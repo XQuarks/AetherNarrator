@@ -1097,8 +1097,8 @@
             </div>
             <div class="form-group">
                 <label>世界观描述</label>
-                <textarea id="worldDesc" placeholder="描述这个世界的规则、力量体系、主要势力、地点、人物关系等..."></textarea>
-                <div class="hint">描述越详细，AI 生成的内容越贴近你的预期。</div>
+                <textarea id="worldDesc" placeholder="可以直接填写原作的世界观概述，也可以在此基础上修改...&#10;例如：在原著的世界观基础上，增加了一个隐秘的地下组织..."></textarea>
+                <div class="hint" id="worldDescHint">你可以直接使用原作的世界观描述，也可以在此基础上进行修改和扩展——例如调整力量体系、加入新势力、改变时间线等。描述越详细，AI 生成的剧情越贴合你的构想。</div>
             </div>
             <div class="form-group">
                 <label>主角设定（可选）</label>
@@ -1493,10 +1493,16 @@ function formatFileSize(bytes) {
 /* ================= 文风 & 自由度选择 ================= */
 function onWorldTypeChange(value) {
     const ipNameField = document.getElementById("ipNameField");
+    const worldDescHint = document.getElementById("worldDescHint");
+    const worldDescTextarea = document.getElementById("worldDesc");
     if (value === "ip") {
         ipNameField.classList.add("show");
+        worldDescHint.innerHTML = "你可以直接使用原作的世界观描述，也可以在此基础上进行修改和扩展——例如调整力量体系、加入新势力、改变时间线等。描述越详细，AI 生成的剧情越贴合你的构想。";
+        worldDescTextarea.placeholder = "可以直接填写原作的世界观概述，也可以在此基础上修改...\n例如：在原著的世界观基础上，增加了一个隐秘的地下组织...";
     } else {
         ipNameField.classList.remove("show");
+        worldDescHint.innerHTML = "描述越详细，AI 生成的内容越贴近你的预期。";
+        worldDescTextarea.placeholder = "描述这个世界的规则、力量体系、主要势力、地点、人物关系等...";
     }
 }
 
@@ -2604,9 +2610,14 @@ function buildPrompt(input, retrieved) {
 
     const schema = getWorldSchema(currentWorld);
 
-    let prompt = (currentWorld && currentWorld.system_prompt)
-        ? currentWorld.system_prompt
-        : systemPromptTemplate;
+    // 始终使用完整模板，确保所有占位符都能正确替换
+    // currentWorld.system_prompt 作为额外世界观约束注入到模板中
+    let prompt = systemPromptTemplate;
+
+    if (currentWorld && currentWorld.system_prompt) {
+        // 将世界专属的 system_prompt 作为附加指令注入到模板开头
+        prompt = "# 世界专属指令\n\n" + currentWorld.system_prompt + "\n\n---\n\n" + prompt;
+    }
 
     // 注入文风参考设置
     let finalNarrativeStyle = narrativeStyle;
@@ -2659,6 +2670,8 @@ async function callLLM(input, retrieved) {
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
     const prompt = buildPrompt(input, retrieved);
+    // DeepSeek API 要求：使用 response_format: json_object 时，prompt 中必须包含 "json" 这个词
+    const finalPrompt = prompt + "\n\n请严格以 JSON 格式输出你的回复。";
     const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
     const res = await fetch(url, {
         method: "POST",
@@ -2668,7 +2681,7 @@ async function callLLM(input, retrieved) {
         },
         body: JSON.stringify({
             model: model,
-            messages: [{ role: "system", content: prompt }],
+            messages: [{ role: "system", content: finalPrompt }],
             temperature: 0.7,
             response_format: { type: "json_object" }
         })
