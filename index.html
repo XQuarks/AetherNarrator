@@ -972,6 +972,31 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 特殊要求 -->
+            <div class="form-group">
+                <label>特殊要求（可选）</label>
+                <div class="radio-group" id="customPrefixGroup">
+                    <label class="radio-option selected" onclick="toggleCustomPrefix(false, this)">
+                        <input type="radio" name="customPrefixEnable" value="off" checked>
+                        <div>
+                            <div class="radio-label">不添加</div>
+                            <div class="radio-desc">不附加额外指令</div>
+                        </div>
+                    </label>
+                    <label class="radio-option" onclick="toggleCustomPrefix(true, this)">
+                        <input type="radio" name="customPrefixEnable" value="on">
+                        <div>
+                            <div class="radio-label">添加特殊要求</div>
+                            <div class="radio-desc">输入的内容将作为 AI Prompt 前缀注入每次对话</div>
+                        </div>
+                    </label>
+                </div>
+                <div class="conditional-field" id="customPrefixField">
+                    <textarea id="customPrefix" placeholder="输入你想附加到 AI Prompt 前面的特殊要求，例如：叙事要更加黑暗残酷 / 增加更多悬疑元素 / NPC 对话要更口语化..." style="min-height:80px;"></textarea>
+                </div>
+            </div>
+
         </div>
         <div class="modal-footer">
             <button class="btn secondary" onclick="closeModal('createWorldModal')">返回</button>
@@ -1288,6 +1313,20 @@ function updatePlotFreedomLabel(value) {
     document.getElementById("plotFreedomLabel").textContent = labels[value] || "";
 }
 
+/* ================= 特殊要求 ================= */
+function toggleCustomPrefix(enabled, el) {
+    document.querySelectorAll("#customPrefixGroup .radio-option").forEach(o => o.classList.remove("selected"));
+    document.querySelectorAll("#customPrefixGroup input[type=radio]").forEach(r => r.checked = false);
+    el.classList.add("selected");
+    el.querySelector("input[type=radio]").checked = true;
+    const field = document.getElementById("customPrefixField");
+    if (enabled) {
+        field.classList.add("show");
+    } else {
+        field.classList.remove("show");
+    }
+}
+
 /* ================= 创建世界 ================= */
 async function generateWorld() {
     const name = document.getElementById("worldName").value.trim();
@@ -1297,6 +1336,8 @@ async function generateWorld() {
     const styleRef = getSelectedStyleRef();
     const customStyle = styleRef === "custom" ? document.getElementById("customStyle").value.trim() : "";
     const plotFreedom = parseInt(document.getElementById("plotFreedom").value);
+    const prefixEnabled = document.querySelector("input[name='customPrefixEnable']:checked");
+    const customPrefix = (prefixEnabled && prefixEnabled.value === "on") ? document.getElementById("customPrefix").value.trim() : "";
 
     if (!name || !desc) {
         showToast("请填写世界名称和世界观描述", "error");
@@ -1325,7 +1366,8 @@ async function generateWorld() {
             source_content: sourceFileContent || "",
             style_ref: styleRef,
             custom_style: customStyle,
-            plot_freedom: plotFreedom
+            plot_freedom: plotFreedom,
+            custom_prefix: customPrefix
         };
         worlds.unshift(world);
         saveWorlds();
@@ -1335,6 +1377,15 @@ async function generateWorld() {
         document.getElementById("worldDesc").value = "";
         document.getElementById("heroDesc").value = "";
         document.getElementById("customStyle").value = "";
+        document.getElementById("customPrefix").value = "";
+        // 重置特殊要求开关
+        document.querySelectorAll("#customPrefixGroup .radio-option").forEach((o, i) => {
+            o.classList.toggle("selected", i === 0);
+        });
+        document.querySelectorAll("#customPrefixGroup input[type=radio]").forEach((r, i) => {
+            r.checked = i === 0;
+        });
+        document.getElementById("customPrefixField").classList.remove("show");
         clearSourceFile();
         closeModal("createWorldModal");
         showToast("世界生成成功！", "success");
@@ -1716,6 +1767,11 @@ function showWorldDetail(worldId) {
         <div class="form-group">
             <label>剧情自由度</label>
             <p style="margin:0;font-size:14px;color:var(--text-secondary);">${["", "严格遵循原著", "以原著为主", "适中发散", "自由发挥", "完全自由"][currentWorld.plot_freedom] || "适中发散"}</p>
+        </div>` : ""}
+        ${currentWorld.custom_prefix ? `
+        <div class="form-group">
+            <label>特殊要求</label>
+            <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(currentWorld.custom_prefix)}</p>
         </div>` : ""}
         ${currentWorld.source_content ? `
         <div class="form-group">
@@ -2302,6 +2358,12 @@ function buildPrompt(input, retrieved) {
         .replace(/{RETRIEVED_LORE_SNIPPETS}/g, snippetsText)
         .replace(/{BEHAVIOR_RECORDS}/g, behaviorText)
         .replace(/{PLAYER_INPUT}/g, input);
+
+    // 注入用户特殊要求前缀
+    if (currentWorld && currentWorld.custom_prefix && currentWorld.custom_prefix.trim()) {
+        prompt = currentWorld.custom_prefix.trim() + "\n\n" + prompt;
+    }
+
     return prompt;
 }
 
