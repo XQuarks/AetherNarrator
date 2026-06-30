@@ -1042,6 +1042,11 @@
                 <div class="hint">例如：DeepSeek 填 https://api.deepseek.com</div>
             </div>
             <div class="form-group">
+                <label>CORS 代理 URL（可选）</label>
+                <input type="text" id="corsProxy" placeholder="不填则直接调用 API">
+                <div class="hint">浏览器无法直接调用第三方 API（CORS 跨域限制）。解决方案：<br>① 使用 CORS 代理服务，将代理 URL 填入此处（如 https://your-proxy.workers.dev/proxy）<br>② 本地搭建 Cloudflare Workers / Nginx 反向代理<br>③ 开发测试时可安装浏览器 CORS 插件（不推荐长期使用）</div>
+            </div>
+            <div class="form-group">
                 <label>API Key</label>
                 <input type="password" id="apiKey" placeholder="sk-...">
                 <div class="hint">密钥仅保存在你的浏览器本地，不会上传</div>
@@ -1052,7 +1057,7 @@
             </div>
             <div class="form-group">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                    <input type="checkbox" id="mockMode" checked style="width:auto;">
+                    <input type="checkbox" id="mockMode" style="width:auto;">
                     <span>模拟模式（不调用真实 API，仅供体验）</span>
                 </label>
             </div>
@@ -1307,9 +1312,10 @@ function deepClone(obj) {
 function loadConfig() {
     const cfg = JSON.parse(localStorage.getItem(STORAGE_KEYS.config) || "{}");
     document.getElementById("baseUrl").value = cfg.baseUrl || "https://api.deepseek.com";
+    document.getElementById("corsProxy").value = cfg.corsProxy || "";
     document.getElementById("apiKey").value = cfg.apiKey || "";
     document.getElementById("modelName").value = cfg.modelName || "deepseek-v4-flash";
-    document.getElementById("mockMode").checked = cfg.mockMode !== false;
+    document.getElementById("mockMode").checked = cfg.mockMode === true;
 }
 
 function loadWorlds() {
@@ -1358,11 +1364,27 @@ function saveState() {
 function saveConfig() {
     const cfg = {
         baseUrl: document.getElementById("baseUrl").value.trim(),
+        corsProxy: document.getElementById("corsProxy").value.trim(),
         apiKey: document.getElementById("apiKey").value.trim(),
         modelName: document.getElementById("modelName").value.trim(),
         mockMode: document.getElementById("mockMode").checked
     };
     localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(cfg));
+}
+
+/**
+ * 构建最终 API 请求 URL
+ * 如果配置了 CORS 代理，则将请求通过代理转发：
+ *   代理URL + /chat/completions 的原始路径
+ *   例如：corsProxy=https://proxy.workers.dev → https://proxy.workers.dev/https://api.deepseek.com/chat/completions
+ * 如果没有配置代理，直接请求 baseUrl + /chat/completions
+ */
+function buildApiUrl(baseUrl, corsProxy) {
+    const apiPath = baseUrl.replace(/\/$/, "") + "/chat/completions";
+    if (corsProxy) {
+        return corsProxy.replace(/\/$/, "") + "/" + apiPath;
+    }
+    return apiPath;
 }
 
 /* ================= 世界模板配置 ================= */
@@ -1620,7 +1642,11 @@ async function generateWorld() {
         closeModal("createWorldModal");
         showToast("世界生成成功！", "success");
     } catch (e) {
-        showToast("生成失败：" + e.message, "error");
+        let errorMsg = e.message;
+        if (errorMsg.includes("Failed to fetch") || errorMsg.includes("NetworkError") || errorMsg.includes("failed to fetch")) {
+            errorMsg = "网络请求失败（大概率是 CORS 跨域限制）。请在 API 配置中填写 CORS 代理 URL，或使用浏览器 CORS 插件。";
+        }
+        showToast("生成失败：" + errorMsg, "error");
         console.error(e);
     } finally {
         btn.disabled = false;
@@ -1636,6 +1662,7 @@ async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceCont
     }
 
     const baseUrl = document.getElementById("baseUrl").value.trim();
+    const corsProxy = document.getElementById("corsProxy").value.trim();
     const apiKey = document.getElementById("apiKey").value.trim();
     const model = document.getElementById("modelName").value.trim();
     if (!baseUrl || !apiKey || !model) {
@@ -1643,7 +1670,7 @@ async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceCont
     }
 
     const prompt = buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom);
-    const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
+    const url = buildApiUrl(baseUrl, corsProxy);
     const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -2610,14 +2637,15 @@ function buildPrompt(input, retrieved) {
 
     const schema = getWorldSchema(currentWorld);
 
-    // 始终使用完整模板，确保所有占位符都能正确替换
-    // currentWorld.system_prompt 作为额外世界观约束注入到模板中
-    let prompt = systemPromptTemplate;
+    // ========== 缓存优化：拆分为固定部分（system）和动态部分（user） ==========
+    // DeepSeek 缓存机制是前缀匹配：system 消息在同一个世界中完全固定 → 100%命中缓存
+    // user 消息每轮变化 → 计为 cache miss，但体积远小于全量 prompt
+    // 预估节省 60-80% 输入 token 成本
 
-    if (currentWorld && currentWorld.system_prompt) {
-        // 将世界专属的 system_prompt 作为附加指令注入到模板开头
-        prompt = "# 世界专属指令\n\n" + currentWorld.system_prompt + "\n\n---\n\n" + prompt;
-    }
+    const DYNAMIC_DELIMITER = "<!-- DYNAMIC -->";
+    const parts = systemPromptTemplate.split(DYNAMIC_DELIMITER);
+    const fixedTemplate = parts[0] || "";   // 角色设定 + 世界观 + 叙事风格 + schema + 职责 + 输出格式 + 规则 + 禁止事项
+    const dynamicTemplate = parts[1] || ""; // 游戏状态 + 知识片段 + 行为记录 + 玩家输入
 
     // 注入文风参考设置
     let finalNarrativeStyle = narrativeStyle;
@@ -2640,22 +2668,31 @@ function buildPrompt(input, retrieved) {
         finalWorldRules += "\n\n" + (plotFreedomHints[currentWorld.plot_freedom] || "");
     }
 
-    prompt = prompt
+    // 构建固定 system 部分：世界专属指令 → custom_prefix → 模板固定段
+    let systemPrompt = fixedTemplate
         .replace(/{IP_NAME}/g, (currentWorld && currentWorld.name) || (kb && kb.ip) || "你的IP")
         .replace(/{WORLD_RULES}/g, finalWorldRules)
         .replace(/{NARRATIVE_STYLE}/g, finalNarrativeStyle)
-        .replace(/{WORLD_SCHEMA}/g, JSON.stringify(schema, null, 2))
+        .replace(/{WORLD_SCHEMA}/g, JSON.stringify(schema, null, 2));
+
+    // 世界专属指令注入到 system 开头（固定不变，可命中缓存）
+    if (currentWorld && currentWorld.system_prompt) {
+        systemPrompt = "# 世界专属指令\n\n" + currentWorld.system_prompt + "\n\n---\n\n" + systemPrompt;
+    }
+
+    // 用户特殊要求前缀注入到 system 开头（固定不变，可命中缓存）
+    if (currentWorld && currentWorld.custom_prefix && currentWorld.custom_prefix.trim()) {
+        systemPrompt = currentWorld.custom_prefix.trim() + "\n\n" + systemPrompt;
+    }
+
+    // 构建动态 user 部分：每轮变化的游戏状态、知识片段、行为记录、玩家输入
+    let userPrompt = dynamicTemplate
         .replace(/{GAME_STATE_JSON}/g, JSON.stringify(gameState, null, 2))
         .replace(/{RETRIEVED_LORE_SNIPPETS}/g, snippetsText)
         .replace(/{BEHAVIOR_RECORDS}/g, behaviorText)
         .replace(/{PLAYER_INPUT}/g, input);
 
-    // 注入用户特殊要求前缀
-    if (currentWorld && currentWorld.custom_prefix && currentWorld.custom_prefix.trim()) {
-        prompt = currentWorld.custom_prefix.trim() + "\n\n" + prompt;
-    }
-
-    return prompt;
+    return { systemPrompt, userPrompt };
 }
 
 async function callLLM(input, retrieved) {
@@ -2664,15 +2701,17 @@ async function callLLM(input, retrieved) {
         return mockLLM(input, retrieved);
     }
     const baseUrl = document.getElementById("baseUrl").value.trim();
+    const corsProxy = document.getElementById("corsProxy").value.trim();
     const apiKey = document.getElementById("apiKey").value.trim();
     const model = document.getElementById("modelName").value.trim();
     if (!baseUrl || !apiKey || !model) {
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
-    const prompt = buildPrompt(input, retrieved);
-    // DeepSeek API 要求：使用 response_format: json_object 时，prompt 中必须包含 "json" 这个词
-    const finalPrompt = prompt + "\n\n请严格以 JSON 格式输出你的回复。";
-    const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
+    const { systemPrompt, userPrompt } = buildPrompt(input, retrieved);
+    // DeepSeek 缓存优化：system 消息（固定部分）+ user 消息（动态部分）
+    // system 消息在同一世界中完全相同 → DeepSeek 前缀缓存 100% 命中
+    // json 兜底词已在模板固定部分末尾，无需额外追加
+    const url = buildApiUrl(baseUrl, corsProxy);
     const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -2681,7 +2720,10 @@ async function callLLM(input, retrieved) {
         },
         body: JSON.stringify({
             model: model,
-            messages: [{ role: "system", content: finalPrompt }],
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt }
+            ],
             temperature: 0.7,
             response_format: { type: "json_object" }
         })
@@ -3015,7 +3057,12 @@ async function processTurn(input) {
         saveState();
         renderLog();
         renderChoices([]);
-        showToast("出错了：" + e.message, "error");
+        // 识别常见错误类型并给出针对性提示
+        let errorMsg = e.message;
+        if (errorMsg.includes("Failed to fetch") || errorMsg.includes("NetworkError") || errorMsg.includes("failed to fetch")) {
+            errorMsg = "网络请求失败（大概率是 CORS 跨域限制）。请在 API 配置中填写 CORS 代理 URL，或使用浏览器 CORS 插件。详见配置弹窗中的提示说明。";
+        }
+        showToast("出错了：" + errorMsg, "error");
         console.error(e);
     }
 }

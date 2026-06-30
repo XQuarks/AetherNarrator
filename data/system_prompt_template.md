@@ -14,30 +14,6 @@
 
 {WORLD_SCHEMA}
 
-# 当前游戏状态
-
-```json
-{GAME_STATE_JSON}
-```
-
-# 相关知识片段
-
-```
-{RETRIEVED_LORE_SNIPPETS}
-```
-
-# 玩家行为记录（关键事实）
-
-```
-{BEHAVIOR_RECORDS}
-```
-
-# 玩家输入
-
-```
-{PLAYER_INPUT}
-```
-
 # 你的职责
 
 1. 判断玩家输入类型：日常行动、剧情抉择、自由输入。
@@ -121,3 +97,31 @@
 - 禁止让 NPC 无条件帮助玩家；帮助需理由、需关系、需代价。
 - 禁止在玩家违反世界观时用系统弹窗，要用剧情内失败反馈。
 - 禁止 JSON 输出缺字段，必须返回 narrative 与 state_changes。
+
+请严格以 JSON 格式输出你的回复。
+
+<!-- DYNAMIC -->
+
+# 当前游戏状态
+
+```json
+{GAME_STATE_JSON}
+```
+
+# 相关知识片段
+
+```
+{RETRIEVED_LORE_SNIPPETS}
+```
+
+# 玩家行为记录（关键事实）
+
+```
+{BEHAVIOR_RECORDS}
+```
+
+# 玩家输入
+
+```
+{PLAYER_INPUT}
+```
