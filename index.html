@@ -1,0 +1,2242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 文字游戏</title>
+    <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2"></script>
+    <style>
+        :root {
+            --bg: #1A2332;
+            --bg-gradient: #1A2332;
+            --bg-panel: #1E2736;
+            --bg-sidebar: #161D28;
+            --card: rgba(255, 255, 255, 0.06);
+            --card-border: rgba(240, 235, 224, 0.12);
+            --text: #F0EBE0;
+            --text-secondary: rgba(240, 235, 224, 0.55);
+            --primary: #D4A574;
+            --primary-light: #E0B888;
+            --accent: #D4A574;
+            --success: #4ecdc4;
+            --danger: #c4554d;
+            --warning: #d4a44a;
+            --text-muted: rgba(240, 235, 224, 0.45);
+            --separator: rgba(240, 235, 224, 0.08);
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        /* 通用屏幕 */
+        .screen {
+            position: fixed;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .screen.active { display: flex; }
+
+        /* 顶部导航栏 */
+        .nav-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--card-border);
+            position: relative;
+            min-height: 56px;
+            flex: none;
+        }
+        .nav-header .back-btn {
+            position: absolute;
+            left: 12px;
+            background: none;
+            border: none;
+            color: var(--text);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 8px;
+        }
+        .nav-header .title {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        /* 主界面 */
+        .home-screen {
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        .home-content {
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .home-title {
+            font-size: 42px;
+            font-weight: 700;
+            margin: 0 0 12px 0;
+            background: linear-gradient(135deg, #E8C97A 0%, #D4A574 50%, #B8895C 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: 0.02em;
+        }
+        .home-subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 48px;
+        }
+        .menu-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            width: 100%;
+        }
+        .menu-btn {
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 28px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: var(--text);
+            backdrop-filter: blur(10px);
+        }
+        .menu-btn:active {
+            transform: scale(0.96);
+            background: rgba(212, 165, 116, 0.12);
+            border-color: var(--primary);
+        }
+        .menu-btn .icon {
+            font-size: 36px;
+            line-height: 1;
+        }
+        .menu-btn .label {
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .menu-btn .desc {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-align: center;
+            line-height: 1.3;
+        }
+        .menu-btn.full-width {
+            grid-column: 1 / -1;
+            flex-direction: row;
+            justify-content: center;
+            padding: 20px 16px;
+        }
+
+        /* 列表屏幕 */
+        .list-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--text-secondary);
+        }
+        .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+        .empty-state .text { font-size: 14px; }
+        .list-item {
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+        }
+        .list-item:active { transform: scale(0.98); background: rgba(212, 165, 116, 0.1); }
+        .list-item .item-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+        .list-item .item-meta { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+        .list-item .item-tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        .tag {
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-secondary);
+        }
+        .tag.primary { background: rgba(212, 165, 116, 0.15); color: var(--primary); }
+        .tag.accent { background: rgba(212, 165, 116, 0.1); color: var(--primary); }
+
+        /* 弹窗 */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: flex-end;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .modal-overlay.show {
+            display: flex;
+            opacity: 1;
+        }
+        .modal {
+            background: var(--bg-panel);
+            border-radius: 24px 24px 0 0;
+            width: 100%;
+            max-width: 520px;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+            border: 1px solid var(--card-border);
+            border-bottom: none;
+        }
+        .modal-overlay.show .modal { transform: translateY(0); }
+        .modal-header {
+            padding: 20px 20px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--separator);
+        }
+        .modal-header h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text); }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px;
+        }
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .modal-footer {
+            padding: 16px 20px 24px;
+            display: flex;
+            gap: 12px;
+            border-top: 1px solid var(--separator);
+        }
+
+        /* 表单 */
+        .form-group { margin-bottom: 16px; }
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 14px;
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            font-size: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-group input::placeholder,
+        .form-group textarea::placeholder { color: var(--text-muted); }
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus { border-color: var(--primary); }
+        .form-group textarea { min-height: 120px; resize: vertical; font-family: inherit; }
+        .form-group .hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+
+        /* 按钮 */
+        .btn {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn.primary {
+            background: linear-gradient(135deg, #D4A574 0%, #C1905E 100%);
+            color: #1A2332;
+            font-weight: 600;
+        }
+        .btn.secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            border: 1px solid var(--card-border);
+        }
+        .btn.danger { background: rgba(196, 85, 77, 0.15); color: #e0706a; }
+        .btn.full-width { width: 100%; flex: none; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.9);
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 16px 28px;
+            border-radius: 16px;
+            font-size: 14px;
+            z-index: 2000;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s ease;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--card-border);
+        }
+        .toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        .toast.success { background: rgba(78, 205, 196, 0.2); border-color: var(--success); }
+        .toast.error { background: rgba(233, 69, 96, 0.2); border-color: var(--danger); }
+
+        /* 游戏界面 */
+        .game-screen { background: var(--bg); color: var(--text); }
+        .game-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            background: rgba(255, 255, 255, 0.04);
+            border-bottom: 1px solid var(--separator);
+            flex: none;
+            height: 56px;
+        }
+        .game-header .world-name { font-size: 16px; font-weight: 600; color: var(--text); }
+        .game-header .day-info { font-size: 13px; color: var(--text-secondary); }
+        .game-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .game-log {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px 32px;
+            background: transparent;
+        }
+        .log-entry {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 18px 20px;
+            margin-bottom: 14px;
+            border: 1px solid var(--separator);
+        }
+        .log-entry .meta {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .log-entry .player-text {
+            color: var(--primary);
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-size: 15px;
+        }
+        .log-entry .narrative {
+            line-height: 1.8;
+            font-size: 14px;
+            color: var(--text);
+            opacity: 0.85;
+        }
+        .log-entry .narrative .item-highlight {
+            color: var(--primary);
+            font-weight: 600;
+            background: rgba(212, 165, 116, 0.12);
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+        .game-input-area {
+            padding: 16px 32px 28px;
+            background: rgba(255, 255, 255, 0.03);
+            border-top: 1px solid var(--separator);
+            flex: none;
+        }
+        .choices-row {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+            scrollbar-width: none;
+        }
+        .choices-row::-webkit-scrollbar { display: none; }
+        .choice-chip {
+            white-space: nowrap;
+            padding: 9px 18px;
+            border-radius: 20px;
+            border: 1px solid var(--card-border);
+            background: var(--card);
+            color: var(--text);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .choice-chip:active { background: rgba(212, 165, 116, 0.15); border-color: var(--primary); }
+        .input-row {
+            display: flex;
+            gap: 10px;
+        }
+        .input-row input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            font-size: 15px;
+            outline: none;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            transition: border-color 0.2s;
+        }
+        .input-row input:focus { border-color: var(--primary); }
+        .input-row input::placeholder { color: var(--text-muted); }
+        .input-row .send-btn {
+            background: var(--primary);
+            color: #1A2332;
+            border: none;
+            border-radius: 10px;
+            padding: 0 24px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .input-row .send-btn:active { opacity: 0.85; }
+        .game-header .header-actions { display: flex; gap: 8px; }
+        .game-header .header-actions button {
+            padding: 6px 14px;
+            border: 1px solid var(--card-border);
+            background: var(--card);
+            color: var(--text);
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .game-header .header-actions button:active { background: rgba(212, 165, 116, 0.12); }
+
+        /* 角色状态面板 */
+        .status-panel-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            justify-content: flex-end;
+            z-index: 500;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .status-panel-overlay.show { display: flex; opacity: 1; }
+        .status-panel {
+            width: 100%;
+            max-width: 420px;
+            height: 100%;
+            background: var(--bg-panel);
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+        }
+        .status-panel-overlay.show .status-panel { transform: translateX(0); }
+        .status-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            background: rgba(255, 255, 255, 0.04);
+            border-bottom: 1px solid var(--separator);
+            flex: none;
+            height: 52px;
+        }
+        .status-panel-header h2 { margin: 0; font-size: 17px; color: var(--text); font-weight: 600; }
+        .status-panel-header .close-btn {
+            background: none;
+            border: none;
+            font-size: 22px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px;
+        }
+        .status-tabs {
+            display: flex;
+            overflow-x: auto;
+            background: transparent;
+            border-bottom: 1px solid var(--separator);
+            scrollbar-width: none;
+            flex: none;
+        }
+        .status-tabs::-webkit-scrollbar { display: none; }
+        .status-tab {
+            flex: 1;
+            min-width: 64px;
+            padding: 14px 8px;
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-secondary);
+            border: none;
+            background: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+        .status-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            font-weight: 600;
+        }
+        .status-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px;
+            background: transparent;
+        }
+        .status-section { margin-bottom: 24px; }
+        .status-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .status-card {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border: 1px solid var(--separator);
+        }
+        .status-card .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(240, 235, 224, 0.06);
+            font-size: 14px;
+        }
+        .status-card .row:last-child { border-bottom: none; }
+        .status-card .row .label { color: var(--text-secondary); }
+        .status-card .row .value { color: var(--text); font-weight: 500; }
+        .status-card .stat-bar { height: 6px; background: rgba(255, 255, 255, 0.06); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+        .status-card .stat-bar > div { height: 100%; background: var(--primary); border-radius: 3px; }
+        .status-card .text-block {
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--text);
+            opacity: 0.8;
+        }
+        .status-tag-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .status-tag {
+            font-size: 12px;
+            padding: 6px 12px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            border: 1px solid var(--card-border);
+        }
+        .goal-item {
+            font-size: 13px;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.04);
+            border-left: 3px solid var(--primary);
+        }
+        .goal-item.completed { border-left-color: #4ecdc4; background: rgba(78, 205, 196, 0.06); }
+        .goal-item.failed { border-left-color: #c4554d; background: rgba(196, 85, 77, 0.06); }
+        .empty-hint { text-align: center; color: var(--text-muted); padding: 24px; font-size: 13px; }
+
+        /* 游戏结束弹窗 */
+        .game-over-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 3000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            padding: 24px;
+        }
+        .game-over-overlay.show { display: flex; opacity: 1; }
+        .game-over-box {
+            background: var(--bg-panel);
+            border-radius: 24px;
+            padding: 32px 24px;
+            max-width: 360px;
+            width: 100%;
+            text-align: center;
+            border: 1px solid var(--card-border);
+        }
+        .game-over-box .icon { font-size: 64px; margin-bottom: 16px; }
+        .game-over-box h2 { margin: 0 0 12px 0; font-size: 24px; }
+        .game-over-box .reason {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(240, 235, 224, 0.15); border-radius: 2px; }
+        .game-log::-webkit-scrollbar-thumb { background: rgba(240, 235, 224, 0.15); }
+    </style>
+</head>
+<body>
+
+<!-- ================= 主界面 ================= -->
+<div class="screen home-screen active" id="homeScreen">
+    <div class="home-content">
+        <h1 class="home-title">AI 文字游戏</h1>
+        <p class="home-subtitle">自定义世界 · AI 生成 · 自由冒险</p>
+        <div class="menu-grid">
+            <button class="menu-btn" onclick="showApiModal()">
+                <span class="icon">🔑</span>
+                <span class="label">输入 API</span>
+                <span class="desc">填写你的 AI 接口密钥</span>
+            </button>
+            <button class="menu-btn" onclick="showCreateWorldModal()">
+                <span class="icon">🌍</span>
+                <span class="label">创建世界</span>
+                <span class="desc">输入 IP 或原创世界观</span>
+            </button>
+            <button class="menu-btn full-width" onclick="showWorldList()">
+                <span class="icon">🎮</span>
+                <span class="label">进入世界</span>
+                <span class="desc">选择已创建的世界开始游玩</span>
+            </button>
+            <button class="menu-btn full-width" onclick="showSaveList()">
+                <span class="icon">💾</span>
+                <span class="label">读取存档</span>
+                <span class="desc">管理不同世界的游玩进度</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 世界列表 ================= -->
+<div class="screen" id="worldListScreen">
+    <div class="nav-header">
+        <button class="back-btn" onclick="goHome()">←</button>
+        <h2 class="title">选择世界</h2>
+    </div>
+    <div class="list-content" id="worldListContent"></div>
+</div>
+
+<!-- ================= 存档列表 ================= -->
+<div class="screen" id="saveListScreen">
+    <div class="nav-header">
+        <button class="back-btn" onclick="goHome()">←</button>
+        <h2 class="title">读取存档</h2>
+    </div>
+    <div class="list-content" id="saveListContent"></div>
+</div>
+
+<!-- ================= 游戏界面 ================= -->
+<div class="screen game-screen" id="gameScreen">
+    <div class="game-header">
+        <div>
+            <div class="world-name" id="gameWorldName">未知世界</div>
+            <div class="day-info" id="gameDayInfo">第 1 天 · 早晨</div>
+        </div>
+        <div class="header-actions">
+            <button onclick="showStatusPanel()">角色</button>
+            <button onclick="goHome()">返回主界面</button>
+        </div>
+    </div>
+    <div class="game-body">
+        <div class="game-log" id="gameLog"></div>
+        <div class="game-input-area">
+            <div class="choices-row" id="choicesArea"></div>
+            <div class="input-row">
+                <input type="text" id="playerInput" placeholder="输入你想做的事..." onkeydown="if(event.key==='Enter') submitInput()">
+                <button class="send-btn" onclick="submitInput()">发送</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 角色状态面板 ================= -->
+<div class="status-panel-overlay" id="statusPanelOverlay" onclick="closeStatusPanel(event)">
+    <div class="status-panel" onclick="event.stopPropagation()">
+        <div class="status-panel-header">
+            <h2>角色状态</h2>
+            <button class="close-btn" onclick="hideStatusPanel()">×</button>
+        </div>
+        <div class="status-tabs" id="statusTabs"></div>
+        <div class="status-content" id="statusContent"></div>
+    </div>
+</div>
+
+<!-- ================= API 输入弹窗 ================= -->
+<div class="modal-overlay" id="apiModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2>🔑 输入 API 配置</h2>
+            <button class="modal-close" onclick="closeModal('apiModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>AI 接口 Base URL</label>
+                <input type="text" id="baseUrl" placeholder="https://api.deepseek.com/v1">
+                <div class="hint">例如：DeepSeek 填 https://api.deepseek.com/v1</div>
+            </div>
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="password" id="apiKey" placeholder="sk-...">
+                <div class="hint">密钥仅保存在你的浏览器本地，不会上传</div>
+            </div>
+            <div class="form-group">
+                <label>模型名称</label>
+                <input type="text" id="modelName" placeholder="deepseek-chat">
+            </div>
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="mockMode" checked style="width:auto;">
+                    <span>模拟模式（不调用真实 API，仅供体验）</span>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" onclick="closeModal('apiModal')">返回</button>
+            <button class="btn primary" onclick="saveApiConfig()">确认</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 创建世界弹窗 ================= -->
+<div class="modal-overlay" id="createWorldModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2>🌍 创建新世界</h2>
+            <button class="modal-close" onclick="closeModal('createWorldModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>世界名称</label>
+                <input type="text" id="worldName" placeholder="例如：剑来、哈利波特、原创仙侠">
+            </div>
+            <div class="form-group">
+                <label>世界类型</label>
+                <select id="worldType">
+                    <option value="ip">基于已有 IP / 小说</option>
+                    <option value="original">原创世界观</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>世界观描述</label>
+                <textarea id="worldDesc" placeholder="描述这个世界的规则、力量体系、主要势力、地点、人物关系等..."></textarea>
+                <div class="hint">描述越详细，AI 生成的内容越贴近你的预期。</div>
+            </div>
+            <div class="form-group">
+                <label>主角设定（可选）</label>
+                <textarea id="heroDesc" placeholder="例如：一名来自小镇的少年，性格谨慎，渴望变强..."></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" onclick="closeModal('createWorldModal')">返回</button>
+            <button class="btn primary" id="generateWorldBtn" onclick="generateWorld()">确认生成</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 世界详情弹窗 ================= -->
+<div class="modal-overlay" id="worldDetailModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="detailWorldTitle">世界详情</h2>
+            <button class="modal-close" onclick="closeModal('worldDetailModal')">×</button>
+        </div>
+        <div class="modal-body" id="detailWorldBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" onclick="closeModal('worldDetailModal')">返回</button>
+            <button class="btn primary" onclick="startGame()">开始游玩</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 游戏结束弹窗 ================= -->
+<div class="game-over-overlay" id="gameOverOverlay">
+    <div class="game-over-box">
+        <div class="icon">💀</div>
+        <h2>游戏结束</h2>
+        <div class="reason" id="gameOverReason">你的旅程到此为止。</div>
+        <button class="btn primary full-width" onclick="backToHomeAfterGameOver()">返回主界面</button>
+    </div>
+</div>
+
+<!-- ================= Toast ================= -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 全局状态 ================= */
+let gameState = null;
+let loreKB = null;
+let loreEmbeddings = null;
+let conversationHistory = [];
+let systemPromptTemplate = "";
+let currentChoices = [];
+let embeddingModel = null;
+let currentWorld = null;
+let worlds = [];
+let saves = [];
+let currentStatusTab = "profile";
+
+const STORAGE_KEYS = {
+    config: "aigame_config",
+    state: "aigame_state",
+    history: "aigame_history",
+    worlds: "aigame_worlds",
+    saves: "aigame_saves"
+};
+
+const DEFAULT_PERIOD_ORDER = ["morning", "forenoon", "afternoon", "evening", "night"];
+const DEFAULT_PERIOD_LABELS = {
+    morning: "早晨", forenoon: "上午", afternoon: "下午", evening: "傍晚", night: "夜晚"
+};
+
+/* ================= 初始化 ================= */
+async function init() {
+    loadConfig();
+    loadWorlds();
+    loadSaves();
+    try {
+        const [kb, emb, prompt, state] = await Promise.all([
+            fetch("./data/lore_kb.json").then(r => r.json()),
+            fetch("./data/lore_kb_with_embeddings.json").then(r => r.json()).catch(() => null),
+            fetch("./data/system_prompt_template.md").then(r => r.text()),
+            fetch("./data/initial_state.json").then(r => r.json())
+        ]);
+        loreKB = kb;
+        loreEmbeddings = emb;
+        systemPromptTemplate = prompt;
+        const saved = localStorage.getItem(STORAGE_KEYS.state);
+        if (saved) {
+            try { gameState = JSON.parse(saved); } catch (e) { gameState = deepClone(state); }
+        } else {
+            gameState = deepClone(state);
+        }
+        const savedHistory = localStorage.getItem(STORAGE_KEYS.history);
+        if (savedHistory) {
+            try { conversationHistory = JSON.parse(savedHistory); } catch (e) { conversationHistory = []; }
+        }
+        renderWorldList();
+        renderSaveList();
+    } catch (e) {
+        showToast("加载游戏数据失败：" + e.message, "error");
+    }
+}
+
+function deepClone(obj) {
+    return JSON.parse(JSON.stringify(obj));
+}
+
+function loadConfig() {
+    const cfg = JSON.parse(localStorage.getItem(STORAGE_KEYS.config) || "{}");
+    document.getElementById("baseUrl").value = cfg.baseUrl || "";
+    document.getElementById("apiKey").value = cfg.apiKey || "";
+    document.getElementById("modelName").value = cfg.modelName || "";
+    document.getElementById("mockMode").checked = cfg.mockMode !== false;
+}
+
+function loadWorlds() {
+    const data = localStorage.getItem(STORAGE_KEYS.worlds);
+    worlds = data ? JSON.parse(data) : [
+        createDemoWorld("剑来", "ip", "大千世界，万族林立，修行者求长生。", ["仙侠", "已有IP"]),
+        createDemoWorld("蒸汽与魔法", "original", "维多利亚风格的蒸汽朋克世界，魔法被机械束缚。", ["原创", "蒸汽朋克"])
+    ];
+}
+
+function createDemoWorld(name, type, desc, tags) {
+    return {
+        id: "demo_" + name,
+        name,
+        type,
+        desc,
+        hero: "",
+        createdAt: new Date().toISOString().split("T")[0],
+        tags,
+        schema: defaultWorldSchema("修仙"),
+        initial_state: null,
+        lore_kb: deepClone(loreKB || { ip: name, snippets: [] }),
+        system_prompt: "",
+        behavior_records: []
+    };
+}
+
+function loadSaves() {
+    const data = localStorage.getItem(STORAGE_KEYS.saves);
+    saves = data ? JSON.parse(data) : [];
+}
+
+function saveWorlds() {
+    localStorage.setItem(STORAGE_KEYS.worlds, JSON.stringify(worlds));
+}
+
+function saveSaves() {
+    localStorage.setItem(STORAGE_KEYS.saves, JSON.stringify(saves));
+}
+
+function saveState() {
+    localStorage.setItem(STORAGE_KEYS.state, JSON.stringify(gameState));
+    localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(conversationHistory));
+}
+
+function saveConfig() {
+    const cfg = {
+        baseUrl: document.getElementById("baseUrl").value.trim(),
+        apiKey: document.getElementById("apiKey").value.trim(),
+        modelName: document.getElementById("modelName").value.trim(),
+        mockMode: document.getElementById("mockMode").checked
+    };
+    localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(cfg));
+}
+
+/* ================= 世界模板配置 ================= */
+function defaultWorldSchema(styleHint) {
+    const isXianxia = /仙|侠|修|道|武|玄|魔/.test(styleHint);
+    const isMagicSchool = /霍格沃茨|哈利|魔法|学院|年级|巫师/.test(styleHint);
+    if (isMagicSchool) {
+        return {
+            progression_label: "年级",
+            progression_path_label: "学院",
+            has_skills: true,
+            skill_label: "课程/法术",
+            attribute_labels: {
+                courage: "勇气", perception: "观察", patience: "耐心", luck: "运气", will: "意志"
+            },
+            time_periods: DEFAULT_PERIOD_LABELS,
+            game_over_conditions: ["is_alive === false"]
+        };
+    }
+    return {
+        progression_label: isXianxia ? "境界" : "等级",
+        progression_path_label: isXianxia ? "修行路线" : "职业/分支",
+        has_skills: true,
+        skill_label: isXianxia ? "功法/技艺" : "技能",
+        attribute_labels: {
+            courage: "胆识", perception: "洞察", patience: "耐心", luck: "气运", will: "心志"
+        },
+        time_periods: DEFAULT_PERIOD_LABELS,
+        game_over_conditions: ["is_alive === false"]
+    };
+}
+
+function getWorldSchema(world) {
+    return (world && world.schema) || defaultWorldSchema(world && world.name);
+}
+
+/* ================= 界面切换 ================= */
+function showScreen(id) {
+    document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+}
+
+function goHome() {
+    showScreen("homeScreen");
+}
+
+function showModal(id) {
+    const el = document.getElementById(id);
+    el.classList.add("show");
+}
+
+function closeModal(id) {
+    const el = document.getElementById(id);
+    el.classList.remove("show");
+}
+
+function showApiModal() {
+    showModal("apiModal");
+}
+
+function showCreateWorldModal() {
+    showModal("createWorldModal");
+}
+
+function saveApiConfig() {
+    saveConfig();
+    closeModal("apiModal");
+    showToast("API 配置已保存", "success");
+}
+
+/* ================= 创建世界 ================= */
+async function generateWorld() {
+    const name = document.getElementById("worldName").value.trim();
+    const type = document.getElementById("worldType").value;
+    const desc = document.getElementById("worldDesc").value.trim();
+    const hero = document.getElementById("heroDesc").value.trim();
+
+    if (!name || !desc) {
+        showToast("请填写世界名称和世界观描述", "error");
+        return;
+    }
+
+    const btn = document.getElementById("generateWorldBtn");
+    btn.disabled = true;
+    btn.textContent = "生成中...";
+
+    try {
+        const generated = await callWorldGenerationLLM(name, type, desc, hero);
+        const world = {
+            id: "w" + Date.now(),
+            name,
+            type,
+            desc,
+            hero,
+            createdAt: new Date().toISOString().split("T")[0],
+            tags: type === "ip" ? ["已有IP"] : ["原创"],
+            schema: generated.schema || defaultWorldSchema(name + " " + desc),
+            initial_state: generated.initial_state,
+            lore_kb: generated.lore_kb,
+            system_prompt: generated.system_prompt,
+            behavior_records: []
+        };
+        worlds.unshift(world);
+        saveWorlds();
+        renderWorldList();
+
+        document.getElementById("worldName").value = "";
+        document.getElementById("worldDesc").value = "";
+        document.getElementById("heroDesc").value = "";
+        closeModal("createWorldModal");
+        showToast("世界生成成功！", "success");
+    } catch (e) {
+        showToast("生成失败：" + e.message, "error");
+        console.error(e);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "确认生成";
+    }
+}
+
+async function callWorldGenerationLLM(name, type, desc, hero) {
+    const mock = document.getElementById("mockMode").checked;
+    if (mock) {
+        await sleep(1200);
+        return mockGenerateWorld(name, type, desc, hero);
+    }
+
+    const baseUrl = document.getElementById("baseUrl").value.trim();
+    const apiKey = document.getElementById("apiKey").value.trim();
+    const model = document.getElementById("modelName").value.trim();
+    if (!baseUrl || !apiKey || !model) {
+        throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
+    }
+
+    const prompt = buildWorldGenerationPrompt(name, type, desc, hero);
+    const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + apiKey
+        },
+        body: JSON.stringify({
+            model,
+            messages: [{ role: "system", content: prompt }],
+            temperature: 0.7,
+            response_format: { type: "json_object" }
+        })
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    const data = await res.json();
+    return parseResponse(data.choices[0].message.content);
+}
+
+function buildWorldGenerationPrompt(name, type, desc, hero) {
+    return `你是专业的文字游戏世界观设计师。请根据以下信息，为一个 AI 文字游戏生成完整的世界配置。
+
+# 输入
+
+- 世界名称：${name}
+- 类型：${type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}
+- 世界观描述：${desc}
+- 主角设定：${hero || "未指定，由你设计"}
+
+# 输出要求
+
+请输出一个严格合法的 JSON，包含以下字段：
+
+1. schema: 世界属性模板对象，包含：
+   - progression_label: 进度系统显示名称，如"境界"/"年级"/"职业等级"
+   - progression_path_label: 路线显示名称，如"修行路线"/"学院"/"职业分支"
+   - has_skills: 该世界是否有技能系统（boolean）
+   - skill_label: 技能显示名称，如"功法"/"课程"/"技能"
+   - attribute_labels: 属性中文映射，键为 courage/perception/patience/luck/will，值为中文名
+   - time_periods: 时间段映射，如 {"morning":"早晨", ...}
+
+2. initial_state: 玩家初始状态对象，包含：
+   - name, age, background, personality（数组）
+   - attributes: {courage, perception, patience, luck, will}，每个值都是一段**文字描述**，不是数字。描述要体现玩家当前水准和世界观。
+   - progression: {path, rank, progress}
+   - relationships: {NPC名: "关系的文字描述"}
+   - skills: {技能名: "技能的文字描述"}
+   - inventory: [{item_id, name, count}]
+   - completed_events: []
+   - current_location: 初始地点
+   - current_date: {day, period}
+   - goals: [{goal_id, name, type, deadline:{day,period}, visible}]
+   - status_effects: []
+   - is_alive: true
+   - death_reason: null
+
+3. lore_kb: 知识库对象，包含：
+   - ip: 世界名
+   - snippets: 数组，每条包含 {id, category（规则/地点/人物/事件/物品/势力）, title, content, keywords（数组）}
+   至少 8 条，每条 100-300 字。
+
+4. system_prompt: 用于游戏运行时的 System Prompt 字符串，要包含世界观硬约束、叙事风格、输出格式说明。
+
+# 注意
+
+- 所有内容要符合该世界的力量体系，不要跨世界观混杂。
+- 已有 IP 不要篡改不可改变的核心设定。
+- attributes / relationships / skills 全部使用文字描述，不要输出数字。
+- 输出必须是合法 JSON，不要包含 markdown 代码块标记。`;
+}
+
+function mockGenerateWorld(name, type, desc, hero) {
+    const isXianxia = /仙|侠|修|道|武|玄|魔/.test(name + desc);
+    const isMagicSchool = /霍格沃茨|哈利|魔法|学院|巫师/.test(name + desc);
+
+    let schema, initial_state, lore_snippets, system_prompt;
+
+    if (isMagicSchool) {
+        schema = {
+            progression_label: "年级",
+            progression_path_label: "学院",
+            has_skills: true,
+            skill_label: "课程/法术",
+            attribute_labels: { courage: "勇气", perception: "观察", patience: "耐心", luck: "运气", will: "意志" },
+            time_periods: DEFAULT_PERIOD_LABELS,
+            game_over_conditions: ["is_alive === false"]
+        };
+        initial_state = {
+            name: "新生",
+            age: 11,
+            background: "刚刚收到入学通知书，对魔法世界一无所知。",
+            personality: ["好奇", "紧张"],
+            attributes: {
+                courage: "勇气不算出众，但分院帽似乎从你身上嗅到了某种执拗。",
+                perception: "观察力不算敏锐，但偶尔能注意到别人遗漏的魔法细节。",
+                patience: "坐得住魔药课漫长的准备步骤，可一旦出错就忍不住想摔坩埚。",
+                luck: "命运似乎在你看不见的地方悄悄转动。",
+                will: "年纪虽小，却有着一股不愿轻易认输的倔劲。"
+            },
+            progression: { path: "待定", rank: "一年级新生", progress: 0 },
+            relationships: {
+                "分院帽": "素未谋面，只听说它会在你头上做出决定。",
+                "室友": "尚未谋面。",
+                "魔药课教授": "只在别人口中听说过，名声让人既敬畏又紧张。"
+            },
+            skills: {
+                "魔药学": "连药材名字都记不全，更别提调配。",
+                "变形术": "理论上知道物体可以变形，实际上连火柴都没让变尖过。",
+                "飞行": "从没骑过扫帚，光是想象离地就已经手心冒汗。"
+            },
+            inventory: [{ item_id: "wand", name: "魔杖", count: 1 }, { item_id: "robe", name: "校袍", count: 1 }],
+            completed_events: [],
+            current_location: "学院大厅",
+            current_date: { day: 1, period: "morning" },
+            goals: [
+                { goal_id: "sorted", name: "完成分院仪式", type: "完成事件", deadline: { day: 1, period: "night" }, visible: true },
+                { goal_id: "first_class", name: "上完第一堂课", type: "完成事件", deadline: { day: 2, period: "night" }, visible: true }
+            ],
+            status_effects: [],
+            is_alive: true,
+            death_reason: null
+        };
+        lore_snippets = [
+            { id: "m1", category: "规则", title: "魔法世界规则", content: "巫师需使用魔杖施法，未成年人禁止在校外施法。", keywords: ["魔杖", "施法", "规则"] },
+            { id: "m2", category: "地点", title: "学院大厅", content: "新生入学与分院仪式举行之地，穹顶施有天气咒。", keywords: ["大厅", "分院"] },
+            { id: "m3", category: "人物", title: "分院帽", content: "一顶有自我意识的魔法帽，负责为新生分配学院。", keywords: ["分院帽"] }
+        ];
+        system_prompt = `你是${name}魔法学院背景文字游戏的主持人。规则：符合魔法世界观，一年级新生不能施展高级咒语，不可篡改原著核心事件。输出 JSON。`;
+    } else if (isXianxia) {
+        schema = {
+            progression_label: "境界",
+            progression_path_label: "修行路线",
+            has_skills: true,
+            skill_label: "功法/技艺",
+            attribute_labels: { courage: "胆识", perception: "洞察", patience: "耐心", luck: "气运", will: "心志" },
+            time_periods: DEFAULT_PERIOD_LABELS,
+            game_over_conditions: ["is_alive === false"]
+        };
+        initial_state = {
+            name: "少年",
+            age: 16,
+            background: "小镇出身的少年，机缘巧合踏上修行路。",
+            personality: ["谨慎", "坚韧"],
+            attributes: {
+                courage: "道心初立，面对修士威压仍会紧张，但已敢抬头看对方的眼睛。",
+                perception: "能留意到灵气波动的微弱痕迹，却常常分辨不出真假。",
+                patience: "能忍着打坐一个时辰，再多腿就开始发麻。",
+                luck: "不算好也不算坏，偶尔能在路边捡到半块灵石。",
+                will: "心志尚浅，却被生活磨出了一股不服输的韧劲。"
+            },
+            progression: { path: "未入门", rank: "凡人", progress: 0 },
+            relationships: {
+                "老道长": "萍水相逢，他看你的眼神里带着几分打量。",
+                "同乡少年": "你们彼此看不顺眼，言语间多有试探。",
+                "药铺掌柜": "只是点头之交，谈不上熟悉。"
+            },
+            skills: {
+                "剑术": "只会些庄稼把式，连剑都握不太稳。",
+                "打坐": "才学会吐纳的皮毛，坐久了腿麻。",
+                "辨识草药": "只认得出最常见的几种，常把杂草当宝贝。"
+            },
+            inventory: [{ item_id: "bread", name: "干粮", count: 2 }, { item_id: "coin", name: "铜钱", count: 10 }],
+            completed_events: [],
+            current_location: "小镇入口",
+            current_date: { day: 1, period: "morning" },
+            goals: [
+                { goal_id: "find_shelter", name: "找到落脚之处", type: "完成事件", deadline: { day: 1, period: "night" }, visible: true },
+                { goal_id: "meet_someone", name: "认识一位当地人", type: "关系变化", deadline: { day: 3, period: "night" }, visible: true }
+            ],
+            status_effects: [],
+            is_alive: true,
+            death_reason: null
+        };
+        lore_snippets = [
+            { id: "x1", category: "规则", title: "修行境界", content: "凡人、练气、筑基、金丹、元婴……境界不可跳跃。", keywords: ["境界", "修行"] },
+            { id: "x2", category: "地点", title: "小镇", content: "大千世界边缘的小镇，鱼龙混杂，是修行者的落脚点。", keywords: ["小镇"] },
+            { id: "x3", category: "人物", title: "老道长", content: "隐居小镇的落魄修士，看似普通，实则见识广博。", keywords: ["老道长"] }
+        ];
+        system_prompt = `你是${name}仙侠背景文字游戏的主持人。规则：境界不可跳跃，重大事件不可篡改，NPC不会无条件帮助玩家。输出 JSON。`;
+    } else {
+        schema = defaultWorldSchema(name + " " + desc);
+        initial_state = {
+            name: "旅人",
+            age: 18,
+            background: "从远方而来的旅人，对这个新世界充满好奇。",
+            personality: ["谨慎", "好奇"],
+            attributes: {
+                courage: "初来乍到，遇事不免有些畏缩，但还不到仓皇逃窜的地步。",
+                perception: "对周遭动静还算留心，偶尔会注意到旁人忽略的细节。",
+                patience: "能坐得住一时半刻，但若长久无望，也会焦躁起来。",
+                luck: "不好不坏，像被世界随手一扔的普通石子。",
+                will: "心志尚浅，却还没被现实完全磨平。"
+            },
+            progression: { path: "无", rank: "新手", progress: 0 },
+            relationships: {
+                "向导": "萍水相逢，对方看你的眼神里带着几分打量。",
+                "酒馆老板": "只是点头之交，谈不上熟悉。"
+            },
+            skills: {
+                "交涉": "说话还算有条理，但远未到打动人心的地步。",
+                "观察": "能注意到一些明显迹象，深层的线索却常常错过。"
+            },
+            inventory: [{ item_id: "bread", name: "干粮", count: 2 }, { item_id: "coin", name: "铜币", count: 10 }],
+            completed_events: [],
+            current_location: "边境驿站",
+            current_date: { day: 1, period: "morning" },
+            goals: [
+                { goal_id: "find_shelter", name: "找到落脚之处", type: "完成事件", deadline: { day: 1, period: "night" }, visible: true }
+            ],
+            status_effects: [],
+            is_alive: true,
+            death_reason: null
+        };
+        lore_snippets = [
+            { id: "g1", category: "规则", title: "世界规则", content: desc.slice(0, 120), keywords: ["规则"] },
+            { id: "g2", category: "地点", title: "初始地点", content: "玩家旅程开始的地方。", keywords: ["地点"] }
+        ];
+        system_prompt = `你是${name}背景文字游戏的主持人。世界观：${desc}。规则：符合世界观，不可让玩家轻易获得超规格力量。输出 JSON。`;
+    }
+
+    return {
+        schema,
+        initial_state,
+        lore_kb: { ip: name, snippets: lore_snippets },
+        system_prompt
+    };
+}
+
+function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+}
+
+function showWorldList() {
+    renderWorldList();
+    showScreen("worldListScreen");
+}
+
+function showSaveList() {
+    renderSaveList();
+    showScreen("saveListScreen");
+}
+
+function renderWorldList() {
+    const container = document.getElementById("worldListContent");
+    if (!worlds.length) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">🌍</div>
+                <div class="text">还没有世界<br>先去「创建世界」生成一个吧</div>
+            </div>`;
+        return;
+    }
+    container.innerHTML = worlds.map(w => `
+        <div class="list-item" onclick="showWorldDetail('${w.id}')">
+            <div class="item-title">${w.name}</div>
+            <div class="item-meta">${w.desc}</div>
+            <div class="item-tags">
+                ${w.tags.map(t => `<span class="tag">${t}</span>`).join("")}
+                <span class="tag accent">${w.type === "ip" ? "已有 IP" : "原创"}</span>
+            </div>
+        </div>
+    `).join("");
+}
+
+function renderSaveList() {
+    const container = document.getElementById("saveListContent");
+    if (!saves.length) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">💾</div>
+                <div class="text">还没有存档<br>进入世界开始游玩后自动生成</div>
+            </div>`;
+        return;
+    }
+    container.innerHTML = saves.map(s => `
+        <div class="list-item">
+            <div class="item-title">${s.worldName}</div>
+            <div class="item-meta">${s.progress}<br>最后游玩：${s.updatedAt}</div>
+            <div class="item-tags">
+                <span class="tag primary" onclick="loadSave('${s.id}')">继续游玩</span>
+                <span class="tag" style="color:var(--danger);" onclick="deleteSave('${s.id}')">删除</span>
+            </div>
+        </div>
+    `).join("");
+}
+
+function showWorldDetail(worldId) {
+    currentWorld = worlds.find(w => w.id === worldId);
+    if (!currentWorld) return;
+    document.getElementById("detailWorldTitle").textContent = currentWorld.name;
+    const schema = getWorldSchema(currentWorld);
+    document.getElementById("detailWorldBody").innerHTML = `
+        <div class="form-group">
+            <label>世界类型</label>
+            <p style="margin:0;font-size:15px;">${currentWorld.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p>
+        </div>
+        <div class="form-group">
+            <label>世界观描述</label>
+            <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${currentWorld.desc}</p>
+        </div>
+        ${currentWorld.hero ? `
+        <div class="form-group">
+            <label>主角设定</label>
+            <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${currentWorld.hero}</p>
+        </div>` : ""}
+        <div class="form-group">
+            <label>进度系统</label>
+            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${schema.progression_path_label} / ${schema.progression_label}</p>
+        </div>
+        <div class="form-group">
+            <label>创建时间</label>
+            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${currentWorld.createdAt}</p>
+        </div>
+    `;
+    showModal("worldDetailModal");
+}
+
+function startGame() {
+    closeModal("worldDetailModal");
+    if (!currentWorld) return;
+
+    // 加载该世界的初始状态
+    if (currentWorld.initial_state) {
+        gameState = deepClone(currentWorld.initial_state);
+    } else {
+        // 兼容旧世界，使用默认初始状态
+        gameState = deepClone(defaultInitialState());
+        gameState.name = currentWorld.hero ? "主角" : "玩家";
+    }
+
+    // 重置当前世界对话历史
+    conversationHistory = [];
+    saveState();
+
+    showScreen("gameScreen");
+    document.getElementById("gameWorldName").textContent = currentWorld.name;
+    updateGameDayInfo();
+    renderLog();
+    renderChoices([]);
+
+    // 开场白
+    conversationHistory.push({
+        player: "",
+        narrative: `你进入了「${currentWorld.name}」。\n\n${currentWorld.desc}\n\n旅程即将开始，请做出你的第一个行动。`,
+        retrieved: [],
+        period: gameState.current_date.period,
+        day: gameState.current_date.day,
+        key_facts: []
+    });
+    saveState();
+    renderLog();
+}
+
+function defaultInitialState() {
+    return {
+        name: "玩家",
+        age: 16,
+        background: "一个误入了陌生世界的普通人。",
+        personality: ["谨慎", "好奇"],
+        attributes: {
+            courage: "初来乍到，遇事不免有些畏缩，但还不到仓皇逃窜的地步。",
+            perception: "对周遭动静还算留心，偶尔会注意到旁人忽略的细节。",
+            patience: "能坐得住一时半刻，但若长久无望，也会焦躁起来。",
+            luck: "不好不坏，像被世界随手一扔的普通石子。",
+            will: "心志尚浅，却还没被现实完全磨平。"
+        },
+        progression: { path: "未入门", rank: "凡人", progress: 0 },
+        relationships: {},
+        skills: {},
+        inventory: [],
+        completed_events: [],
+        current_location: "初始地点",
+        current_date: { day: 1, period: "morning" },
+        goals: [],
+        status_effects: [],
+        is_alive: true,
+        death_reason: null
+    };
+}
+
+function loadSave(saveId) {
+    const save = saves.find(s => s.id === saveId);
+    if (!save) return;
+    currentWorld = worlds.find(w => w.id === save.worldId);
+    if (save.state) gameState = deepClone(save.state);
+    if (save.history) conversationHistory = deepClone(save.history);
+    showToast(`加载存档：${save.worldName}`, "success");
+    showScreen("gameScreen");
+    document.getElementById("gameWorldName").textContent = save.worldName;
+    updateGameDayInfo();
+    renderLog();
+    renderChoices([]);
+}
+
+function deleteSave(saveId) {
+    if (!confirm("确定要删除这个存档吗？")) return;
+    saves = saves.filter(s => s.id !== saveId);
+    saveSaves();
+    renderSaveList();
+    showToast("存档已删除", "success");
+}
+
+function createOrUpdateSave() {
+    if (!currentWorld || !gameState) return;
+    const existing = saves.find(s => s.worldId === currentWorld.id);
+    const progress = `第 ${gameState.current_date.day} 天 · ${getPeriodLabel(gameState.current_date.period)}`;
+    const now = new Date().toLocaleString("zh-CN", { hour12: false });
+    if (existing) {
+        existing.progress = progress;
+        existing.updatedAt = now;
+        existing.state = deepClone(gameState);
+        existing.history = deepClone(conversationHistory);
+    } else {
+        saves.unshift({
+            id: "s" + Date.now(),
+            worldId: currentWorld.id,
+            worldName: currentWorld.name,
+            progress,
+            updatedAt: now,
+            state: deepClone(gameState),
+            history: deepClone(conversationHistory)
+        });
+    }
+    saveSaves();
+}
+
+/* ================= 角色状态面板 ================= */
+function showStatusPanel() {
+    currentStatusTab = "profile";
+    renderStatusTabs();
+    renderStatusPanel(currentStatusTab);
+    document.getElementById("statusPanelOverlay").classList.add("show");
+}
+
+function hideStatusPanel() {
+    document.getElementById("statusPanelOverlay").classList.remove("show");
+}
+
+function closeStatusPanel(event) {
+    if (event.target.id === "statusPanelOverlay") {
+        hideStatusPanel();
+    }
+}
+
+function renderStatusTabs() {
+    const schema = getWorldSchema(currentWorld);
+    const tabs = [
+        { key: "profile", label: "属性" },
+        { key: "background", label: "背景" },
+        { key: "state", label: "状态" },
+        { key: "relations", label: "关系" },
+        { key: "items", label: "物品" }
+    ];
+    if (schema.has_skills) {
+        tabs.push({ key: "skills", label: schema.skill_label || "技能" });
+    }
+    tabs.push({ key: "goals", label: "目标" });
+
+    document.getElementById("statusTabs").innerHTML = tabs.map(t => `
+        <button class="status-tab ${currentStatusTab === t.key ? "active" : ""}" onclick="switchStatusTab('${t.key}')">${t.label}</button>
+    `).join("");
+}
+
+function switchStatusTab(tab) {
+    currentStatusTab = tab;
+    renderStatusTabs();
+    renderStatusPanel(tab);
+}
+
+function getPeriodLabel(period) {
+    const schema = getWorldSchema(currentWorld);
+    return (schema.time_periods && schema.time_periods[period]) || DEFAULT_PERIOD_LABELS[period] || period;
+}
+
+function getAttributeLabel(key) {
+    const schema = getWorldSchema(currentWorld);
+    return (schema.attribute_labels && schema.attribute_labels[key]) || key;
+}
+
+function renderTextAttribute(label, value) {
+    const text = renderTextValue(value);
+    return `
+        <div class="row" style="align-items:flex-start;"><span class="label">${label}</span></div>
+        <div class="text-block" style="margin-bottom:10px;">${text}</div>
+    `;
+}
+
+function renderTextValue(value) {
+    if (typeof value === "string") return escapeHtml(value);
+    if (typeof value === "number") return `数值 ${value}（旧版兼容）`;
+    if (value && typeof value === "object") {
+        if (value.description) return escapeHtml(value.description);
+        return escapeHtml(JSON.stringify(value));
+    }
+    return "暂无描述";
+}
+
+function renderStatusPanel(tab) {
+    const container = document.getElementById("statusContent");
+    if (!gameState) {
+        container.innerHTML = '<div class="empty-hint">暂无角色数据</div>';
+        return;
+    }
+    const s = gameState;
+    const schema = getWorldSchema(currentWorld);
+
+    switch (tab) {
+        case "profile":
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">基本信息</div>
+                    <div class="status-card">
+                        <div class="row"><span class="label">姓名</span><span class="value">${s.name}</span></div>
+                        <div class="row"><span class="label">年龄</span><span class="value">${s.age}</span></div>
+                        <div class="row"><span class="label">当前地点</span><span class="value">${s.current_location}</span></div>
+                        <div class="row"><span class="label">时间</span><span class="value">第 ${s.current_date.day} 天 · ${getPeriodLabel(s.current_date.period)}</span></div>
+                    </div>
+                </div>
+                <div class="status-section">
+                    <div class="status-section-title">属性</div>
+                    <div class="status-card">
+                        ${Object.entries(s.attributes).map(([k, v]) => renderTextAttribute(getAttributeLabel(k), v)).join("")}
+                    </div>
+                </div>
+                <div class="status-section">
+                    <div class="status-section-title">${schema.progression_label || "进度"}</div>
+                    <div class="status-card">
+                        <div class="row"><span class="label">${schema.progression_path_label || "路线"}</span><span class="value">${s.progression.path}</span></div>
+                        <div class="row"><span class="label">${schema.progression_label || "等级"}</span><span class="value">${s.progression.rank}</span></div>
+                        <div class="row"><span class="label">进度</span><span class="value">${s.progression.progress}</span></div>
+                        <div class="stat-bar"><div style="width:${Math.min(s.progression.progress, 100)}%"></div></div>
+                    </div>
+                </div>
+            `;
+            break;
+
+        case "background":
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">出身背景</div>
+                    <div class="status-card text-block">${s.background}</div>
+                </div>
+                <div class="status-section">
+                    <div class="status-section-title">性格</div>
+                    <div class="status-card">
+                        <div class="status-tag-list">
+                            ${(s.personality || []).map(p => `<span class="status-tag">${p}</span>`).join("") || '<span class="empty-hint" style="padding:0">未设置</span>'}
+                        </div>
+                    </div>
+                </div>
+                <div class="status-section">
+                    <div class="status-section-title">已完成事件</div>
+                    <div class="status-card">
+                        <div class="status-tag-list">
+                            ${s.completed_events.length ? s.completed_events.map(e => `<span class="status-tag">${e}</span>`).join("") : '<span class="empty-hint" style="padding:0">暂无</span>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+            break;
+
+        case "state":
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">当前状态</div>
+                    <div class="status-card">
+                        <div class="row"><span class="label">地点</span><span class="value">${s.current_location}</span></div>
+                        <div class="row"><span class="label">时间</span><span class="value">第 ${s.current_date.day} 天 · ${getPeriodLabel(s.current_date.period)}</span></div>
+                        <div class="row"><span class="label">${schema.progression_label || "等级"}</span><span class="value">${s.progression.rank}</span></div>
+                    </div>
+                </div>
+                <div class="status-section">
+                    <div class="status-section-title">临时状态</div>
+                    <div class="status-card">
+                        ${(s.status_effects && s.status_effects.length) ? s.status_effects.map(e => `<div class="row"><span class="label">${e.name}</span><span class="value">${e.desc}</span></div>`).join("") : '<div class="empty-hint">无临时状态</div>'}
+                    </div>
+                </div>
+            `;
+            break;
+
+        case "relations":
+            const relEntries = Object.entries(s.relationships);
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">人物关系</div>
+                    ${relEntries.length ? relEntries.map(([name, value]) => `
+                        <div class="status-card">
+                            <div class="row"><span class="label">${name}</span></div>
+                            <div class="text-block">${renderTextValue(value)}</div>
+                        </div>
+                    `).join("") : '<div class="empty-hint">暂无人物关系</div>'}
+                </div>
+            `;
+            break;
+
+        case "items":
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">背包物品</div>
+                    ${s.inventory.length ? s.inventory.map(i => `
+                        <div class="status-card">
+                            <div class="row">
+                                <span class="label">${i.name}</span>
+                                <span class="value">x${i.count}</span>
+                            </div>
+                        </div>
+                    `).join("") : '<div class="empty-hint">背包空空如也</div>'}
+                </div>
+            `;
+            break;
+
+        case "skills":
+            const skillEntries = Object.entries(s.skills || {});
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">已掌握${schema.skill_label || "技能"}</div>
+                    ${skillEntries.length ? skillEntries.map(([name, value]) => `
+                        <div class="status-card">
+                            <div class="row"><span class="label">${name}</span></div>
+                            <div class="text-block">${renderTextValue(value)}</div>
+                        </div>
+                    `).join("") : '<div class="empty-hint">尚未掌握' + (schema.skill_label || "技能") + '</div>'}
+                </div>
+            `;
+            break;
+
+        case "goals":
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">当前目标</div>
+                    ${s.goals.length ? s.goals.map(g => {
+                        let cls = "";
+                        if (g.status === "completed") cls = "completed";
+                        else if (g.status === "failed") cls = "failed";
+                        const deadline = g.deadline ? `截止：第${g.deadline.day}天 ${getPeriodLabel(g.deadline.period)}` : "无期限";
+                        return `<div class="goal-item ${cls}"><strong>${g.name}</strong><br><span style="font-size:11px;color:#888">${g.type} · ${deadline}</span></div>`;
+                    }).join("") : '<div class="empty-hint">暂无目标</div>'}
+                </div>
+            `;
+            break;
+    }
+}
+
+function updateGameDayInfo() {
+    if (!gameState) return;
+    document.getElementById("gameDayInfo").textContent = `第 ${gameState.current_date.day} 天 · ${getPeriodLabel(gameState.current_date.period)}`;
+}
+
+/* ================= UI 渲染 ================= */
+function highlightItems(text) {
+    if (!gameState || !gameState.inventory.length) return text;
+    const names = gameState.inventory.map(i => i.name).filter(n => n);
+    if (!names.length) return text;
+    // 按名称长度降序，避免短名先替换导致长名无法匹配
+    names.sort((a, b) => b.length - a.length);
+    let html = escapeHtml(text);
+    for (const name of names) {
+        const regex = new RegExp(escapeHtml(name), "g");
+        html = html.replace(regex, `<span class="item-highlight">${escapeHtml(name)}</span>`);
+    }
+    return html;
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function renderLog() {
+    const log = document.getElementById("gameLog");
+    log.innerHTML = conversationHistory.map(entry => `
+        <div class="log-entry">
+            <div class="meta">
+                <span>${entry.player ? "你" : "开场"} · 第${entry.day}天 ${getPeriodLabel(entry.period)}</span>
+            </div>
+            ${entry.player ? `<div class="player-text">${escapeHtml(entry.player)}</div>` : ""}
+            <div class="narrative">${highlightItems(entry.narrative)}</div>
+        </div>
+    `).join("");
+    log.scrollTop = log.scrollHeight;
+}
+
+function renderChoices(choices) {
+    currentChoices = choices || [];
+    const area = document.getElementById("choicesArea");
+    if (!choices || choices.length === 0) {
+        area.innerHTML = "";
+        return;
+    }
+    area.innerHTML = choices.map((c, i) => `<button class="choice-chip" onclick="chooseOption(${i})">${escapeHtml(c.text)}</button>`).join("");
+}
+
+/* ================= RAG 检索 ================= */
+function getWorldLoreKB() {
+    return (currentWorld && currentWorld.lore_kb) || loreKB;
+}
+
+function keywordRetrieve(input, topK = 5) {
+    const kb = getWorldLoreKB();
+    if (!kb || !kb.snippets) return [];
+    const terms = input.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+    const scored = kb.snippets.map(s => {
+        let score = 0;
+        const text = (s.category + " " + s.title + " " + s.content + " " + (s.keywords || []).join(" ")).toLowerCase();
+        for (const t of terms) {
+            if (text.includes(t)) score += 2;
+            if ((s.keywords || []).some(k => k.toLowerCase().includes(t))) score += 3;
+            if (s.title.toLowerCase().includes(t)) score += 4;
+        }
+        return { snippet: s, score };
+    }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
+    return scored.map(x => x.snippet);
+}
+
+async function embeddingRetrieve(input, topK = 5) {
+    const kb = getWorldLoreKB();
+    if (!kb || !kb.snippets || !kb.snippets[0] || !kb.snippets[0].embedding) return [];
+    if (!embeddingModel) {
+        try {
+            embeddingModel = await transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+        } catch (e) {
+            console.warn("Embedding model load failed", e);
+            return [];
+        }
+    }
+    const out = await embeddingModel(input, { pooling: "mean", normalize: true });
+    const qVec = Array.from(out.data);
+    const scored = kb.snippets.map(s => {
+        const sim = cosineSimilarity(qVec, s.embedding);
+        return { snippet: s, score: sim };
+    }).sort((a, b) => b.score - a.score).slice(0, topK);
+    return scored.map(x => x.snippet);
+}
+
+function cosineSimilarity(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-10);
+}
+
+async function retrieve(input) {
+    const keyword = keywordRetrieve(input, 7);
+    const embedding = await embeddingRetrieve(input, 7);
+    const merged = new Map();
+    for (const s of keyword) merged.set(s.id, { snippet: s, score: 1 });
+    for (const s of embedding) {
+        const existing = merged.get(s.id);
+        if (existing) existing.score += 2;
+        else merged.set(s.id, { snippet: s, score: 2 });
+    }
+
+    // 加入玩家行为记录
+    const behavior = retrieveBehaviorRecords(input, 3);
+    for (const b of behavior) {
+        merged.set("behavior_" + b.id, { snippet: { id: "behavior_" + b.id, category: "行为记录", title: "关键事实", content: b.text }, score: 1.5 });
+    }
+
+    return Array.from(merged.values()).sort((a, b) => b.score - a.score).slice(0, 8).map(x => x.snippet);
+}
+
+/* ================= 关键事实 / 玩家行为记录 ================= */
+function retrieveBehaviorRecords(input, topK = 3) {
+    if (!currentWorld || !currentWorld.behavior_records) return [];
+    const terms = input.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+    const scored = currentWorld.behavior_records.map(b => {
+        let score = 0;
+        const text = b.text.toLowerCase();
+        for (const t of terms) if (text.includes(t)) score += 1;
+        return { ...b, score };
+    }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
+    return scored;
+}
+
+function addBehaviorRecords(facts) {
+    if (!currentWorld || !facts || !facts.length) return;
+    if (!currentWorld.behavior_records) currentWorld.behavior_records = [];
+    for (const text of facts) {
+        if (!text || currentWorld.behavior_records.some(b => b.text === text)) continue;
+        currentWorld.behavior_records.push({
+            id: "b" + Date.now() + Math.random().toString(36).slice(2, 6),
+            text,
+            createdAt: new Date().toISOString()
+        });
+    }
+    // 限制数量，避免无限增长
+    if (currentWorld.behavior_records.length > 100) {
+        currentWorld.behavior_records = currentWorld.behavior_records.slice(-100);
+    }
+    saveWorlds();
+}
+
+function summarizeFactsFromChanges(input, narrative, changes) {
+    const facts = [];
+    if (changes && changes.inventory) {
+        for (const op of changes.inventory) {
+            if (op.op === "add") facts.push(`玩家获得了 ${op.name} x${op.count}`);
+            if (op.op === "remove") facts.push(`玩家失去了 ${op.name} x${op.count}`);
+        }
+    }
+    if (changes && changes.relationships) {
+        for (const [k, v] of Object.entries(changes.relationships)) {
+            if (typeof v === "string" && v.trim() !== "") {
+                facts.push(`玩家与 ${k} 的关系发生了变化`);
+            } else if (typeof v === "number") {
+                if (v > 0) facts.push(`玩家与 ${k} 的关系有所提升`);
+                if (v < 0) facts.push(`玩家与 ${k} 的关系有所下降`);
+            }
+        }
+    }
+    if (changes && changes.attributes) {
+        for (const [k, v] of Object.entries(changes.attributes)) {
+            if (typeof v === "string" && v.trim() !== "") {
+                facts.push(`玩家的 ${k} 属性有了新的变化`);
+            }
+        }
+    }
+    if (changes && changes.skills) {
+        for (const [k, v] of Object.entries(changes.skills)) {
+            if (typeof v === "string" && v.trim() !== "") {
+                facts.push(`玩家的 ${k} 技能有了新的变化`);
+            }
+        }
+    }
+    if (changes && changes.completed_events) {
+        for (const e of changes.completed_events) facts.push(`玩家完成了事件：${e}`);
+    }
+    if (changes && changes.current_location) facts.push(`玩家前往/到达了 ${changes.current_location}`);
+    if (changes && changes.progression && changes.progression.rank) facts.push(`玩家的境界/等级发生了变化：${changes.progression.rank}`);
+    return facts.slice(0, 5);
+}
+
+/* ================= Prompt 与 LLM ================= */
+function buildPrompt(input, retrieved) {
+    const kb = getWorldLoreKB();
+    const worldRules = kb && kb.snippets ? kb.snippets.filter(s => s.category === "规则").map(s => s.content).join("\n") : "请根据世界观规则进行叙事。";
+    const narrativeStyle = kb && kb.snippets ? kb.snippets.filter(s => s.category === "世界观").map(s => s.content).join("\n") : "叙事风格：沉浸式文字冒险，符合世界氛围。";
+    const snippetsText = retrieved.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
+    const behaviorText = (currentWorld && currentWorld.behavior_records && currentWorld.behavior_records.length)
+        ? currentWorld.behavior_records.slice(-10).map(b => `- ${b.text}`).join("\n")
+        : "暂无";
+
+    const schema = getWorldSchema(currentWorld);
+
+    let prompt = (currentWorld && currentWorld.system_prompt)
+        ? currentWorld.system_prompt
+        : systemPromptTemplate;
+
+    prompt = prompt
+        .replace(/{IP_NAME}/g, (currentWorld && currentWorld.name) || (kb && kb.ip) || "你的IP")
+        .replace(/{WORLD_RULES}/g, (currentWorld && currentWorld.desc) || worldRules)
+        .replace(/{NARRATIVE_STYLE}/g, narrativeStyle)
+        .replace(/{WORLD_SCHEMA}/g, JSON.stringify(schema, null, 2))
+        .replace(/{GAME_STATE_JSON}/g, JSON.stringify(gameState, null, 2))
+        .replace(/{RETRIEVED_LORE_SNIPPETS}/g, snippetsText)
+        .replace(/{BEHAVIOR_RECORDS}/g, behaviorText)
+        .replace(/{PLAYER_INPUT}/g, input);
+    return prompt;
+}
+
+async function callLLM(input, retrieved) {
+    const mock = document.getElementById("mockMode").checked;
+    if (mock) {
+        return mockLLM(input, retrieved);
+    }
+    const baseUrl = document.getElementById("baseUrl").value.trim();
+    const apiKey = document.getElementById("apiKey").value.trim();
+    const model = document.getElementById("modelName").value.trim();
+    if (!baseUrl || !apiKey || !model) {
+        throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
+    }
+    const prompt = buildPrompt(input, retrieved);
+    const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + apiKey
+        },
+        body: JSON.stringify({
+            model: model,
+            messages: [{ role: "system", content: prompt }],
+            temperature: 0.7,
+            response_format: { type: "json_object" }
+        })
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    const data = await res.json();
+    const content = data.choices[0].message.content;
+    return parseResponse(content);
+}
+
+function parseResponse(content) {
+    let text = content;
+    if (text.includes("```json")) {
+        text = text.replace(/```json\s*/g, "").replace(/```\s*$/g, "").trim();
+    } else if (text.startsWith("```") && text.endsWith("```")) {
+        text = text.slice(3, -3).trim();
+    }
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        throw new Error("AI 返回的 JSON 解析失败：" + e.message + "\n原始内容：" + content);
+    }
+}
+
+function mockLLM(input, retrieved) {
+    const loc = gameState.current_location;
+    const npcNames = Object.keys(gameState.relationships);
+    const npc = npcNames.find(n => input.includes(n)) || (npcNames.length ? npcNames[0] : "路人");
+    const schema = getWorldSchema(currentWorld);
+
+    let narrative = "";
+    let choices = [];
+    let changes = { attributes: {}, relationships: {}, skills: {}, inventory: [], completed_events: [] };
+
+    if (input.includes("休息") || input.includes("睡觉")) {
+        narrative = `你在${loc}找了处安静角落歇下。精神渐好，远处传来几声寻常响动，日子像水一样流过。`;
+        changes.skills = { "静修": "短暂的歇息让你心神稍定，思绪不再像无头苍蝇般乱撞。" };
+        choices = [
+            { text: "睡到明天早晨", action: "sleep" },
+            { text: "只歇一会儿，继续行动", action: "rest_short" },
+            { text: "回想今天的见闻", action: "reflect" }
+        ];
+    } else if (input.includes("打听") || input.includes("问") || input.includes("聊天")) {
+        narrative = `你向${npc}问起这${loc}的规矩。${npc}打量你片刻，言语间有几分试探，倒也没完全拒你于门外。"外乡人，想在这里活得好，先学会低头看路。"`;
+        changes.relationships = { [npc]: "对方话虽不多，但看你的眼神少了些戒备，多了点可有可无的兴趣。" };
+        changes.skills = { "交谈": "这番对话让你意识到，打听消息比想象中更需要耐心和分寸。" };
+        choices = [
+            { text: "继续追问这世界的规则", action: "ask_more" },
+            { text: "换个话题，聊点轻松的", action: "change_topic" },
+            { text: "道谢后离开", action: "leave" }
+        ];
+    } else if (input.includes("结束") || input.includes("下一天")) {
+        narrative = `你决定结束今日的行动。${loc}渐渐安静下来，你合上眼，等待新的一天。`;
+        changes.period = "morning";
+        changes.current_date = { ...gameState.current_date, day: gameState.current_date.day + 1 };
+        choices = [
+            { text: "开始新的一天", action: "new_day" }
+        ];
+    } else if (input.includes("走") || input.includes("逛") || input.includes("去")) {
+        const places = (getWorldLoreKB().snippets || []).filter(s => s.category === "地点");
+        const place = places.length ? places[0].title : "附近的集市";
+        narrative = `你沿着${loc}的小路走去，来到了${place}。这里人来人往，烟火气扑面而来。你注意到一个摊位前围了不少人。`;
+        changes.current_location = place;
+        changes.attributes = { perception: "一路走下来，你学会从嘈杂中分辨出对自己有用的声响。" };
+        changes.skills = { "观察": "你开始懂得，热闹背后的安静角落往往藏着更多东西。" };
+        changes.inventory = [{ op: "add", item_id: "herb", name: "草药", count: 1 }];
+        choices = [
+            { text: "上前看看热闹", action: "approach" },
+            { text: "找地方歇脚", action: "rest" },
+            { text: "继续探索别处", action: "explore" }
+        ];
+    } else if (input.includes("死") || input.includes("自杀")) {
+        narrative = `你做出了一个无法挽回的决定。周围的世界骤然安静下来，${loc}的灯火在视野中逐渐模糊，直至黑暗吞没一切。`;
+        changes.is_alive = false;
+        changes.death_reason = "主动放弃生命";
+        choices = [];
+    } else {
+        narrative = `你在${loc}做出了尝试。周围的世界似乎因为你的举动泛起了微小的涟漪，但一切都还在规则之内缓缓流动。`;
+        changes.attributes = { courage: "这一尝试未必聪明，却让你觉得自己至少还敢迈出这一步。" };
+        choices = [
+            { text: "继续行动", action: "continue" },
+            { text: "先观察周围", action: "observe" },
+            { text: "找个人搭话", action: "talk" }
+        ];
+    }
+
+    return {
+        narrative,
+        choices,
+        state_changes: changes,
+        is_forced_plot: false,
+        next_period: getNextPeriod(gameState.current_date.period),
+        comment: "模拟响应",
+        key_facts: summarizeFactsFromChanges(input, narrative, changes)
+    };
+}
+
+function getNextPeriod(period) {
+    const idx = DEFAULT_PERIOD_ORDER.indexOf(period);
+    if (idx < 0) return DEFAULT_PERIOD_ORDER[0];
+    return DEFAULT_PERIOD_ORDER[(idx + 1) % DEFAULT_PERIOD_ORDER.length];
+}
+
+/* ================= 状态应用 ================= */
+function applyStateChanges(changes) {
+    if (!changes) return;
+    const s = gameState;
+
+    if (changes.period) s.current_date.period = changes.period;
+    if (changes.current_location) s.current_location = changes.current_location;
+    if (changes.current_date) s.current_date = { ...s.current_date, ...changes.current_date };
+
+    if (changes.attributes) {
+        for (const [k, v] of Object.entries(changes.attributes)) {
+            if (typeof v === "string" && v.trim() !== "") {
+                s.attributes[k] = v;
+            } else if (typeof v === "number") {
+                // 兼容旧版数值
+                s.attributes[k] = (typeof s.attributes[k] === "number" ? s.attributes[k] : 0) + v;
+            }
+        }
+    }
+    if (changes.relationships) {
+        for (const [k, v] of Object.entries(changes.relationships)) {
+            if (typeof v === "string" && v.trim() !== "") {
+                s.relationships[k] = v;
+            } else if (typeof v === "number") {
+                s.relationships[k] = (typeof s.relationships[k] === "number" ? s.relationships[k] : 0) + v;
+            }
+        }
+    }
+    if (changes.skills) {
+        for (const [k, v] of Object.entries(changes.skills)) {
+            if (typeof v === "string" && v.trim() !== "") {
+                s.skills[k] = v;
+            } else if (typeof v === "number") {
+                s.skills[k] = (typeof s.skills[k] === "number" ? s.skills[k] : 0) + v;
+            }
+        }
+    }
+    if (changes.progression) s.progression = { ...s.progression, ...changes.progression };
+
+    if (changes.inventory) {
+        for (const op of changes.inventory) {
+            if (op.op === "add") {
+                const found = s.inventory.find(i => i.item_id === op.item_id);
+                if (found) found.count += op.count;
+                else s.inventory.push({ item_id: op.item_id, name: op.name, count: op.count });
+            } else if (op.op === "remove") {
+                const found = s.inventory.find(i => i.item_id === op.item_id);
+                if (found) {
+                    found.count -= op.count;
+                    if (found.count <= 0) s.inventory = s.inventory.filter(i => i.item_id !== op.item_id);
+                }
+            }
+        }
+    }
+
+    if (changes.completed_events) {
+        for (const e of changes.completed_events) {
+            if (!s.completed_events.includes(e)) s.completed_events.push(e);
+        }
+    }
+
+    if (changes.goal_updates) {
+        for (const u of changes.goal_updates) {
+            const g = s.goals.find(x => x.goal_id === u.goal_id);
+            if (g) g.status = u.status || g.status;
+        }
+    }
+
+    if (changes.status_effects) {
+        s.status_effects = changes.status_effects;
+    }
+
+    if (changes.is_alive === false) {
+        s.is_alive = false;
+        s.death_reason = changes.death_reason || "未知原因";
+    }
+
+    // 推进时间（如果 AI 没指定 period）
+    if (!changes.period && !changes.current_date) {
+        const next = getNextPeriod(s.current_date.period);
+        if (next === "morning") s.current_date.day += 1;
+        s.current_date.period = next;
+    }
+
+    saveState();
+    updateGameDayInfo();
+}
+
+/* ================= 交互处理 ================= */
+async function submitInput() {
+    const inputEl = document.getElementById("playerInput");
+    const input = inputEl.value.trim();
+    if (!input) return;
+    inputEl.value = "";
+    await processTurn(input);
+}
+
+function chooseOption(index) {
+    const choice = currentChoices[index];
+    if (!choice) return;
+    document.getElementById("playerInput").value = choice.text;
+    // 只填入，不自动发送，方便玩家修改
+}
+
+async function processTurn(input) {
+    if (!gameState) return;
+    if (gameState.is_alive === false) {
+        showGameOver();
+        return;
+    }
+
+    showToast("正在思考...", "", 2000);
+    try {
+        const retrieved = await retrieve(input);
+        const resp = await callLLM(input, retrieved);
+        applyStateChanges(resp.state_changes);
+
+        const entry = {
+            player: input,
+            narrative: resp.narrative || "（无叙事）",
+            retrieved: retrieved.map(s => s.title),
+            period: gameState.current_date.period,
+            day: gameState.current_date.day,
+            key_facts: resp.key_facts || []
+        };
+        conversationHistory.push(entry);
+
+        // 添加关键事实到 RAG
+        const facts = resp.key_facts || summarizeFactsFromChanges(input, resp.narrative, resp.state_changes);
+        addBehaviorRecords(facts);
+
+        saveState();
+        createOrUpdateSave();
+
+        renderLog();
+        renderChoices(resp.choices);
+
+        if (gameState.is_alive === false) {
+            setTimeout(showGameOver, 800);
+        }
+    } catch (e) {
+        showToast("出错了：" + e.message, "error");
+        console.error(e);
+    }
+}
+
+/* ================= 游戏结束 ================= */
+function showGameOver() {
+    const reason = gameState && gameState.death_reason ? gameState.death_reason : "你的旅程到此为止。";
+    document.getElementById("gameOverReason").textContent = reason;
+    document.getElementById("gameOverOverlay").classList.add("show");
+}
+
+function backToHomeAfterGameOver() {
+    document.getElementById("gameOverOverlay").classList.remove("show");
+    goHome();
+}
+
+function showToast(msg, type = "", duration = 2000) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.className = "toast show " + type;
+    setTimeout(() => {
+        el.classList.remove("show");
+    }, duration);
+}
+
+/* ================= 启动 ================= */
+init();
+</script>
+</body>
+</html>
