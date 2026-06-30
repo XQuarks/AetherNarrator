@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AI 文字游戏</title>
     <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
     <style>
         :root {
             --bg: #1A2332;
@@ -277,6 +278,132 @@
             margin-top: 6px;
             line-height: 1.4;
         }
+        .form-group input[type="file"] {
+            display: none;
+        }
+        .file-upload-area {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 18px;
+            border: 2px dashed var(--card-border);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 14px;
+            min-height: 60px;
+        }
+        .file-upload-area:hover { border-color: var(--primary); background: rgba(212, 165, 116, 0.06); }
+        .file-upload-area.has-file { border-color: var(--primary); border-style: solid; background: rgba(212, 165, 116, 0.08); }
+        .file-upload-area .icon { font-size: 24px; }
+        .file-upload-area .file-name { color: var(--primary); font-weight: 500; word-break: break-all; }
+        .file-upload-area .file-remove {
+            color: var(--danger);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .file-upload-area .file-remove:hover { background: rgba(196, 85, 77, 0.15); }
+        .form-group .upload-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+        /* 单选组 */
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .radio-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 14px;
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            background: rgba(255,255,255,0.02);
+        }
+        .radio-option:hover { border-color: rgba(212, 165, 116, 0.5); }
+        .radio-option.selected { border-color: var(--primary); background: rgba(212, 165, 116, 0.08); }
+        .radio-option input[type="radio"] {
+            appearance: none;
+            width: 18px; height: 18px;
+            border: 2px solid var(--card-border);
+            border-radius: 50%;
+            flex-shrink: 0;
+            margin-top: 2px;
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.2s;
+        }
+        .radio-option input[type="radio"]:checked {
+            border-color: var(--primary);
+        }
+        .radio-option input[type="radio"]:checked::after {
+            content: "";
+            position: absolute;
+            top: 3px; left: 3px;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--primary);
+        }
+        .radio-option .radio-label { font-size: 14px; color: var(--text); font-weight: 500; }
+        .radio-option .radio-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+        /* 条件区域 */
+        .conditional-field {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease, margin-top 0.3s ease;
+            margin-top: 0;
+        }
+        .conditional-field.show {
+            max-height: 300px;
+            margin-top: 12px;
+        }
+
+        /* 范围滑块 */
+        .range-slider-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .range-slider-wrapper input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.08);
+            outline: none;
+            padding: 0;
+            margin: 0;
+        }
+        .range-slider-wrapper input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+            border: 2px solid var(--bg-panel);
+            box-shadow: 0 0 8px rgba(0,0,0,0.3);
+        }
+        .range-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .range-current {
+            text-align: center;
+            font-size: 13px;
+            color: var(--primary);
+            font-weight: 600;
+        }
 
         /* 按钮 */
         .btn {
@@ -386,6 +513,19 @@
             background: rgba(212, 165, 116, 0.12);
             padding: 1px 6px;
             border-radius: 4px;
+        }
+        /* 非故事内容警告样式 */
+        .log-entry.warning {
+            border-color: var(--danger);
+            background: rgba(196, 85, 77, 0.06);
+            border-left: 3px solid var(--danger);
+        }
+        .log-entry.warning .meta {
+            color: #e0706a;
+        }
+        .log-entry.warning .narrative {
+            color: #e89e9a;
+            font-style: italic;
         }
         .game-input-area {
             padding: 16px 32px 28px;
@@ -777,6 +917,61 @@
                 <label>主角设定（可选）</label>
                 <textarea id="heroDesc" placeholder="例如：一名来自小镇的少年，性格谨慎，渴望变强..."></textarea>
             </div>
+
+            <!-- 上传源文件 -->
+            <div class="form-group">
+                <label>上传世界观/小说源文件（可选）</label>
+                <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('sourceFile').click()">
+                    <span class="icon">📄</span>
+                    <span id="fileUploadText">点击上传 TXT / DOCX 文件</span>
+                </div>
+                <input type="file" id="sourceFile" accept=".txt,.docx" onchange="handleFileSelect(event)">
+                <div class="upload-hint">支持 .txt 和 .docx 格式，源文件内容将作为世界观生成的参考材料</div>
+            </div>
+
+            <!-- 文风参考 -->
+            <div class="form-group">
+                <label>文风参考</label>
+                <div class="radio-group" id="styleRefGroup">
+                    <label class="radio-option selected" onclick="selectStyleRef('original', this)">
+                        <input type="radio" name="styleRef" value="original" checked>
+                        <div>
+                            <div class="radio-label">参考原版文风</div>
+                            <div class="radio-desc">AI 将模仿源文件或描述中的写作风格</div>
+                        </div>
+                    </label>
+                    <label class="radio-option" onclick="selectStyleRef('custom', this)">
+                        <input type="radio" name="styleRef" value="custom">
+                        <div>
+                            <div class="radio-label">自定义文风</div>
+                            <div class="radio-desc">手动输入你想要的叙事风格</div>
+                        </div>
+                    </label>
+                    <label class="radio-option" onclick="selectStyleRef('none', this)">
+                        <input type="radio" name="styleRef" value="none">
+                        <div>
+                            <div class="radio-label">不参考文风</div>
+                            <div class="radio-desc">AI 将使用通用叙事风格</div>
+                        </div>
+                    </label>
+                </div>
+                <div class="conditional-field" id="customStyleField">
+                    <textarea id="customStyle" placeholder="描述你想要的文风，例如：冷峻克制、江湖气息浓厚、对话简练不拖沓..." style="min-height:80px;"></textarea>
+                </div>
+            </div>
+
+            <!-- 剧情自由度 -->
+            <div class="form-group">
+                <label>剧情自由度</label>
+                <div class="range-slider-wrapper">
+                    <input type="range" id="plotFreedom" min="1" max="5" value="3" oninput="updatePlotFreedomLabel(this.value)">
+                    <div class="range-current" id="plotFreedomLabel">适中发散 — 在原著世界观内适度创新</div>
+                    <div class="range-labels">
+                        <span>严格遵循原著</span>
+                        <span>完全自由创作</span>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="modal-footer">
             <button class="btn secondary" onclick="closeModal('createWorldModal')">返回</button>
@@ -826,6 +1021,7 @@ let currentWorld = null;
 let worlds = [];
 let saves = [];
 let currentStatusTab = "profile";
+let sourceFileContent = "";  // 用户上传的源文件内容
 
 const STORAGE_KEYS = {
     config: "aigame_config",
@@ -1005,12 +1201,102 @@ function saveApiConfig() {
     showToast("API 配置已保存", "success");
 }
 
+/* ================= 文件上传处理 ================= */
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const area = document.getElementById("fileUploadArea");
+    const text = document.getElementById("fileUploadText");
+
+    if (file.name.endsWith(".txt")) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            sourceFileContent = e.target.result;
+            area.classList.add("has-file");
+            text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" onclick="clearSourceFile(event)">✕</span>`;
+            area.onclick = null;
+        };
+        reader.readAsText(file, "UTF-8");
+    } else if (file.name.endsWith(".docx")) {
+        if (typeof mammoth !== "undefined") {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                mammoth.extractRawText({ arrayBuffer: e.target.result })
+                    .then(function(result) {
+                        sourceFileContent = result.value;
+                        area.classList.add("has-file");
+                        text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" onclick="clearSourceFile(event)">✕</span>`;
+                        area.onclick = null;
+                    })
+                    .catch(function(err) {
+                        showToast("DOCX 解析失败：" + err.message, "error");
+                    });
+            };
+            reader.readAsArrayBuffer(file);
+        } else {
+            showToast("DOCX 解析需要 mammoth.js，请使用 .txt 格式", "error");
+        }
+    }
+}
+
+function clearSourceFile(e) {
+    if (e) e.stopPropagation();
+    sourceFileContent = "";
+    const area = document.getElementById("fileUploadArea");
+    const text = document.getElementById("fileUploadText");
+    const input = document.getElementById("sourceFile");
+    area.classList.remove("has-file");
+    text.innerHTML = `<span class="icon">📄</span> 点击上传 TXT / DOCX 文件`;
+    area.onclick = function() { document.getElementById("sourceFile").click(); };
+    input.value = "";
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+/* ================= 文风 & 自由度选择 ================= */
+function selectStyleRef(value, el) {
+    document.querySelectorAll("#styleRefGroup .radio-option").forEach(o => o.classList.remove("selected"));
+    document.querySelectorAll("#styleRefGroup input[type=radio]").forEach(r => r.checked = false);
+    el.classList.add("selected");
+    el.querySelector("input[type=radio]").checked = true;
+    const customField = document.getElementById("customStyleField");
+    if (value === "custom") {
+        customField.classList.add("show");
+    } else {
+        customField.classList.remove("show");
+    }
+}
+
+function getSelectedStyleRef() {
+    const checked = document.querySelector("input[name='styleRef']:checked");
+    return checked ? checked.value : "original";
+}
+
+function updatePlotFreedomLabel(value) {
+    const labels = {
+        1: "严格遵循原著 — 剧情走向基本不偏离",
+        2: "以原著为主 — 偶尔有限发散",
+        3: "适中发散 — 在原著世界观内适度创新",
+        4: "自由发挥 — 世界观为框架，剧情大胆创新",
+        5: "完全自由 — 仅用世界框架，剧情独立发展"
+    };
+    document.getElementById("plotFreedomLabel").textContent = labels[value] || "";
+}
+
 /* ================= 创建世界 ================= */
 async function generateWorld() {
     const name = document.getElementById("worldName").value.trim();
     const type = document.getElementById("worldType").value;
     const desc = document.getElementById("worldDesc").value.trim();
     const hero = document.getElementById("heroDesc").value.trim();
+    const styleRef = getSelectedStyleRef();
+    const customStyle = styleRef === "custom" ? document.getElementById("customStyle").value.trim() : "";
+    const plotFreedom = parseInt(document.getElementById("plotFreedom").value);
 
     if (!name || !desc) {
         showToast("请填写世界名称和世界观描述", "error");
@@ -1022,7 +1308,7 @@ async function generateWorld() {
     btn.textContent = "生成中...";
 
     try {
-        const generated = await callWorldGenerationLLM(name, type, desc, hero);
+        const generated = await callWorldGenerationLLM(name, type, desc, hero, sourceFileContent, styleRef, customStyle, plotFreedom);
         const world = {
             id: "w" + Date.now(),
             name,
@@ -1035,7 +1321,11 @@ async function generateWorld() {
             initial_state: generated.initial_state,
             lore_kb: generated.lore_kb,
             system_prompt: generated.system_prompt,
-            behavior_records: []
+            behavior_records: [],
+            source_content: sourceFileContent || "",
+            style_ref: styleRef,
+            custom_style: customStyle,
+            plot_freedom: plotFreedom
         };
         worlds.unshift(world);
         saveWorlds();
@@ -1044,6 +1334,8 @@ async function generateWorld() {
         document.getElementById("worldName").value = "";
         document.getElementById("worldDesc").value = "";
         document.getElementById("heroDesc").value = "";
+        document.getElementById("customStyle").value = "";
+        clearSourceFile();
         closeModal("createWorldModal");
         showToast("世界生成成功！", "success");
     } catch (e) {
@@ -1055,7 +1347,7 @@ async function generateWorld() {
     }
 }
 
-async function callWorldGenerationLLM(name, type, desc, hero) {
+async function callWorldGenerationLLM(name, type, desc, hero, sourceContent, styleRef, customStyle, plotFreedom) {
     const mock = document.getElementById("mockMode").checked;
     if (mock) {
         await sleep(1200);
@@ -1069,7 +1361,7 @@ async function callWorldGenerationLLM(name, type, desc, hero) {
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
 
-    const prompt = buildWorldGenerationPrompt(name, type, desc, hero);
+    const prompt = buildWorldGenerationPrompt(name, type, desc, hero, sourceContent, styleRef, customStyle, plotFreedom);
     const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
     const res = await fetch(url, {
         method: "POST",
@@ -1092,7 +1384,29 @@ async function callWorldGenerationLLM(name, type, desc, hero) {
     return parseResponse(data.choices[0].message.content);
 }
 
-function buildWorldGenerationPrompt(name, type, desc, hero) {
+function buildWorldGenerationPrompt(name, type, desc, hero, sourceContent, styleRef, customStyle, plotFreedom) {
+    const plotFreedomDesc = {
+        1: "严格遵循原著 — 关键剧情节点、重要事件必须按原著发生，AI 不得偏移主线。",
+        2: "以原著为主 — 主线遵循原著，但在支线和日常互动上可以有限发散。",
+        3: "适中发散 — 以原著世界观为框架，剧情可在合理范围内创新和延伸。",
+        4: "自由发挥 — 世界观为框架，剧情走向由 AI 和玩家自由创造。",
+        5: "完全自由 — 仅使用世界基本框架和设定，所有剧情由 AI 独立生成。"
+    };
+
+    const styleRefDesc = {
+        original: "请参考源文件的文风和叙事节奏进行生成。",
+        custom: customStyle ? `请严格遵循以下文风进行生成：${customStyle}` : "请使用通用叙事风格。",
+        none: "请使用通用叙事风格，不需要模仿特定文风。"
+    };
+
+    const sourceSection = sourceContent
+        ? `\n# 源文件参考\n\n以下是用户上传的世界观/小说源文件内容（前 8000 字），请从中提取世界观设定、人物关系、力量体系、叙事风格等元素：\n\n\`\`\`\n${sourceContent.slice(0, 8000)}\n\`\`\`\n`
+        : "";
+
+    const lengthLimitSection = sourceContent
+        ? `\n- 知识库至少生成 12 条，每条 100-300 字，确保覆盖源文件中的关键设定。`
+        : `\n- 知识库至少生成 8 条，每条 100-300 字。`;
+
     return `你是专业的文字游戏世界观设计师。请根据以下信息，为一个 AI 文字游戏生成完整的世界配置。
 
 # 输入
@@ -1101,6 +1415,14 @@ function buildWorldGenerationPrompt(name, type, desc, hero) {
 - 类型：${type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}
 - 世界观描述：${desc}
 - 主角设定：${hero || "未指定，由你设计"}
+${sourceSection}
+# 文风要求
+
+${styleRefDesc[styleRef] || styleRefDesc.none}
+
+# 剧情控制
+
+${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
 
 # 输出要求
 
@@ -1131,15 +1453,14 @@ function buildWorldGenerationPrompt(name, type, desc, hero) {
 
 3. lore_kb: 知识库对象，包含：
    - ip: 世界名
-   - snippets: 数组，每条包含 {id, category（规则/地点/人物/事件/物品/势力）, title, content, keywords（数组）}
-   至少 8 条，每条 100-300 字。
+   - snippets: 数组，每条包含 {id, category（规则/地点/人物/事件/物品/势力）, title, content, keywords（数组）}${lengthLimitSection}
 
 4. system_prompt: 用于游戏运行时的 System Prompt 字符串，要包含世界观硬约束、叙事风格、输出格式说明。
 
 # 注意
 
 - 所有内容要符合该世界的力量体系，不要跨世界观混杂。
-- 已有 IP 不要篡改不可改变的核心设定。
+- ${type === "ip" ? "已有 IP 不要篡改不可改变的核心设定和关键角色命运。" : "原创世界请保持内部逻辑自洽。"}
 - attributes / relationships / skills 全部使用文字描述，不要输出数字。
 - 输出必须是合法 JSON，不要包含 markdown 代码块标记。`;
 }
@@ -1386,6 +1707,21 @@ function showWorldDetail(worldId) {
             <label>创建时间</label>
             <p style="margin:0;font-size:14px;color:var(--text-secondary);">${currentWorld.createdAt}</p>
         </div>
+        ${currentWorld.style_ref ? `
+        <div class="form-group">
+            <label>文风参考</label>
+            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${currentWorld.style_ref === "original" ? "参考原版文风" : currentWorld.style_ref === "custom" ? "自定义文风：" + (currentWorld.custom_style || "未填写") : "不参考文风"}</p>
+        </div>` : ""}
+        ${currentWorld.plot_freedom ? `
+        <div class="form-group">
+            <label>剧情自由度</label>
+            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${["", "严格遵循原著", "以原著为主", "适中发散", "自由发挥", "完全自由"][currentWorld.plot_freedom] || "适中发散"}</p>
+        </div>` : ""}
+        ${currentWorld.source_content ? `
+        <div class="form-group">
+            <label>源文件</label>
+            <p style="margin:0;font-size:14px;color:var(--text-secondary);">已上传（${Math.ceil(currentWorld.source_content.length / 1024)} KB）</p>
+        </div>` : ""}
     `;
     showModal("worldDetailModal");
 }
@@ -1480,11 +1816,13 @@ function createOrUpdateSave() {
     const existing = saves.find(s => s.worldId === currentWorld.id);
     const progress = `第 ${gameState.current_date.day} 天 · ${getPeriodLabel(gameState.current_date.period)}`;
     const now = new Date().toLocaleString("zh-CN", { hour12: false });
+    // 过滤掉警告条目，存档中只保留故事内容
+    const cleanHistory = conversationHistory.filter(e => !e.isWarning);
     if (existing) {
         existing.progress = progress;
         existing.updatedAt = now;
         existing.state = deepClone(gameState);
-        existing.history = deepClone(conversationHistory);
+        existing.history = deepClone(cleanHistory);
     } else {
         saves.unshift({
             id: "s" + Date.now(),
@@ -1493,7 +1831,7 @@ function createOrUpdateSave() {
             progress,
             updatedAt: now,
             state: deepClone(gameState),
-            history: deepClone(conversationHistory)
+            history: deepClone(cleanHistory)
         });
     }
     saveSaves();
@@ -1747,15 +2085,21 @@ function escapeHtml(str) {
 
 function renderLog() {
     const log = document.getElementById("gameLog");
-    log.innerHTML = conversationHistory.map(entry => `
-        <div class="log-entry">
+    log.innerHTML = conversationHistory.map(entry => {
+        const warningClass = entry.isWarning ? " warning" : "";
+        const metaLabel = entry.isWarning
+            ? "⚠️ 系统提示"
+            : (entry.player ? "你" : "开场");
+        return `
+        <div class="log-entry${warningClass}">
             <div class="meta">
-                <span>${entry.player ? "你" : "开场"} · 第${entry.day}天 ${getPeriodLabel(entry.period)}</span>
+                <span>${metaLabel} · 第${entry.day}天 ${getPeriodLabel(entry.period)}</span>
             </div>
             ${entry.player ? `<div class="player-text">${escapeHtml(entry.player)}</div>` : ""}
-            <div class="narrative">${highlightItems(entry.narrative)}</div>
+            <div class="narrative">${entry.isWarning ? escapeHtml(entry.narrative) : highlightItems(entry.narrative)}</div>
         </div>
-    `).join("");
+        `;
+    }).join("");
     log.scrollTop = log.scrollHeight;
 }
 
@@ -1928,10 +2272,31 @@ function buildPrompt(input, retrieved) {
         ? currentWorld.system_prompt
         : systemPromptTemplate;
 
+    // 注入文风参考设置
+    let finalNarrativeStyle = narrativeStyle;
+    if (currentWorld && currentWorld.style_ref === "original") {
+        finalNarrativeStyle = narrativeStyle + "\n\n请尝试模仿源材料的文风与叙事节奏。";
+    } else if (currentWorld && currentWorld.style_ref === "custom" && currentWorld.custom_style) {
+        finalNarrativeStyle = "文风要求：" + currentWorld.custom_style;
+    }
+
+    // 注入剧情自由度
+    let finalWorldRules = (currentWorld && currentWorld.desc) || worldRules;
+    if (currentWorld && currentWorld.plot_freedom) {
+        const plotFreedomHints = {
+            1: "剧情约束：严格遵循原著剧情，关键事件必须按原著发生，不可偏离主线。",
+            2: "剧情约束：以原著剧情为主，支线和日常可有限发散，但主线不可偏移。",
+            3: "剧情约束：在原著世界观框架内，剧情可适度创新和延伸。",
+            4: "剧情约束：以世界观为框架，剧情自由发挥，大胆创新。",
+            5: "剧情约束：仅以世界基本设定为框架，所有剧情由你自由创造。"
+        };
+        finalWorldRules += "\n\n" + (plotFreedomHints[currentWorld.plot_freedom] || "");
+    }
+
     prompt = prompt
         .replace(/{IP_NAME}/g, (currentWorld && currentWorld.name) || (kb && kb.ip) || "你的IP")
-        .replace(/{WORLD_RULES}/g, (currentWorld && currentWorld.desc) || worldRules)
-        .replace(/{NARRATIVE_STYLE}/g, narrativeStyle)
+        .replace(/{WORLD_RULES}/g, finalWorldRules)
+        .replace(/{NARRATIVE_STYLE}/g, finalNarrativeStyle)
         .replace(/{WORLD_SCHEMA}/g, JSON.stringify(schema, null, 2))
         .replace(/{GAME_STATE_JSON}/g, JSON.stringify(gameState, null, 2))
         .replace(/{RETRIEVED_LORE_SNIPPETS}/g, snippetsText)
@@ -2062,6 +2427,58 @@ function mockLLM(input, retrieved) {
     };
 }
 
+/* ================= 非故事内容检测 ================= */
+function isNonStoryResponse(text) {
+    if (!text || typeof text !== "string") return true;
+    if (text.trim().length === 0) return true;
+    const lower = text.toLowerCase();
+
+    // 强拒绝/限制信号 — 只要命中一个就判定为非故事
+    const strongPatterns = [
+        "抱歉，我无法", "抱歉，我不能", "我无法满足", "无法生成此类",
+        "这类内容超出我的能力", "超出我的能力范围",
+        "作为ai", "作为人工智能", "as an ai", "as a language model",
+        "i'm sorry, i cannot", "i'm sorry, i can't",
+        "违反了内容政策", "违反安全政策", "content policy",
+        "无法处理该请求", "无法回应", "请重新描述",
+        "不适当的内容", "inappropriate content",
+        "我不能继续生成", "因安全考虑",
+        "该话题超出", "我无法提供",
+        "不符合使用规范", "不符合作品规范",
+        "我只是一段程序", "我无法模拟"
+    ];
+
+    for (const p of strongPatterns) {
+        if (lower.includes(p.toLowerCase())) return true;
+    }
+
+    // 弱信号：需要多个命中才判定
+    const weakPatterns = [
+        "抱歉", "无法", "不能", "unable to", "cannot",
+        "请提供", "请换一个", "请尝试", "please provide",
+        "不恰当", "不适当", "违反", "违规",
+        "涉及敏感", "敏感内容"
+    ];
+
+    let weakHits = 0;
+    for (const p of weakPatterns) {
+        if (lower.includes(p.toLowerCase())) weakHits++;
+    }
+
+    // 短文本 + 弱信号 → 判定为非故事
+    if (text.length < 80 && weakHits >= 1) return true;
+    // 长文本但命中多个弱信号
+    if (weakHits >= 3) return true;
+
+    // 内容过短且不包含中文（可能是纯英文错误/技术限制消息）
+    if (text.length < 30 && !/[\u4e00-\u9fff]/.test(text)) return true;
+
+    // 纯 JSON 错误格式
+    if (text.trim().startsWith("{") && text.trim().endsWith("}") && text.length < 100) return true;
+
+    return false;
+}
+
 function getNextPeriod(period) {
     const idx = DEFAULT_PERIOD_ORDER.indexOf(period);
     if (idx < 0) return DEFAULT_PERIOD_ORDER[0];
@@ -2183,32 +2600,66 @@ async function processTurn(input) {
     try {
         const retrieved = await retrieve(input);
         const resp = await callLLM(input, retrieved);
-        applyStateChanges(resp.state_changes);
 
-        const entry = {
-            player: input,
-            narrative: resp.narrative || "（无叙事）",
-            retrieved: retrieved.map(s => s.title),
-            period: gameState.current_date.period,
-            day: gameState.current_date.day,
-            key_facts: resp.key_facts || []
-        };
-        conversationHistory.push(entry);
+        // 检测是否为非故事内容（拒绝/限制/错误响应）
+        const isWarning = isNonStoryResponse(resp.narrative);
 
-        // 添加关键事实到 RAG
-        const facts = resp.key_facts || summarizeFactsFromChanges(input, resp.narrative, resp.state_changes);
-        addBehaviorRecords(facts);
+        if (isWarning) {
+            // ⚠️ 非故事内容：不应用状态变更、不写入知识库、不影响记忆
+            const entry = {
+                player: input,
+                narrative: resp.narrative || "（无内容）",
+                retrieved: retrieved.map(s => s.title),
+                period: gameState.current_date.period,
+                day: gameState.current_date.day,
+                key_facts: [],
+                isWarning: true
+            };
+            conversationHistory.push(entry);
+            // 明确跳过 applyStateChanges 和 addBehaviorRecords
+        } else {
+            // ✅ 正常故事内容
+            applyStateChanges(resp.state_changes);
+
+            const entry = {
+                player: input,
+                narrative: resp.narrative || "（无叙事）",
+                retrieved: retrieved.map(s => s.title),
+                period: gameState.current_date.period,
+                day: gameState.current_date.day,
+                key_facts: resp.key_facts || []
+            };
+            conversationHistory.push(entry);
+
+            // 添加关键事实到 RAG
+            const facts = resp.key_facts || summarizeFactsFromChanges(input, resp.narrative, resp.state_changes);
+            addBehaviorRecords(facts);
+        }
 
         saveState();
         createOrUpdateSave();
 
         renderLog();
-        renderChoices(resp.choices);
+        renderChoices(isWarning ? [] : resp.choices);  // 警告内容不提供选项
 
-        if (gameState.is_alive === false) {
+        if (!isWarning && gameState.is_alive === false) {
             setTimeout(showGameOver, 800);
         }
     } catch (e) {
+        // 网络/API 错误也作为警告展示，不影响游戏状态
+        const errorEntry = {
+            player: input,
+            narrative: "请求失败：" + e.message,
+            retrieved: [],
+            period: gameState.current_date.period,
+            day: gameState.current_date.day,
+            key_facts: [],
+            isWarning: true
+        };
+        conversationHistory.push(errorEntry);
+        saveState();
+        renderLog();
+        renderChoices([]);
         showToast("出错了：" + e.message, "error");
         console.error(e);
     }
