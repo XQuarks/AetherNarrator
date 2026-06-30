@@ -3,60 +3,115 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI 文字游戏</title>
+    <title>以太叙事 · AetherNarrator</title>
     <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2"></script>
     <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
         :root {
-            --bg: #1A2332;
-            --bg-gradient: #1A2332;
-            --bg-panel: #1E2736;
-            --bg-sidebar: #161D28;
-            --card: rgba(255, 255, 255, 0.06);
-            --card-border: rgba(240, 235, 224, 0.12);
-            --text: #F0EBE0;
-            --text-secondary: rgba(240, 235, 224, 0.55);
-            --primary: #D4A574;
-            --primary-light: #E0B888;
-            --accent: #D4A574;
-            --success: #4ecdc4;
-            --danger: #c4554d;
-            --warning: #d4a44a;
-            --text-muted: rgba(240, 235, 224, 0.45);
-            --separator: rgba(240, 235, 224, 0.08);
+            --bg: #161618;
+            --bg-gradient: radial-gradient(ellipse at 50% 0%, #1C1C1E 0%, #161618 70%);
+            --bg-panel: #1C1C1E;
+            --bg-sidebar: #1A1A1C;
+            --card: rgba(255, 255, 255, 0.05);
+            --card-hover: rgba(255, 255, 255, 0.08);
+            --card-border: rgba(255, 255, 255, 0.10);
+            --card-border-hover: rgba(255, 255, 255, 0.18);
+            --text: #ECECEE;
+            --text-secondary: rgba(255, 255, 255, 0.55);
+            --primary: #C9A87C;
+            --primary-light: #D8BC9A;
+            --accent: #C9A87C;
+            --success: #6BAF9A;
+            --danger: #D04848;
+            --warning: #B89440;
+            --text-muted: rgba(255, 255, 255, 0.40);
+            --separator: rgba(255, 255, 255, 0.07);
+            --radius-s: 6px;
+            --radius-m: 8px;
+            --radius-l: 12px;
+            --shadow-card: 0 2px 8px rgba(0,0,0,0.12);
+            --shadow-modal: 0 4px 16px rgba(0,0,0,0.2);
+            --shadow-gameover: 0 8px 32px rgba(0,0,0,0.3);
+            --overlay-bg: rgba(0,0,0,0.5);
+            --overlay-light: rgba(0,0,0,0.4);
+            --overlay-gameover: rgba(0,0,0,0.6);
+            --scrollbar-thumb: rgba(255,255,255,0.15);
+            --radio-inner: #1A1A1C;
+            --btn-primary-text: #1A1A1C;
+        }
+
+        /* 白天模式 */
+        [data-theme="light"] {
+            --bg: #F3F3F6;
+            --bg-gradient: radial-gradient(ellipse at 50% 0%, #FFFFFF 0%, #F3F3F6 70%);
+            --bg-panel: #FFFFFF;
+            --bg-sidebar: #F8F8FA;
+            --card: rgba(0, 0, 0, 0.025);
+            --card-hover: rgba(0, 0, 0, 0.05);
+            --card-border: rgba(0, 0, 0, 0.08);
+            --card-border-hover: rgba(0, 0, 0, 0.14);
+            --text: #1A1A1C;
+            --text-secondary: rgba(0, 0, 0, 0.50);
+            --primary: #B08A5E;
+            --primary-light: #C4A074;
+            --accent: #B08A5E;
+            --success: #4A9B82;
+            --danger: #C03838;
+            --warning: #A07A30;
+            --text-muted: rgba(0, 0, 0, 0.38);
+            --separator: rgba(0, 0, 0, 0.06);
+            --shadow-card: 0 1px 4px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04);
+            --shadow-modal: 0 2px 12px rgba(0,0,0,0.10);
+            --shadow-gameover: 0 4px 24px rgba(0,0,0,0.12);
+            --overlay-bg: rgba(0,0,0,0.25);
+            --overlay-light: rgba(0,0,0,0.20);
+            --overlay-gameover: rgba(0,0,0,0.35);
+            --scrollbar-thumb: rgba(0,0,0,0.15);
+            --radio-inner: #FFFFFF;
+            --btn-primary-text: #FFFFFF;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         html, body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
             margin: 0;
             padding: 0;
             height: 100%;
             overflow: hidden;
-            background: var(--bg);
+            background: var(--bg-gradient);
             color: var(--text);
+            font-size: 14px;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
-        /* 通用屏幕 */
+        /* 通用屏幕 - 带入场动画 */
         .screen {
             position: fixed;
             inset: 0;
             display: none;
             flex-direction: column;
             overflow: hidden;
+            animation: screenIn 0.4s ease-out;
         }
         .screen.active { display: flex; }
+        @keyframes screenIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
 
         /* 顶部导航栏 */
         .nav-header {
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 12px 16px;
-            background: rgba(0, 0, 0, 0.2);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid var(--card-border);
+            padding: 0 20px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--separator);
             position: relative;
-            min-height: 56px;
+            min-height: 48px;
             flex: none;
         }
         .nav-header .back-btn {
@@ -65,14 +120,17 @@
             background: none;
             border: none;
             color: var(--text);
-            font-size: 24px;
+            font-size: 20px;
             cursor: pointer;
             padding: 8px;
+            transition: opacity 0.15s;
         }
+        .nav-header .back-btn:hover { opacity: 0.6; }
         .nav-header .title {
-            font-size: 18px;
-            font-weight: 600;
+            font-size: 13px;
+            font-weight: 500;
             margin: 0;
+            letter-spacing: 0.06em;
         }
 
         /* 主界面 */
@@ -84,67 +142,74 @@
         }
         .home-content {
             width: 100%;
-            max-width: 400px;
+            max-width: 420px;
             text-align: center;
+            position: relative;
+        }
+        .home-est {
+            font-size: 11px;
+            color: var(--text-muted);
+            letter-spacing: 0.2em;
+            font-weight: 400;
+            margin: 0 0 20px 0;
         }
         .home-title {
-            font-size: 42px;
-            font-weight: 700;
-            margin: 0 0 12px 0;
-            background: linear-gradient(135deg, #E8C97A 0%, #D4A574 50%, #B8895C 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            letter-spacing: 0.02em;
+            font-size: 38px;
+            font-weight: 300;
+            margin: 0 0 8px 0;
+            color: var(--text);
+            letter-spacing: 0.22em;
+        }
+        .home-subtitle-en {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin: 0 0 40px 0;
+            letter-spacing: 0.35em;
+            font-weight: 300;
         }
         .home-subtitle {
-            font-size: 14px;
+            font-size: 13px;
             color: var(--text-secondary);
-            margin-bottom: 48px;
+            margin-bottom: 56px;
+            letter-spacing: 0.04em;
         }
         .menu-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 16px;
+            gap: 8px;
             width: 100%;
         }
         .menu-btn {
             background: var(--card);
             border: 1px solid var(--card-border);
-            border-radius: 20px;
-            padding: 28px 16px;
+            border-radius: var(--radius-m);
+            padding: 24px 16px;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: background 0.15s ease, border-color 0.15s ease;
             color: var(--text);
-            backdrop-filter: blur(10px);
         }
-        .menu-btn:active {
-            transform: scale(0.96);
-            background: rgba(212, 165, 116, 0.12);
-            border-color: var(--primary);
-        }
-        .menu-btn .icon {
-            font-size: 36px;
-            line-height: 1;
-        }
+        .menu-btn:hover { background: var(--card-hover); border-color: var(--card-border-hover); }
+        .menu-btn:active { background: var(--card-hover); }
         .menu-btn .label {
-            font-size: 15px;
-            font-weight: 600;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0.04em;
         }
         .menu-btn .desc {
             font-size: 11px;
-            color: var(--text-secondary);
+            color: var(--text-muted);
             text-align: center;
-            line-height: 1.3;
+            line-height: 1.4;
         }
         .menu-btn.full-width {
             grid-column: 1 / -1;
             flex-direction: row;
             justify-content: center;
+            gap: 12px;
             padding: 20px 16px;
         }
 
@@ -156,46 +221,45 @@
         }
         .empty-state {
             text-align: center;
-            padding: 48px 24px;
-            color: var(--text-secondary);
+            padding: 64px 24px;
+            color: var(--text-muted);
         }
-        .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
-        .empty-state .text { font-size: 14px; }
+        .empty-state .text { font-size: 13px; line-height: 1.5; }
         .list-item {
             background: var(--card);
             border: 1px solid var(--card-border);
-            border-radius: 16px;
-            padding: 16px;
-            margin-bottom: 12px;
+            border-radius: var(--radius-m);
+            padding: 14px 16px;
+            margin-bottom: 8px;
             cursor: pointer;
-            transition: all 0.2s ease;
-            backdrop-filter: blur(10px);
+            transition: background 0.15s ease, border-color 0.15s ease;
         }
-        .list-item:active { transform: scale(0.98); background: rgba(212, 165, 116, 0.1); }
-        .list-item .item-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+        .list-item:hover { background: var(--card-hover); border-color: var(--card-border-hover); }
+        .list-item .item-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; color: var(--text); }
         .list-item .item-meta { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
-        .list-item .item-tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        .list-item .item-tags { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
         .tag {
-            font-size: 11px;
-            padding: 4px 10px;
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.06);
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: var(--radius-s);
+            background: var(--card);
             color: var(--text-secondary);
+            letter-spacing: 0.04em;
         }
-        .tag.primary { background: rgba(212, 165, 116, 0.15); color: var(--primary); }
-        .tag.accent { background: rgba(212, 165, 116, 0.1); color: var(--primary); }
+        .tag.primary { background: rgba(201, 168, 124, 0.12); color: var(--primary); }
+        .tag.accent { background: rgba(201, 168, 124, 0.08); color: var(--primary-light); }
 
         /* 弹窗 */
         .modal-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(0, 0, 0, 0.7);
+            background: var(--overlay-bg);
             display: none;
             justify-content: center;
             align-items: flex-end;
             z-index: 1000;
             opacity: 0;
-            transition: opacity 0.3s ease;
+            transition: opacity 0.25s ease;
         }
         .modal-overlay.show {
             display: flex;
@@ -203,7 +267,7 @@
         }
         .modal {
             background: var(--bg-panel);
-            border-radius: 24px 24px 0 0;
+            border-radius: var(--radius-l) var(--radius-l) 0 0;
             width: 100%;
             max-width: 520px;
             max-height: 90vh;
@@ -212,35 +276,36 @@
             flex-direction: column;
             transform: translateY(100%);
             transition: transform 0.3s ease;
-            border: 1px solid var(--card-border);
-            border-bottom: none;
+            border-top: 1px solid var(--card-border);
         }
         .modal-overlay.show .modal { transform: translateY(0); }
         .modal-header {
-            padding: 20px 20px 12px;
+            padding: 20px 20px 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             border-bottom: 1px solid var(--separator);
         }
-        .modal-header h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text); }
+        .modal-header h2 { margin: 0; font-size: 13px; font-weight: 500; color: var(--text); letter-spacing: 0.06em; }
         .modal-close {
             background: none;
             border: none;
-            color: var(--text-secondary);
-            font-size: 24px;
+            color: var(--text-muted);
+            font-size: 18px;
             cursor: pointer;
-            padding: 4px;
+            padding: 4px 8px;
+            transition: color 0.15s;
         }
+        .modal-close:hover { color: var(--text); }
         .modal-body {
             padding: 20px;
             overflow-y: auto;
             flex: 1;
         }
         .modal-footer {
-            padding: 16px 20px 24px;
+            padding: 12px 20px 20px;
             display: flex;
-            gap: 12px;
+            gap: 8px;
             border-top: 1px solid var(--separator);
         }
 
@@ -248,33 +313,34 @@
         .form-group { margin-bottom: 16px; }
         .form-group label {
             display: block;
-            font-size: 13px;
-            color: var(--text-secondary);
-            margin-bottom: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
             font-weight: 500;
+            letter-spacing: 0.06em;
         }
         .form-group input,
         .form-group textarea,
         .form-group select {
             width: 100%;
-            padding: 14px;
+            padding: 10px 12px;
             border: 1px solid var(--card-border);
-            border-radius: 12px;
-            font-size: 15px;
-            background: rgba(255, 255, 255, 0.05);
+            border-radius: var(--radius-s);
+            font-size: 14px;
+            background: var(--card);
             color: var(--text);
             outline: none;
-            transition: border-color 0.2s;
+            transition: border-color 0.2s, background 0.2s;
+            font-family: inherit;
         }
         .form-group input::placeholder,
-        .form-group textarea::placeholder { color: var(--text-muted); }
-        .form-group input:focus,
+        .form-group textarea::placeholder { color: var(--text-muted); }        .form-group input:focus,
         .form-group textarea:focus,
-        .form-group select:focus { border-color: var(--primary); }
-        .form-group textarea { min-height: 120px; resize: vertical; font-family: inherit; }
+        .form-group select:focus { border-color: var(--primary); background: var(--card-hover); }
+        .form-group textarea { min-height: 120px; resize: vertical; }
         .form-group .hint {
             font-size: 11px;
-            color: var(--text-secondary);
+            color: var(--text-muted);
             margin-top: 6px;
             line-height: 1.4;
         }
@@ -285,73 +351,90 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
-            padding: 18px;
-            border: 2px dashed var(--card-border);
-            border-radius: 12px;
+            gap: 8px;
+            padding: 16px;
+            border: 1px dashed var(--card-border);
+            border-radius: var(--radius-s);
             cursor: pointer;
             transition: border-color 0.2s, background 0.2s;
             text-align: center;
-            color: var(--text-secondary);
-            font-size: 14px;
-            min-height: 60px;
+            color: var(--text-muted);
+            font-size: 12px;
+            min-height: 48px;
         }
-        .file-upload-area:hover { border-color: var(--primary); background: rgba(212, 165, 116, 0.06); }
-        .file-upload-area.has-file { border-color: var(--primary); border-style: solid; background: rgba(212, 165, 116, 0.08); }
-        .file-upload-area .icon { font-size: 24px; }
+        .file-upload-area:hover { border-color: var(--primary); background: var(--card-hover); }
+        .file-upload-area.has-file { border-color: var(--primary); border-style: solid; background: rgba(201, 168, 124, 0.06); }
         .file-upload-area .file-name { color: var(--primary); font-weight: 500; word-break: break-all; }
         .file-upload-area .file-remove {
             color: var(--danger);
             cursor: pointer;
-            font-size: 18px;
+            font-size: 16px;
             padding: 2px 6px;
-            border-radius: 4px;
+            border-radius: 2px;
         }
-        .file-upload-area .file-remove:hover { background: rgba(196, 85, 77, 0.15); }
+        .file-upload-area .file-remove:hover { background: rgba(208, 72, 72, 0.12); }
         .form-group .upload-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
         /* 单选组 */
         .radio-group {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 6px;
         }
         .radio-option {
             display: flex;
             align-items: flex-start;
             gap: 10px;
-            padding: 14px;
+            padding: 12px 14px;
             border: 1px solid var(--card-border);
-            border-radius: 12px;
+            border-radius: var(--radius-m);
             cursor: pointer;
-            transition: border-color 0.2s, background 0.2s;
-            background: rgba(255,255,255,0.02);
-        }
-        .radio-option:hover { border-color: rgba(212, 165, 116, 0.5); }
-        .radio-option.selected { border-color: var(--primary); background: rgba(212, 165, 116, 0.08); }
-        .radio-option input[type="radio"] {
-            appearance: none;
-            width: 18px; height: 18px;
-            border: 2px solid var(--card-border);
-            border-radius: 50%;
-            flex-shrink: 0;
-            margin-top: 2px;
-            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+            background: var(--card);
             position: relative;
-            transition: border-color 0.2s;
         }
-        .radio-option input[type="radio"]:checked {
+        .radio-option:hover { background: var(--card-hover); border-color: var(--card-border-hover); }
+        .radio-option.selected {
             border-color: var(--primary);
+            background: rgba(201, 168, 124, 0.06);
         }
-        .radio-option input[type="radio"]:checked::after {
+        .radio-option.selected::before {
             content: "";
             position: absolute;
-            top: 3px; left: 3px;
-            width: 8px; height: 8px;
-            border-radius: 50%;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: var(--primary);
+            border-radius: var(--radius-m) 0 0 var(--radius-m);
+        }
+        .radio-option input[type="radio"] {
+            display: none;
+        }
+        .radio-option .radio-indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: var(--radius-s);
+            border: 1.5px solid var(--card-border-hover);
+            flex-shrink: 0;
+            margin-top: 1px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .radio-option.selected .radio-indicator {
+            border-color: var(--primary);
             background: var(--primary);
         }
-        .radio-option .radio-label { font-size: 14px; color: var(--text); font-weight: 500; }
+        .radio-option.selected .radio-indicator::after {
+            content: "";
+            width: 6px;
+            height: 6px;
+            background: var(--radio-inner);
+            border-radius: 2px;
+        }
+        .radio-option .radio-label { font-size: 13px; color: var(--text); font-weight: 500; }
         .radio-option .radio-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
         /* 条件区域 */
@@ -363,7 +446,7 @@
         }
         .conditional-field.show {
             max-height: 300px;
-            margin-top: 12px;
+            margin-top: 8px;
         }
 
         /* 范围滑块 */
@@ -375,85 +458,86 @@
         .range-slider-wrapper input[type="range"] {
             -webkit-appearance: none;
             width: 100%;
-            height: 6px;
-            border-radius: 3px;
-            background: rgba(255,255,255,0.08);
+            height: 4px;
+            border-radius: 2px;
+            background: var(--card-border);
             outline: none;
             padding: 0;
             margin: 0;
         }
         .range-slider-wrapper input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
-            width: 22px;
-            height: 22px;
+            width: 16px;
+            height: 16px;
             border-radius: 50%;
-            background: var(--primary);
+            background: var(--text);
             cursor: pointer;
-            border: 2px solid var(--bg-panel);
-            box-shadow: 0 0 8px rgba(0,0,0,0.3);
+            border: none;
         }
         .range-labels {
             display: flex;
             justify-content: space-between;
-            font-size: 11px;
-            color: var(--text-secondary);
+            font-size: 10px;
+            color: var(--text-muted);
         }
         .range-current {
             text-align: center;
-            font-size: 13px;
-            color: var(--primary);
-            font-weight: 600;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 400;
         }
 
         /* 按钮 */
         .btn {
             flex: 1;
-            padding: 14px 20px;
+            padding: 10px 16px;
             border: none;
-            border-radius: 12px;
-            font-size: 15px;
-            font-weight: 600;
+            border-radius: var(--radius-s);
+            font-size: 12px;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.15s ease;
             text-align: center;
+            letter-spacing: 0.04em;
         }
-        .btn:active { transform: scale(0.98); }
+        .btn:active { opacity: 0.7; }
         .btn.primary {
-            background: linear-gradient(135deg, #D4A574 0%, #C1905E 100%);
-            color: #1A2332;
-            font-weight: 600;
+            background: var(--primary);
+            color: var(--btn-primary-text);
         }
+        .btn.primary:hover { opacity: 0.85; }
         .btn.secondary {
-            background: rgba(255, 255, 255, 0.06);
-            color: var(--text);
+            background: transparent;
+            color: var(--text-secondary);
             border: 1px solid var(--card-border);
         }
-        .btn.danger { background: rgba(196, 85, 77, 0.15); color: #e0706a; }
+        .btn.secondary:hover { border-color: var(--card-border-hover); color: var(--text); }
+        .btn.danger { background: transparent; color: var(--danger); border: 1px solid rgba(208, 72, 72, 0.2); }
         .btn.full-width { width: 100%; flex: none; }
-        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
         /* Toast */
         .toast {
             position: fixed;
             top: 50%;
             left: 50%;
-            transform: translate(-50%, -50%) scale(0.9);
-            background: rgba(0, 0, 0, 0.85);
-            color: #fff;
-            padding: 16px 28px;
-            border-radius: 16px;
-            font-size: 14px;
+            transform: translate(-50%, -50%) scale(0.95);
+            background: var(--bg-panel);
+            color: var(--text);
+            padding: 12px 24px;
+            border-radius: var(--radius-m);
+            font-size: 13px;
             z-index: 2000;
             opacity: 0;
             pointer-events: none;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             text-align: center;
-            backdrop-filter: blur(10px);
             border: 1px solid var(--card-border);
+            box-shadow: var(--shadow-modal);
         }
         .toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        .toast.success { background: rgba(78, 205, 196, 0.2); border-color: var(--success); }
-        .toast.error { background: rgba(233, 69, 96, 0.2); border-color: var(--danger); }
+        .toast.success { border-color: var(--success); }
+        .toast.error { border-color: var(--danger); }
 
         /* 游戏界面 */
         .game-screen { background: var(--bg); color: var(--text); }
@@ -461,14 +545,14 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 24px;
-            background: rgba(255, 255, 255, 0.04);
+            padding: 0 20px;
+            background: var(--bg-panel);
             border-bottom: 1px solid var(--separator);
             flex: none;
-            height: 56px;
+            height: 48px;
         }
-        .game-header .world-name { font-size: 16px; font-weight: 600; color: var(--text); }
-        .game-header .day-info { font-size: 13px; color: var(--text-secondary); }
+        .game-header .world-name { font-size: 13px; font-weight: 500; color: var(--text); letter-spacing: 0.04em; }
+        .game-header .day-info { font-size: 11px; color: var(--text-muted); }
         .game-body {
             flex: 1;
             display: flex;
@@ -478,170 +562,180 @@
         .game-log {
             flex: 1;
             overflow-y: auto;
-            padding: 24px 32px;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-y: contain;
+            padding: 20px 24px;
             background: transparent;
         }
         .log-entry {
-            background: rgba(255, 255, 255, 0.04);
-            border-radius: 12px;
-            padding: 18px 20px;
-            margin-bottom: 14px;
-            border: 1px solid var(--separator);
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-m);
+            padding: 16px 18px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow-card);
         }
         .log-entry .meta {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-secondary);
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             display: flex;
             justify-content: space-between;
+            letter-spacing: 0.04em;
         }
         .log-entry .player-text {
             color: var(--primary);
-            font-weight: 600;
-            margin-bottom: 10px;
-            font-size: 15px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            font-size: 14px;
         }
         .log-entry .narrative {
-            line-height: 1.8;
+            line-height: 1.75;
             font-size: 14px;
             color: var(--text);
-            opacity: 0.85;
         }
         .log-entry .narrative .item-highlight {
             color: var(--primary);
-            font-weight: 600;
-            background: rgba(212, 165, 116, 0.12);
-            padding: 1px 6px;
-            border-radius: 4px;
+            font-weight: 500;
+            background: rgba(201, 168, 124, 0.10);
+            padding: 1px 4px;
+            border-radius: var(--radius-s);
         }
         /* 非故事内容警告样式 */
         .log-entry.warning {
-            border-color: var(--danger);
-            background: rgba(196, 85, 77, 0.06);
             border-left: 3px solid var(--danger);
+            background: rgba(208, 72, 72, 0.06);
+            box-shadow: none;
         }
         .log-entry.warning .meta {
-            color: #e0706a;
+            color: rgba(208, 72, 72, 0.5);
         }
         .log-entry.warning .narrative {
-            color: #e89e9a;
+            color: rgba(208, 72, 72, 0.4);
             font-style: italic;
         }
         .game-input-area {
-            padding: 16px 32px 28px;
-            background: rgba(255, 255, 255, 0.03);
+            padding: 10px 16px 20px;
+            background: var(--bg-panel);
             border-top: 1px solid var(--separator);
             flex: none;
         }
         .choices-row {
             display: flex;
-            gap: 8px;
+            gap: 6px;
             overflow-x: auto;
-            padding-bottom: 12px;
-            margin-bottom: 12px;
+            padding-bottom: 8px;
+            margin-bottom: 8px;
             scrollbar-width: none;
         }
         .choices-row::-webkit-scrollbar { display: none; }
         .choice-chip {
             white-space: nowrap;
-            padding: 9px 18px;
-            border-radius: 20px;
+            padding: 7px 14px;
+            border-radius: var(--radius-m);
             border: 1px solid var(--card-border);
             background: var(--card);
-            color: var(--text);
+            color: var(--text-secondary);
             font-size: 13px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.15s;
         }
-        .choice-chip:active { background: rgba(212, 165, 116, 0.15); border-color: var(--primary); }
+        .choice-chip:hover { color: var(--text); border-color: var(--card-border-hover); background: var(--card-hover); }
+        .choice-chip:active { color: var(--primary); border-color: var(--primary); }
         .input-row {
             display: flex;
-            gap: 10px;
+            gap: 6px;
         }
         .input-row input {
             flex: 1;
-            padding: 12px 16px;
+            padding: 8px 12px;
             border: 1px solid var(--card-border);
-            border-radius: 10px;
-            font-size: 15px;
+            border-radius: var(--radius-s);
+            font-size: 14px;
             outline: none;
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text);
-            transition: border-color 0.2s;
+            background: var(--card);
+            color: var(--text); 0.2s;
+            font-family: inherit;
         }
         .input-row input:focus { border-color: var(--primary); }
         .input-row input::placeholder { color: var(--text-muted); }
         .input-row .send-btn {
             background: var(--primary);
-            color: #1A2332;
+            color: var(--btn-primary-text);
             border: none;
-            border-radius: 10px;
-            padding: 0 24px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .input-row .send-btn:active { opacity: 0.85; }
-        .game-header .header-actions { display: flex; gap: 8px; }
-        .game-header .header-actions button {
-            padding: 6px 14px;
-            border: 1px solid var(--card-border);
-            background: var(--card);
-            color: var(--text);
-            border-radius: 8px;
+            border-radius: var(--radius-m);
+            padding: 0 20px;
             font-size: 13px;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: opacity 0.15s;
+            letter-spacing: 0.04em;
         }
-        .game-header .header-actions button:active { background: rgba(212, 165, 116, 0.12); }
+        .input-row .send-btn:hover { opacity: 0.85; }
+        .game-header .header-actions { display: flex; gap: 6px; }
+        .game-header .header-actions button {
+            padding: 4px 10px;
+            border: 1px solid var(--card-border);
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: var(--radius-s);
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.15s;
+            letter-spacing: 0.04em;
+        }
+        .game-header .header-actions button:hover { color: var(--text); border-color: var(--card-border-hover); background: var(--card-hover); }
 
         /* 角色状态面板 */
         .status-panel-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(0, 0, 0, 0.6);
+            background: var(--overlay-light);
             display: none;
             justify-content: flex-end;
             z-index: 500;
             opacity: 0;
-            transition: opacity 0.3s ease;
+            transition: opacity 0.25s ease;
         }
         .status-panel-overlay.show { display: flex; opacity: 1; }
         .status-panel {
             width: 100%;
-            max-width: 420px;
+            max-width: 380px;
             height: 100%;
             background: var(--bg-panel);
             display: flex;
             flex-direction: column;
             transform: translateX(100%);
-            transition: transform 0.3s ease;
-            box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+            transition: transform 0.25s ease;
+            border-left: 1px solid var(--card-border);
         }
         .status-panel-overlay.show .status-panel { transform: translateX(0); }
         .status-panel-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 20px;
-            background: rgba(255, 255, 255, 0.04);
+            padding: 0 16px;
+            background: var(--bg-panel);
             border-bottom: 1px solid var(--separator);
             flex: none;
-            height: 52px;
+            height: 44px;
         }
-        .status-panel-header h2 { margin: 0; font-size: 17px; color: var(--text); font-weight: 600; }
+        .status-panel-header h2 { margin: 0; font-size: 11px; color: var(--text-muted); font-weight: 500; letter-spacing: 0.1em; }
         .status-panel-header .close-btn {
             background: none;
             border: none;
-            font-size: 22px;
-            color: var(--text-secondary);
+            font-size: 18px;
+            color: var(--text-muted);
             cursor: pointer;
             padding: 4px;
+            transition: color 0.15s;
         }
+        .status-panel-header .close-btn:hover { color: var(--text); }
         .status-tabs {
             display: flex;
             overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-x: contain;
             background: transparent;
             border-bottom: 1px solid var(--separator);
             scrollbar-width: none;
@@ -650,90 +744,91 @@
         .status-tabs::-webkit-scrollbar { display: none; }
         .status-tab {
             flex: 1;
-            min-width: 64px;
-            padding: 14px 8px;
+            min-width: 56px;
+            padding: 10px 6px;
             text-align: center;
-            font-size: 13px;
-            color: var(--text-secondary);
+            font-size: 11px;
+            color: var(--text-muted);
             border: none;
             background: none;
             cursor: pointer;
-            border-bottom: 2px solid transparent;
+            border-bottom: 1px solid transparent;
             white-space: nowrap;
-            transition: all 0.2s;
+            transition: color 0.15s, border-color 0.15s;
+            letter-spacing: 0.04em;
         }
         .status-tab.active {
-            color: var(--primary);
-            border-bottom-color: var(--primary);
-            font-weight: 600;
+            color: var(--text);
+            border-bottom-color: var(--text);
         }
         .status-content {
             flex: 1;
             overflow-y: auto;
-            padding: 20px 24px;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-y: contain;
+            padding: 16px;
             background: transparent;
         }
         .status-section { margin-bottom: 24px; }
         .status-section-title {
-            font-size: 12px;
-            font-weight: 600;
+            font-size: 10px;
+            font-weight: 500;
             color: var(--text-muted);
-            margin-bottom: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+            letter-spacing: 0.1em;
         }
         .status-card {
-            background: rgba(255, 255, 255, 0.04);
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 12px;
-            border: 1px solid var(--separator);
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-m);
+            padding: 12px 14px;
+            margin-bottom: 8px;
         }
         .status-card .row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(240, 235, 224, 0.06);
-            font-size: 14px;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--separator);
+            font-size: 13px;
         }
         .status-card .row:last-child { border-bottom: none; }
-        .status-card .row .label { color: var(--text-secondary); }
-        .status-card .row .value { color: var(--text); font-weight: 500; }
-        .status-card .stat-bar { height: 6px; background: rgba(255, 255, 255, 0.06); border-radius: 3px; margin-top: 6px; overflow: hidden; }
-        .status-card .stat-bar > div { height: 100%; background: var(--primary); border-radius: 3px; }
+        .status-card .row .label { color: var(--text-secondary); font-size: 12px; }
+        .status-card .row .value { color: var(--text); font-weight: 400; font-size: 13px; }
+        .status-card .stat-bar { height: 4px; background: var(--card-border); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+        .status-card .stat-bar > div { height: 100%; background: var(--primary); border-radius: 2px; }
         .status-card .text-block {
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.7;
             color: var(--text);
-            opacity: 0.8;
         }
-        .status-tag-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .status-tag-list { display: flex; flex-wrap: wrap; gap: 4px; }
         .status-tag {
-            font-size: 12px;
-            padding: 6px 12px;
-            border-radius: 14px;
-            background: rgba(255, 255, 255, 0.06);
-            color: var(--text);
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: var(--radius-s);
+            background: var(--card);
             border: 1px solid var(--card-border);
+            color: var(--text-secondary);
         }
         .goal-item {
             font-size: 13px;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            background: rgba(255, 255, 255, 0.04);
+            padding: 10px 14px;
+            border-radius: var(--radius-m);
+            margin-bottom: 6px;
+            background: var(--card);
+            border: 1px solid var(--card-border);
             border-left: 3px solid var(--primary);
         }
-        .goal-item.completed { border-left-color: #4ecdc4; background: rgba(78, 205, 196, 0.06); }
-        .goal-item.failed { border-left-color: #c4554d; background: rgba(196, 85, 77, 0.06); }
-        .empty-hint { text-align: center; color: var(--text-muted); padding: 24px; font-size: 13px; }
+        .goal-item.completed { border-left-color: var(--success); }
+        .goal-item.failed { border-left-color: var(--danger); }
+        .empty-hint { text-align: center; color: var(--text-muted); padding: 24px; font-size: 12px; }
 
         /* 游戏结束弹窗 */
         .game-over-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(0, 0, 0, 0.85);
+            background: var(--overlay-gameover);
             display: none;
             justify-content: center;
             align-items: center;
@@ -745,17 +840,17 @@
         .game-over-overlay.show { display: flex; opacity: 1; }
         .game-over-box {
             background: var(--bg-panel);
-            border-radius: 24px;
+            border-radius: var(--radius-l);
             padding: 32px 24px;
-            max-width: 360px;
+            max-width: 340px;
             width: 100%;
             text-align: center;
             border: 1px solid var(--card-border);
+            box-shadow: var(--shadow-gameover);
         }
-        .game-over-box .icon { font-size: 64px; margin-bottom: 16px; }
-        .game-over-box h2 { margin: 0 0 12px 0; font-size: 24px; }
+        .game-over-box h2 { margin: 0 0 8px 0; font-size: 20px; font-weight: 300; letter-spacing: 0.08em; }
         .game-over-box .reason {
-            font-size: 14px;
+            font-size: 13px;
             color: var(--text-secondary);
             line-height: 1.6;
             margin-bottom: 24px;
@@ -763,8 +858,42 @@
 
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(240, 235, 224, 0.15); border-radius: 2px; }
-        .game-log::-webkit-scrollbar-thumb { background: rgba(240, 235, 224, 0.15); }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+        .game-log::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
+
+        /* 主题切换按钮 */
+        .theme-toggle-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-s);
+            background: var(--card);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .theme-toggle-btn:hover { border-color: var(--card-border-hover); background: var(--card-hover); color: var(--text); }
+
+        /* 主题图标显示控制：夜间模式显示太阳(切换到白天)，白天模式显示月亮(切换到夜间) */
+        .theme-icon-moon { display: none; }
+        .theme-icon-sun { display: block; }
+        [data-theme="light"] .theme-icon-moon { display: block; }
+        [data-theme="light"] .theme-icon-sun { display: none; }
+
+        /* ================= 移动端适配 ================= */
+        @media (max-width: 480px) {
+            .home-title { font-size: 28px; letter-spacing: 0.18em; }
+            .home-subtitle-en { font-size: 9px; letter-spacing: 0.3em; margin-bottom: 28px; }
+            .home-subtitle { font-size: 13px; margin-bottom: 36px; }
+            .game-log { padding: 10px 14px; }
+            .game-input-area { padding: 8px 12px 16px; }
+            .log-entry { padding: 12px 14px; }
+            .status-content { padding: 12px; }
+            .status-panel { max-width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -772,27 +901,31 @@
 <!-- ================= 主界面 ================= -->
 <div class="screen home-screen active" id="homeScreen">
     <div class="home-content">
-        <h1 class="home-title">AI 文字游戏</h1>
+        <div style="position:absolute;top:16px;right:16px;">
+            <button class="theme-toggle-btn" onclick="toggleTheme()" id="homeThemeToggle" title="切换白天/夜间模式">
+                <svg class="theme-icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
+        </div>
+        <p class="home-est">Est. 2026</p>
+        <h1 class="home-title">以太叙事</h1>
+        <p class="home-subtitle-en">AETHERNARRATOR</p>
         <p class="home-subtitle">自定义世界 · AI 生成 · 自由冒险</p>
         <div class="menu-grid">
             <button class="menu-btn" onclick="showApiModal()">
-                <span class="icon">🔑</span>
-                <span class="label">输入 API</span>
-                <span class="desc">填写你的 AI 接口密钥</span>
+                <span class="label">API 配置</span>
+                <span class="desc">填写 AI 接口密钥</span>
             </button>
             <button class="menu-btn" onclick="showCreateWorldModal()">
-                <span class="icon">🌍</span>
                 <span class="label">创建世界</span>
                 <span class="desc">输入 IP 或原创世界观</span>
             </button>
             <button class="menu-btn full-width" onclick="showWorldList()">
-                <span class="icon">🎮</span>
-                <span class="label">进入世界</span>
+                <span class="label">进入世界 →</span>
                 <span class="desc">选择已创建的世界开始游玩</span>
             </button>
             <button class="menu-btn full-width" onclick="showSaveList()">
-                <span class="icon">💾</span>
-                <span class="label">读取存档</span>
+                <span class="label">读取存档 →</span>
                 <span class="desc">管理不同世界的游玩进度</span>
             </button>
         </div>
@@ -826,6 +959,10 @@
         </div>
         <div class="header-actions">
             <button onclick="showStatusPanel()">角色</button>
+            <button onclick="toggleTheme()" id="gameThemeToggle" title="切换白天/夜间模式" style="display:flex;align-items:center;gap:3px;">
+                <svg class="theme-icon-sun" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
             <button onclick="goHome()">返回主界面</button>
         </div>
     </div>
@@ -857,7 +994,7 @@
 <div class="modal-overlay" id="apiModal">
     <div class="modal">
         <div class="modal-header">
-            <h2>🔑 输入 API 配置</h2>
+            <h2>输入 API 配置</h2>
             <button class="modal-close" onclick="closeModal('apiModal')">×</button>
         </div>
         <div class="modal-body">
@@ -893,7 +1030,7 @@
 <div class="modal-overlay" id="createWorldModal">
     <div class="modal">
         <div class="modal-header">
-            <h2>🌍 创建新世界</h2>
+            <h2>创建新世界</h2>
             <button class="modal-close" onclick="closeModal('createWorldModal')">×</button>
         </div>
         <div class="modal-body">
@@ -922,7 +1059,6 @@
             <div class="form-group">
                 <label>上传世界观/小说源文件（可选）</label>
                 <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('sourceFile').click()">
-                    <span class="icon">📄</span>
                     <span id="fileUploadText">点击上传 TXT / DOCX 文件</span>
                 </div>
                 <input type="file" id="sourceFile" accept=".txt,.docx" onchange="handleFileSelect(event)">
@@ -935,6 +1071,7 @@
                 <div class="radio-group" id="styleRefGroup">
                     <label class="radio-option selected" onclick="selectStyleRef('original', this)">
                         <input type="radio" name="styleRef" value="original" checked>
+                        <div class="radio-indicator"></div>
                         <div>
                             <div class="radio-label">参考原版文风</div>
                             <div class="radio-desc">AI 将模仿源文件或描述中的写作风格</div>
@@ -942,6 +1079,7 @@
                     </label>
                     <label class="radio-option" onclick="selectStyleRef('custom', this)">
                         <input type="radio" name="styleRef" value="custom">
+                        <div class="radio-indicator"></div>
                         <div>
                             <div class="radio-label">自定义文风</div>
                             <div class="radio-desc">手动输入你想要的叙事风格</div>
@@ -949,6 +1087,7 @@
                     </label>
                     <label class="radio-option" onclick="selectStyleRef('none', this)">
                         <input type="radio" name="styleRef" value="none">
+                        <div class="radio-indicator"></div>
                         <div>
                             <div class="radio-label">不参考文风</div>
                             <div class="radio-desc">AI 将使用通用叙事风格</div>
@@ -979,6 +1118,7 @@
                 <div class="radio-group" id="customPrefixGroup">
                     <label class="radio-option selected" onclick="toggleCustomPrefix(false, this)">
                         <input type="radio" name="customPrefixEnable" value="off" checked>
+                        <div class="radio-indicator"></div>
                         <div>
                             <div class="radio-label">不添加</div>
                             <div class="radio-desc">不附加额外指令</div>
@@ -986,6 +1126,7 @@
                     </label>
                     <label class="radio-option" onclick="toggleCustomPrefix(true, this)">
                         <input type="radio" name="customPrefixEnable" value="on">
+                        <div class="radio-indicator"></div>
                         <div>
                             <div class="radio-label">添加特殊要求</div>
                             <div class="radio-desc">输入的内容将作为 AI Prompt 前缀注入每次对话</div>
@@ -1023,7 +1164,6 @@
 <!-- ================= 游戏结束弹窗 ================= -->
 <div class="game-over-overlay" id="gameOverOverlay">
     <div class="game-over-box">
-        <div class="icon">💀</div>
         <h2>游戏结束</h2>
         <div class="reason" id="gameOverReason">你的旅程到此为止。</div>
         <button class="btn primary full-width" onclick="backToHomeAfterGameOver()">返回主界面</button>
@@ -1047,6 +1187,7 @@ let worlds = [];
 let saves = [];
 let currentStatusTab = "profile";
 let sourceFileContent = "";  // 用户上传的源文件内容
+let currentTheme = localStorage.getItem("aigame_theme") || "dark";
 
 const STORAGE_KEYS = {
     config: "aigame_config",
@@ -1061,8 +1202,24 @@ const DEFAULT_PERIOD_LABELS = {
     morning: "早晨", forenoon: "上午", afternoon: "下午", evening: "傍晚", night: "夜晚"
 };
 
+/* ================= 主题切换 ================= */
+function toggleTheme() {
+    currentTheme = currentTheme === "dark" ? "light" : "dark";
+    applyTheme();
+    localStorage.setItem("aigame_theme", currentTheme);
+}
+
+function applyTheme() {
+    if (currentTheme === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+    } else {
+        document.documentElement.removeAttribute("data-theme");
+    }
+}
+
 /* ================= 初始化 ================= */
 async function init() {
+    applyTheme();
     loadConfig();
     loadWorlds();
     loadSaves();
@@ -1272,7 +1429,7 @@ function clearSourceFile(e) {
     const text = document.getElementById("fileUploadText");
     const input = document.getElementById("sourceFile");
     area.classList.remove("has-file");
-    text.innerHTML = `<span class="icon">📄</span> 点击上传 TXT / DOCX 文件`;
+    text.innerHTML = `点击上传 TXT / DOCX 文件`;
     area.onclick = function() { document.getElementById("sourceFile").click(); };
     input.value = "";
 }
@@ -1692,7 +1849,6 @@ function renderWorldList() {
     if (!worlds.length) {
         container.innerHTML = `
             <div class="empty-state">
-                <div class="icon">🌍</div>
                 <div class="text">还没有世界<br>先去「创建世界」生成一个吧</div>
             </div>`;
         return;
@@ -1714,7 +1870,6 @@ function renderSaveList() {
     if (!saves.length) {
         container.innerHTML = `
             <div class="empty-state">
-                <div class="icon">💾</div>
                 <div class="text">还没有存档<br>进入世界开始游玩后自动生成</div>
             </div>`;
         return;
@@ -2102,7 +2257,7 @@ function renderStatusPanel(tab) {
                         if (g.status === "completed") cls = "completed";
                         else if (g.status === "failed") cls = "failed";
                         const deadline = g.deadline ? `截止：第${g.deadline.day}天 ${getPeriodLabel(g.deadline.period)}` : "无期限";
-                        return `<div class="goal-item ${cls}"><strong>${g.name}</strong><br><span style="font-size:11px;color:#888">${g.type} · ${deadline}</span></div>`;
+                        return `<div class="goal-item ${cls}"><strong>${g.name}</strong><br><span style="font-size:11px;color:var(--text-muted)">${g.type} · ${deadline}</span></div>`;
                     }).join("") : '<div class="empty-hint">暂无目标</div>'}
                 </div>
             `;
