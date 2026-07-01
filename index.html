@@ -3981,13 +3981,15 @@ async function processTurn(input) {
         renderLog();
 
         if (!isWarning) {
-            // 正常故事内容：先逐字打字，打字完成后再显示选项（避免玩家跳过阅读）
-            await startTypewriter(conversationHistory.length - 1);
-            renderChoices(resp.choices);
-            // ★ 将本轮选项存入 conversationHistory，保证退出后读档还能看到
+            // ★ 先将本轮选项存入记录并持久化，防止打字过程中退出导致选项丢失
             if (conversationHistory.length > 0) {
                 conversationHistory[conversationHistory.length - 1].choices = resp.choices || [];
             }
+            saveState();
+
+            // 打字完成后显示选项（延迟渲染，不延迟存储）
+            await startTypewriter(conversationHistory.length - 1);
+            renderChoices(resp.choices);
             if (gameState.is_alive === false) {
                 setTimeout(showGameOver, 800);
             }
