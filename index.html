@@ -322,6 +322,10 @@
             padding: 1px 6px; border-radius: 3px;
             margin-left: 6px; vertical-align: middle;
         }
+        @keyframes fadeSlideIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
         .dead-badge { font-size: 12px; color: #E24B4A; font-weight: 500; }
         .world-list-item { position: relative; }
         .delete-world-btn {
@@ -1583,11 +1587,23 @@ function loadWorlds() {
         createMagicAcademyWorld(),
         createHongLouMengWorld()
     ];
-    // 迁移：如果已有数据但缺少红楼梦 demo，自动注入
-    if (data && !worlds.some(w => w.id === "demo_红楼梦")) {
-        worlds.push(createHongLouMengWorld());
-        saveWorlds();
+    // 迁移：旧世界的清理与新的 demo 注入
+    let changed = false;
+    // 删除旧的蒸汽与魔法 demo
+    if (worlds.some(w => w.id === "demo_蒸汽与魔法")) {
+        worlds = worlds.filter(w => w.id !== "demo_蒸汽与魔法");
+        changed = true;
     }
+    // 注入缺失的 demo 世界
+    if (!worlds.some(w => w.id === "demo_红楼梦")) {
+        worlds.push(createHongLouMengWorld());
+        changed = true;
+    }
+    if (!worlds.some(w => w.id === "demo_magic_academy")) {
+        worlds.push(createMagicAcademyWorld());
+        changed = true;
+    }
+    if (changed) saveWorlds();
 }
 
 function createDemoWorld(name, type, desc, tags) {
@@ -2612,12 +2628,21 @@ function renderWorldList() {
             </div>`;
         return;
     }
+    // 按创建时间降序排列（最新的在最上面）
+    const sorted = [...worlds].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     const now = Date.now();
-    const newThreshold = 24 * 60 * 60 * 1000; // 24 小时内算新世界
-    container.innerHTML = worlds.map((w, i) => {
-        const isNew = (now - new Date(w.createdAt).getTime()) < newThreshold;
+    const newThreshold = 24 * 60 * 60 * 1000;
+
+    // 只给最新创建且 24 小时内的世界加「新」徽章
+    let newestTime = 0;
+    if (sorted.length > 0) newestTime = new Date(sorted[0].createdAt).getTime();
+    const newestId = (now - newestTime) < newThreshold ? sorted[0].id : null;
+
+    container.innerHTML = sorted.map((w, i) => {
+        const isNew = w.id === newestId;
+        const delay = i * 0.07; // 依次延迟 0/0.07/0.14/... 秒
         return `
-        <div class="list-item world-list-item${isNew ? " new-world" : ""}" onclick="showWorldDetail('${w.id}')">
+        <div class="list-item world-list-item${isNew ? " new-world" : ""}" onclick="showWorldDetail('${w.id}')" style="animation: fadeSlideIn 0.4s ease-out ${delay}s both;">
             <div class="item-title">${w.name}${isNew ? '<span class="new-badge">新</span>' : ""}</div>
             <div class="item-meta">${w.desc}</div>
             <div class="item-tags">
