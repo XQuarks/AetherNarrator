@@ -1210,6 +1210,7 @@
                 <svg class="theme-icon-moon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             </button>
             <button onclick="goHome()">返回主界面</button>
+            <button onclick="exportStory()" title="导出剧情文本">导出</button>
         </div>
     </div>
     <div class="death-banner hidden" id="deathBanner">
@@ -1980,6 +1981,38 @@ function showScreen(id) {
 
 function goHome() {
     showScreen("homeScreen");
+}
+
+function exportStory() {
+    if (!conversationHistory || !conversationHistory.length) {
+        showToast("还没有剧情可以导出", "warn");
+        return;
+    }
+    const worldName = currentWorld ? currentWorld.name : "未知世界";
+    let text = worldName + " · 剧情记录\n";
+    text += "导出时间：" + new Date().toLocaleString() + "\n";
+    text += "=".repeat(50) + "\n\n";
+
+    conversationHistory.forEach((entry, i) => {
+        if (entry.isWarning) return;
+        if (entry.player) {
+            text += "【玩家 · 第 " + entry.day + " 天 · " + (entry.period || "") + "】\n";
+            text += "> " + entry.player + "\n\n";
+        }
+        text += entry.narrative + "\n\n";
+        text += "-".repeat(40) + "\n\n";
+    });
+
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const safeName = worldName.replace(/[\\/:*?"<>|]/g, "_");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    a.download = safeName + "_" + dateStr + ".txt";
+    a.href = url;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("剧情已导出为 TXT 文件", "success");
 }
 
 function showModal(id) {
