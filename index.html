@@ -73,6 +73,7 @@
             --btn-primary-text: #FBF6E9;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        .hidden { display: none !important; }
         html, body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
             margin: 0;
@@ -591,6 +592,11 @@
         }
         .game-header .world-name { font-size: 13px; font-weight: 500; color: var(--text); letter-spacing: 0.04em; }
         .game-header .day-info { font-size: 11px; color: var(--text-muted); }
+        .cache-indicator { font-size: 10px; color: var(--text-tertiary); margin-left: 8px; padding: 2px 6px; border-radius: 4px;
+            background: var(--card-bg); border: 1px solid var(--card-border); cursor: default; }
+        .cache-indicator.good { color: #1D9E75; border-color: #5DCAA5; }
+        .cache-indicator.warn { color: #BA7517; border-color: #EF9F27; }
+        .cache-indicator.bad { color: #E24B4A; border-color: #F09595; }
         .game-body {
             flex: 1;
             display: flex;
@@ -1010,7 +1016,7 @@
     <div class="game-header">
         <div>
             <div class="world-name" id="gameWorldName">未知世界</div>
-            <div class="day-info" id="gameDayInfo">第 1 天 · 早晨</div>
+            <div class="day-info" id="gameDayInfo">第 1 天 · 早晨<span class="cache-indicator hidden" id="cacheIndicator" title="缓存命中/未命中 token 数"></span></div>
         </div>
         <div class="header-actions">
             <button onclick="showStatusPanel()">角色</button>
@@ -1253,6 +1259,8 @@ let loreEmbeddings = null;
 let conversationHistory = [];   // 显示用历史（含 narrative、choices 等，用于 UI 渲染）
 let chatHistory = [];           // 多轮对话原始消息序列 [{role, content}, ...]，不含 system（system 固定单独维护）
 let systemPromptTemplate = "";
+let cachedSystemPrompt = null;  // ★ P0: 预计算的 system prompt 缓存
+let cachedSysPromptWorldId = null;  // 缓存对应的世界 ID，变更时重建
 let currentChoices = [];
 let embeddingModel = null;
 let currentWorld = null;
@@ -1263,7 +1271,10 @@ let sourceFileContent = "";  // 用户上传的源文件内容
 let currentTheme = localStorage.getItem("aigame_theme") || "dark";
 
 // 多轮对话配置
-const MAX_CHAT_MESSAGES = 24;  // chatHistory 最大消息数（含 user+assistant），约 12 轮。超过则从最早开始丢弃。
+const MAX_CHAT_MESSAGES = 40;  // chatHistory 最大消息数（含 user+assistant），约 20 轮。更多历史 = 更长稳定前缀 = 更高命中率。
+
+// ★ P2: 缓存统计
+let lastCacheStats = { hitTokens: 0, missTokens: 0, totalTokens: 0, hitRate: "0%" };
 
 const STORAGE_KEYS = {
     config: "aigame_config",
@@ -2100,21 +2111,20 @@ function showWorldDetail(worldId) {
 function startGame() {
     closeModal("worldDetailModal");
     if (!currentWorld) return;
-    // 停止旧世界的打字状态（不触发回调，避免污染新场景）
     stopTypewriter();
 
     // 加载该世界的初始状态
     if (currentWorld.initial_state) {
         gameState = deepClone(currentWorld.initial_state);
     } else {
-        // 兼容旧世界，使用默认初始状态
         gameState = deepClone(defaultInitialState());
         gameState.name = currentWorld.hero ? "主角" : "玩家";
     }
 
-    // 重置当前世界对话历史
+    // ★ P0/P1: 重置缓存 + 聊天历史
+    invalidateSystemPromptCache();
     conversationHistory = [];
-    chatHistory = [];
+    chatHistory = [];  // ★ 开场白已注入 system prompt，chatHistory 从空开始
     saveState();
 
     showScreen("gameScreen");
@@ -2123,7 +2133,7 @@ function startGame() {
     renderLog();
     renderChoices([]);
 
-    // 开场白
+    // 开场白（UI 展示，不推入 chatHistory）
     const openingText = currentWorld.opening_narrative
         ? currentWorld.opening_narrative
         : `你进入了「${currentWorld.name}」。\n\n${currentWorld.desc}\n\n旅程即将开始，请做出你的第一个行动。`;
@@ -2135,12 +2145,11 @@ function startGame() {
         day: gameState.current_date.day,
         key_facts: []
     });
-    // 开场白作为首条 assistant 消息进入多轮对话历史，让 AI 知道故事起点
-    // 包装成与后续轮次一致的精简 JSON 格式，避免历史中混合纯文本/JSON 影响输出遵循
-    chatHistory.push({ role: "assistant", content: JSON.stringify({ narrative: openingText, state_changes: {} }) });
+    // ★ P1: 开场白已注入 system prompt（固定，命中缓存），不再作为首条 chatHistory 消息
+    // 第一轮 API 请求结构：[system(含开场白), user1] — 与 DeepSeek 官方 Example 1 一致
+
     saveState();
     renderLog();
-    // 开场白逐字打字（无需等待，打字期间没有选项）
     startTypewriter(conversationHistory.length - 1);
 }
 
@@ -2174,12 +2183,11 @@ function defaultInitialState() {
 function loadSave(saveId) {
     const save = saves.find(s => s.id === saveId);
     if (!save) return;
-    // 停止当前打字（不触发回调）
     stopTypewriter();
     currentWorld = worlds.find(w => w.id === save.worldId);
+    invalidateSystemPromptCache();  // P0: 加载存档可能换世界，失效缓存
     if (save.state) gameState = deepClone(save.state);
     if (save.history) conversationHistory = deepClone(save.history);
-    // 兼容旧存档：无 chatHistory 字段时从 conversationHistory 重建（无 state_changes，仅叙事流）
     chatHistory = save.chatHistory ? deepClone(save.chatHistory) : rebuildChatFromHistory(save.history);
     showToast(`加载存档：${save.worldName}`, "success");
     showScreen("gameScreen");
@@ -2210,6 +2218,7 @@ function deleteWorld(worldId) {
         gameState = null;
         conversationHistory = [];
         chatHistory = [];
+        invalidateSystemPromptCache();
         localStorage.removeItem(STORAGE_KEYS.state);
         localStorage.removeItem(STORAGE_KEYS.history);
         localStorage.removeItem(STORAGE_KEYS.chatHistory);
@@ -2767,15 +2776,20 @@ function summarizeFactsFromChanges(input, narrative, changes) {
 
 /* ================= Prompt 与 LLM ================= */
 function buildSystemPrompt() {
+    // ★ P0: 预计算缓存 — 同一世界内 system prompt 完全固定，无需每轮重建
+    const worldId = currentWorld && currentWorld.id;
+    if (cachedSystemPrompt !== null && worldId && worldId === cachedSysPromptWorldId) {
+        return cachedSystemPrompt;
+    }
+
     const kb = getWorldLoreKB();
     const worldRules = kb && kb.snippets ? kb.snippets.filter(s => s.category === "规则").map(s => s.content).join("\n") : "请根据世界观规则进行叙事。";
     const narrativeStyle = kb && kb.snippets ? kb.snippets.filter(s => s.category === "世界观").map(s => s.content).join("\n") : "叙事风格：沉浸式文字冒险，符合世界氛围。";
     const schema = getWorldSchema(currentWorld);
 
-    // ========== 多轮对话 + DeepSeek 前缀缓存优化 ==========
-    // system 在同一世界内完全固定 → 100% 命中缓存。
-    // 多轮历史 [system, ...chatHistory, user_current] 中，历史部分固定不变 → 命中前缀；
-    // 仅最新一轮 user 为 miss。整体命中率 90%+。
+    // ========== DeepSeek 前缀缓存：system 硬化 ==========
+    // system 被缓存到 cachedSystemPrompt，同一世界内永远返回同一字符串。
+    // 任何隐藏的不确定性（CDN 差异、JS 引擎差异、Unicode 规范化）都被消除。
 
     const DYNAMIC_DELIMITER = "<!-- DYNAMIC -->";
     const parts = systemPromptTemplate.split(DYNAMIC_DELIMITER);
@@ -2811,7 +2825,8 @@ function buildSystemPrompt() {
     // ★ 全量知识库注入 system（固定，命中缓存）
     const allSnippets = kb && kb.snippets ? kb.snippets : [];
     const fullLoreText = allSnippets.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
-    const LORE_FULL_THRESHOLD = 6000;
+    // P2: 阈值提升到 12000 字符（约 3500 tokens），覆盖更大的知识库
+    const LORE_FULL_THRESHOLD = 12000;
     if (fullLoreText.length > 0 && fullLoreText.length < LORE_FULL_THRESHOLD) {
         systemPrompt += "\n\n# 世界观知识库（全量·固定，命中缓存）\n\n以下为该世界全部知识片段，请作为叙事依据：\n\n```\n" + fullLoreText + "\n```";
     }
@@ -2824,20 +2839,51 @@ function buildSystemPrompt() {
     if (currentWorld && currentWorld.custom_prefix && currentWorld.custom_prefix.trim()) {
         systemPrompt = currentWorld.custom_prefix.trim() + "\n\n" + systemPrompt;
     }
+
+    // ★ P1: 开场白注入 system prompt（世界级固定内容，永远命中缓存）
+    if (currentWorld && currentWorld.opening_narrative) {
+        systemPrompt += "\n\n# 故事起点 / 开场白（固定上下文）\n\n你正在讲述的故事始于以下场景。后续所有叙事都应从此处展开，保持世界观和氛围的一致性：\n\n---\n" + currentWorld.opening_narrative + "\n---";
+    }
+
+    // P0: 硬化缓存
+    cachedSystemPrompt = systemPrompt;
+    cachedSysPromptWorldId = worldId;
     return systemPrompt;
 }
 
-// 判断知识库是否已全量入 system（供 buildTurnUserMessage 决定是否补检索片段）
+// P0: 世界变更时清除 system prompt 缓存
+function invalidateSystemPromptCache() {
+    cachedSystemPrompt = null;
+    cachedSysPromptWorldId = null;
+}
+
 function isLoreFullInSystem() {
     const kb = getWorldLoreKB();
     const allSnippets = kb && kb.snippets ? kb.snippets : [];
     const fullLoreText = allSnippets.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
-    return fullLoreText.length > 0 && fullLoreText.length < 6000;
+    return fullLoreText.length > 0 && fullLoreText.length < 12000;
+}
+
+// P0: 构建紧凑游戏状态（仅含每轮可能变化的字段，紧凑 JSON 无换行）
+// 从完整 gameState 中提取 AI 需要校准的运行时状态，去掉从未变化的静态字段
+function buildCompactGameState() {
+    if (!gameState) return "{}";
+    return JSON.stringify({
+        current_location: gameState.current_location,
+        current_date: gameState.current_date,
+        attributes: gameState.attributes,
+        progression: gameState.progression,
+        relationships: gameState.relationships,
+        skills: gameState.skills,
+        inventory: gameState.inventory,
+        goals: gameState.goals,
+        status_effects: gameState.status_effects,
+        is_alive: gameState.is_alive
+    });
 }
 
 // 构建本轮 user 消息（每轮动态，仅最新轮 miss）
-// 多轮模式下历史叙事已包含上下文，user 只放：动态检索补充 + 当前状态 + 玩家输入
-// 不再放 behavior_records（多轮历史已含行为上下文，避免冗余）
+// 多轮模式下历史叙事已包含上下文，user 只放：动态检索补充 + 紧凑状态 + 玩家输入
 function buildTurnUserMessage(input, retrieved) {
     let userPrompt = "";
 
@@ -2850,11 +2896,12 @@ function buildTurnUserMessage(input, retrieved) {
         }
     }
 
-    // 当前游戏状态（每轮变化，供 AI 校准 state_changes 基准）
-    userPrompt += "# 当前游戏状态\n\n```json\n" + JSON.stringify(gameState, null, 2) + "\n```\n\n";
+    // P0: 紧凑游戏状态 — 无 pretty-print，去掉了 personality/background/name/age 等静态字段
+    // 预期削减 50-70% miss tokens
+    userPrompt += "# 当前游戏状态\n\n" + buildCompactGameState() + "\n\n";
 
     // 玩家输入（每轮变化，放最后）
-    userPrompt += "# 玩家输入\n\n```\n" + input + "\n```";
+    userPrompt += "# 玩家输入\n\n" + input;
 
     return userPrompt;
 }
@@ -2880,15 +2927,14 @@ function trimChatHistory() {
 }
 
 // 从显示用 conversationHistory 重建多轮对话历史（用于加载无 chatHistory 字段的旧存档）
-// 重建的 assistant 消息仅含 narrative（无 state_changes），user 消息仅含玩家输入（无 gameState）
-// 不完美但能让 AI 保留叙事记忆，避免完全失忆
+// 重建的 assistant 消息仅含 narrative（无 state_changes），user 消息使用紧凑格式
 function rebuildChatFromHistory(history) {
     if (!history || !history.length) return [];
     const chat = [];
     for (const entry of history) {
         if (entry.isWarning) continue;
-        if (entry.player) {  // 开场白 player 为空，跳过其 user 消息
-            chat.push({ role: "user", content: "# 玩家输入\n\n```\n" + entry.player + "\n```" });
+        if (entry.player) {
+            chat.push({ role: "user", content: "# 玩家输入\n\n" + entry.player });
         }
         chat.push({ role: "assistant", content: JSON.stringify({ narrative: entry.narrative || "", state_changes: {} }) });
     }
@@ -2900,7 +2946,7 @@ async function callLLM(input, retrieved) {
     const systemPrompt = buildSystemPrompt();
     const userContent = buildTurnUserMessage(input, retrieved);
 
-    // 多轮对话：[system(固定), ...chatHistory(历史·命中前缀), user(本轮·miss)]
+    // 多轮对话：[system(硬化·100%命中), ...chatHistory(历史·命中前缀), user(本轮·miss)]
     const messages = [
         { role: "system", content: systemPrompt },
         ...chatHistory,
@@ -2939,6 +2985,20 @@ async function callLLM(input, retrieved) {
         const data = await res.json();
         const content = data.choices[0].message.content;
         parsed = parseResponse(content);
+
+        // ★ P2: 提取缓存命中统计
+        if (data.usage) {
+            const hit = data.usage.prompt_cache_hit_tokens || 0;
+            const miss = data.usage.prompt_cache_miss_tokens || 0;
+            const total = hit + miss;
+            lastCacheStats = {
+                hitTokens: hit,
+                missTokens: miss,
+                totalTokens: total,
+                hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
+            };
+            updateCacheIndicator();
+        }
     }
     // 暂存本轮 user 内容，供 processTurn 在非警告时推入历史
     parsed._turnUserContent = userContent;
@@ -3306,6 +3366,23 @@ function showToast(msg, type = "", duration = 2000) {
     setTimeout(() => {
         el.classList.remove("show");
     }, duration);
+}
+
+// ★ P2: 更新缓存命中率指示器
+function updateCacheIndicator() {
+    const el = document.getElementById("cacheIndicator");
+    if (!el || !lastCacheStats.totalTokens) {
+        if (el) el.classList.add("hidden");
+        return;
+    }
+    el.classList.remove("hidden");
+    const rate = parseFloat(lastCacheStats.hitRate);
+    let cls = "bad";
+    if (rate >= 70) cls = "good";
+    else if (rate >= 35) cls = "warn";
+    el.className = "cache-indicator " + cls;
+    el.textContent = "命中 " + lastCacheStats.hitRate + " (" + lastCacheStats.hitTokens + "/" + lastCacheStats.totalTokens + "t)";
+    el.title = "缓存命中: " + lastCacheStats.hitTokens + " tokens | 未命中: " + lastCacheStats.missTokens + " tokens";
 }
 
 /* ================= 启动 ================= */
