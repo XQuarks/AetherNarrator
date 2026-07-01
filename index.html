@@ -80,6 +80,17 @@
             --log-entry-bg: #FEFCF8;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        :focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+            border-radius: 2px;
+        }
+        button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 1px;
+        }
+
         .hidden { display: none !important; }
         html, body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
@@ -228,8 +239,9 @@
         }
         .menu-btn.primary-btn .label { color: var(--primary); }
         .menu-btn.primary-btn:hover {
-            background: rgba(201, 168, 124, 0.12);
+            background: var(--card-hover);
             border-color: var(--primary-light);
+            opacity: 0.9;
         }
         .home-disclaimer {
             margin-top: 28px;
@@ -438,7 +450,6 @@
             font-size: 14px;
             background: var(--card);
             color: var(--text);
-            outline: none;
             transition: border-color 0.2s, background 0.2s;
             font-family: inherit;
         }
@@ -598,7 +609,6 @@
             height: 4px;
             border-radius: 2px;
             background: var(--card-border);
-            outline: none;
             padding: 0;
             margin: 0;
         }
@@ -841,7 +851,6 @@
             border: 1px solid var(--card-border);
             border-radius: var(--radius-s);
             font-size: 14px;
-            outline: none;
             background: var(--card);
             color: var(--text);
             font-family: inherit;
@@ -1449,6 +1458,7 @@ let loreKB = null;
 let loreEmbeddings = null;
 let conversationHistory = [];   // 显示用历史（含 narrative、choices 等，用于 UI 渲染）
 let chatHistory = [];           // 多轮对话原始消息序列 [{role, content}, ...]，不含 system（system 固定单独维护）
+let chatSummary = [];           // 对话历史摘要（每轮 1-2 句），替代被截断的完整对话，大幅降低 token 消耗
 let systemPromptTemplate = "";
 let cachedSystemPrompt = null;  // ★ P0: 预计算的 system prompt 缓存
 let cachedSysPromptWorldId = null;  // 缓存对应的世界 ID，变更时重建
@@ -1462,7 +1472,9 @@ let sourceFileContent = "";  // 用户上传的源文件内容
 let currentTheme = localStorage.getItem("aigame_theme") || "dark";
 
 // 多轮对话配置
-const MAX_CHAT_MESSAGES = 40;  // chatHistory 最大消息数（含 user+assistant），约 20 轮。更多历史 = 更长稳定前缀 = 更高命中率。
+const MAX_CHAT_MESSAGES = 8;  // 保留最近 4 轮完整对话（8 条消息），更早的用摘要替代
+const CHAT_ANCHOR_MSGS = 4;     // 最早 2 轮固定为缓存锚点，始终不变 → 前缀稳定，缓存持续命中
+const CHAT_RECENT_MSGS = 4;     // 最近 2 轮灵活追加
 
 // ★ P2: 缓存统计
 let lastCacheStats = { hitTokens: 0, missTokens: 0, totalTokens: 0, hitRate: "0%" };
@@ -1472,6 +1484,7 @@ const STORAGE_KEYS = {
     state: "aigame_state",
     history: "aigame_history",
     chatHistory: "aigame_chathistory",
+    chatSummary: "aigame_chat_summary",
     worlds: "aigame_worlds",
     saves: "aigame_saves"
 };
@@ -1543,6 +1556,10 @@ async function init() {
     const savedChat = localStorage.getItem(STORAGE_KEYS.chatHistory);
     if (savedChat) {
         try { chatHistory = JSON.parse(savedChat); } catch (e) { chatHistory = []; }
+    }
+    const savedSummary = localStorage.getItem(STORAGE_KEYS.chatSummary);
+    if (savedSummary) {
+        try { chatSummary = JSON.parse(savedSummary); } catch (e) { chatSummary = []; }
     }
     renderWorldList();
     renderSaveList();
@@ -1888,6 +1905,7 @@ function saveState(serialized) {
         localStorage.setItem(STORAGE_KEYS.state, stateStr);
         localStorage.setItem(STORAGE_KEYS.history, historyStr);
         localStorage.setItem(STORAGE_KEYS.chatHistory, chatStr);
+        localStorage.setItem(STORAGE_KEYS.chatSummary, JSON.stringify(chatSummary));
     } catch (e) {
         console.warn("localStorage 写入失败，可能空间不足", e);
     }
@@ -2753,10 +2771,11 @@ async function startGame() {
         gameState.name = currentWorld.hero ? "主角" : "玩家";
     }
 
-    // ★ P0/P1: 重置缓存 + 聊天历史
+    // ★ P0/P1: 重置缓存 + 聊天历史 + 摘要
     invalidateSystemPromptCache();
     conversationHistory = [];
     chatHistory = [];  // ★ 开场白已注入 system prompt，chatHistory 从空开始
+    chatSummary = [];
     saveState();
 
     showScreen("gameScreen");
@@ -2827,6 +2846,7 @@ function loadSave(saveId) {
     if (save.state) gameState = deepClone(save.state);
     if (save.history) conversationHistory = deepClone(save.history);
     chatHistory = save.chatHistory ? deepClone(save.chatHistory) : rebuildChatFromHistory(save.history);
+    chatSummary = (save.chatSummary && save.chatSummary.length) ? deepClone(save.chatSummary) : rebuildSummaryFromHistory(save.history);
     showToast(`加载存档：${save.worldName}`, "success");
     showScreen("gameScreen");
     document.getElementById("gameWorldName").textContent = save.worldName;
@@ -2892,11 +2912,13 @@ function createOrUpdateSave() {
         existing.state = JSON.parse(stateStr);
         existing.history = JSON.parse(cleanHistoryStr);
         existing.chatHistory = cleanChat;
+        existing.chatSummary = chatSummary;
     } else {
         saves.unshift({
             id: "s" + Date.now(), worldId: currentWorld.id, worldName: currentWorld.name,
             progress, updatedAt: now,
-            state: JSON.parse(stateStr), history: JSON.parse(cleanHistoryStr), chatHistory: cleanChat
+            state: JSON.parse(stateStr), history: JSON.parse(cleanHistoryStr), chatHistory: cleanChat,
+            chatSummary: [...chatSummary]
         });
     }
     saveSaves();
@@ -3584,6 +3606,13 @@ function buildCompactGameState() {
 function buildTurnUserMessage(input, retrieved) {
     let userPrompt = "";
 
+    // ★ 对话历史摘要：用精简的 1-2 句摘要替代被截断的完整对话，大幅降低 token 消耗
+    if (chatSummary && chatSummary.length > 0) {
+        userPrompt += "# 前情提要（之前发生的故事）\n\n";
+        chatSummary.forEach((s, i) => { userPrompt += (i + 1) + ". " + s + "\n"; });
+        userPrompt += "\n";
+    }
+
     // ★ 永久记忆：无条件注入最近关键事实（解决 AI 失忆问题）
     const recentFacts = getRecentKeyFacts(5);
     if (recentFacts.length) {
@@ -3592,7 +3621,7 @@ function buildTurnUserMessage(input, retrieved) {
         userPrompt += "\n";
     }
 
-    // ★ NPC 关系注入：当前所有角色的关系描述，辅助 AI 保持一致性
+    // ★ NPC 关系注入：只发送有变化或关键的关系
     if (gameState && gameState.relationships && Object.keys(gameState.relationships).length > 0) {
         const rels = gameState.relationships;
         userPrompt += "# 当前 NPC 关系（请保持一致）\n\n";
@@ -3629,21 +3658,47 @@ function getRecentKeyFacts(count) {
 // 将一轮 user/assistant 推入多轮对话历史（仅在正常故事轮次调用，警告轮次跳过）
 function pushChatTurn(userContent, parsed) {
     chatHistory.push({ role: "user", content: userContent });
-    // assistant 存精简 JSON：仅保留 narrative + state_changes，去掉 choices/key_facts/comment 等非必要字段
-    // 这样历史体积更小，可容纳更多轮次
+    // assistant 存精简 JSON：仅保留 narrative + state_changes
     const slim = {
         narrative: parsed.narrative || "",
         state_changes: parsed.state_changes || {}
     };
     chatHistory.push({ role: "assistant", content: JSON.stringify(slim) });
+
+    // ★ 生成本轮摘要（1-2 句中文），追加到 chatSummary
+    const summary = summarizeTurn(parsed);
+    if (summary) chatSummary.push(summary);
+    // 摘要只保留最近 20 条，避免无限增长
+    if (chatSummary.length > 20) chatSummary = chatSummary.slice(-20);
+
     trimChatHistory();
 }
 
-// 滑动窗口截断 + 压缩：超过上限时保留最近消息，丢弃最老的
-function trimChatHistory() {
-    if (chatHistory.length > MAX_CHAT_MESSAGES) {
-        chatHistory = chatHistory.slice(-MAX_CHAT_MESSAGES);
+// 从 assistant 回复中提取 1-2 句中文摘要
+function summarizeTurn(parsed) {
+    const narrative = (parsed.narrative || "").trim();
+    if (!narrative) return null;
+    // 取叙事文本的前 2 个句子（按中文句号/感叹号/问号/省略号分割）
+    const sentences = narrative.split(/[。！？…]/).filter(s => s.trim().length > 5);
+    if (!sentences.length) return narrative.slice(0, 80);
+    // 取第 1-2 句，拼接成摘要
+    const first = sentences[0].trim();
+    const second = sentences[1] ? sentences[1].trim() : "";
+    let result = first;
+    if (second && (first + second).length < 120) result += second;
+    if (parsed.state_changes && parsed.state_changes.current_location) {
+        result += "（地点变更为" + parsed.state_changes.current_location + "）";
     }
+    return result.slice(0, 150);
+}
+
+// ★ 稳定缓存锚点：前缀 [sys + 锚定轮次] 永不变化，缓存持续命中
+// 结构: [anchor_u1, anchor_a1, anchor_u2, anchor_a2, ..., recent_u_N-1, recent_a_N-1, recent_u_N, recent_a_N]
+function trimChatHistory() {
+    if (chatHistory.length <= MAX_CHAT_MESSAGES) return;
+    const anchor = chatHistory.slice(0, CHAT_ANCHOR_MSGS);
+    const recent = chatHistory.slice(-CHAT_RECENT_MSGS);
+    chatHistory = [...anchor, ...recent];
 }
 
 // 从显示用 conversationHistory 重建多轮对话历史（用于加载无 chatHistory 字段的旧存档）
@@ -3658,7 +3713,30 @@ function rebuildChatFromHistory(history) {
         }
         chat.push({ role: "assistant", content: JSON.stringify({ narrative: entry.narrative || "", state_changes: {} }) });
     }
-    return chat.slice(-MAX_CHAT_MESSAGES);
+    // 使用锚定模式：保留前2轮作为稳定前缀 + 最近2轮
+    if (chat.length <= MAX_CHAT_MESSAGES) return chat;
+    const anchor = chat.slice(0, CHAT_ANCHOR_MSGS);
+    const recent = chat.slice(-CHAT_RECENT_MSGS);
+    return [...anchor, ...recent];
+}
+
+// 从 conversationHistory 重建对话摘要（用于加载无 chatSummary 字段的旧存档）
+function rebuildSummaryFromHistory(history) {
+    if (!history || !history.length) return [];
+    const summaries = [];
+    for (const entry of history) {
+        if (entry.isWarning) continue;
+        const narrative = (entry.narrative || "").trim();
+        if (!narrative) continue;
+        const sentences = narrative.split(/[。！？…]/).filter(s => s.trim().length > 5);
+        if (!sentences.length) continue;
+        const first = sentences[0].trim();
+        const second = sentences[1] ? sentences[1].trim() : "";
+        let result = first;
+        if (second && (first + second).length < 120) result += second;
+        if (result) summaries.push(result.slice(0, 150));
+    }
+    return summaries.slice(-20);
 }
 
 async function callLLM(input, retrieved) {

@@ -1,130 +1,75 @@
-# AI 文字游戏 · RAG 方案
+# RAG 方案
 
-RAG（Retrieval-Augmented Generation）是本游戏防止 AI 瞎编的核心机制。
+RAG（Retrieval-Augmented Generation）确保 AI 叙事严格遵循世界观设定。
 
-## 1. RAG 流程
+---
+
+## 1. 架构
 
 ```
 玩家输入
   │
-  ▼
-[预处理] 分词、提取地点/NPC/物品
+  ├─→ 中文分词 (Intl.Segmenter)
+  │     └─→ 关键词检索 → 得分
   │
-  ├───▶ 关键词检索（lore_kb.snippets）
-  ├───▶ 向量检索（embedding）
-  └───▶ 行为记录检索（behavior_records）
+  ├─→ 向量语义检索 (Promise.all 并行)
+  │     └─→ 余弦相似度 → 得分
   │
-  ▼
-[融合排序] 综合分数，取 Top-K
+  ├─→ 行为记录检索 (中文分词)
+  │     └─→ 关键事实 → 得分
   │
-  ▼
-[System Prompt] 注入检索结果
-  │
-  ▼
-LLM 生成叙事 + 状态变更
-  │
-  ▼
-提取关键事实 → 存入 behavior_records
+  └─→ 融合排序 → Top 8 → 注入 User Message
 ```
 
-## 2. 检索源
+---
 
-### 2.1 知识库（lore_kb）
+## 2. 双检索并行
 
-- 静态数据，创建世界时生成。
-- 包含规则、地点、人物、事件、物品、势力、世界观。
-- 可手动维护。
+`keywordRetrieve()` 和 `embeddingRetrieve()` 使用 `Promise.all` 同时执行，节省 100-300ms 等待时间。
 
-### 2.2 玩家行为记录（behavior_records）
+### 2.1 关键词检索
 
-- 动态数据，游戏过程中积累。
-- 记录玩家做过的事、获得/失去的物品、关系变化、到达的地点、完成的事件。
-- 每次 LLM 返回后提取 `key_facts` 存入。
+- 使用 `Intl.Segmenter("zh-CN", { granularity: "word" })` 中文分词
+- "我要去大观园找林黛玉" → ["大观园","林黛玉","找","去"]
+- 纯英文/数字直接作为关键词保留
+- 匹配 title/keywords/content，加权评分
 
-## 3. 检索方法
+### 2.2 向量语义检索
 
-### 3.1 关键词检索
+- 模型：`@xenova/transformers` + `Xenova/all-MiniLM-L6-v2`（384 维）
+- 浏览器端推理，无服务器依赖
+- 入口时后台预热模型，首次检索无冷启动惩罚
+- 计算玩家输入与每条知识片段的余弦相似度
 
-```javascript
-function keywordRetrieve(input, topK) {
-    const terms = input.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
-    snippets.map(s => {
-        let score = 0;
-        for (const t of terms) {
-            if (text.includes(t)) score += 2;
-            if (keywords.includes(t)) score += 3;
-            if (title.includes(t)) score += 4;
-        }
-        return { snippet: s, score };
-    });
-}
-```
+### 2.3 行为记录检索
 
-### 3.2 向量检索
+- 从 `currentWorld.behavior_records` 中搜索匹配的关键事实
+- 使用与关键词检索相同的 `Intl.Segmenter` 分词
 
-使用 `Xenova/all-MiniLM-L6-v2` 在浏览器端生成 embedding：
+---
 
-```javascript
-embeddingModel = await transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-const out = await embeddingModel(input, { pooling: "mean", normalize: true });
-const qVec = Array.from(out.data);
-// 计算与每条片段 embedding 的余弦相似度
-```
+## 3. 融合排序
 
-### 3.3 行为记录检索
+| 来源 | 权重 |
+|------|------|
+| 关键词检索命中 | 1× |
+| 向量检索命中 | 2×（语义匹配权重更高） |
+| 关键词+向量同时命中 | 叠加 |
+| 行为记录 | 1.5× |
 
-与关键词检索类似，但只匹配 behavior_records.text。
+最终取 Top 8 注入 user message。
 
-## 4. 融合排序
+---
 
-| 来源 | 权重 | 说明 |
-|------|------|------|
-| 关键词匹配 title | 4 | 高置信 |
-| 关键词匹配 keywords | 3 | 中高置信 |
-| 关键词匹配 content | 2 | 普通 |
-| 向量相似度 Top | 2 | 语义相关 |
-| 行为记录匹配 | 1.5 | 玩家历史 |
+## 4. 全量注入策略
 
-去重后按总分排序，取 Top-K（默认 8）。
+当知识库总长度 < 12000 字符时，**全量注入 system prompt**（作为固定前缀，命中 DeepSeek 磁盘缓存）。超过阈值时仅注入检索结果的 Top 片段。
 
-## 5. 硬规则始终注入
+---
 
-以下片段无论检索分数如何都应注入：
+## 5. 性能优化
 
-- 力量体系核心规则（境界顺序、魔法限制等）。
-- 玩家当前地点的 1-2 条相关描述。
-- 当前涉及 NPC 的性格与态度。
-- 世界观禁忌列表。
-
-## 6. 关键事实摘要
-
-每次 LLM 返回后，从 `state_changes` 和 `narrative` 中提取关键事实：
-
-- 获得/失去物品
-- 关系变化
-- 地点变化
-- 完成事件
-- 死亡原因
-
-存储格式：
-
-```json
-{
-  "id": "b123",
-  "text": "玩家在小镇入口获得了草药 x1",
-  "createdAt": "2026-06-29T12:00:00Z"
-}
-```
-
-## 7. 性能优化
-
-- 浏览器端 embedding 首次加载较慢，建议提供「模拟模式」供快速体验。
-- 行为记录上限设为 100 条，超过时保留最近记录。
-- 知识库片段数量控制在 50-200 条，避免 prompt 过长。
-
-## 8. 后续升级
-
-- 使用更强大的 embedding 模型（bge-m3、Qwen Embedding）。
-- 引入重排序（re-ranker）。
-- 按 category 过滤检索结果。
-- 支持多模态检索（图片、地图）。
+- System prompt 缓存：同世界内 system prompt 只构建一次
+- 增量检索：知识库不变化时不重复加载
+- Embedding 预热：`init()` 中后台加载模型
+- ID 去重：关键词和向量结果以 ID 去重，避免重复片段
