@@ -2,10 +2,11 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>以太叙事 · AetherNarrator</title>
     <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2"></script>
     <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
 
@@ -40,37 +41,43 @@
             --scrollbar-thumb: rgba(217,207,192,0.18);
             --radio-inner: #221E18;
             --btn-primary-text: #1A160F;
+            --text-tertiary: rgba(217, 207, 192, 0.30);
+            --card-bg: rgba(217, 207, 192, 0.06);
+            --log-entry-bg: var(--card);
         }
 
-        /* 白天模式 — 纸张暖黄 */
+        /* 白天模式 — 仿电子书阅读器 */
         [data-theme="light"] {
-            --bg: #F5EFE0;
-            --bg-gradient: radial-gradient(ellipse at 50% 0%, #FBF6E9 0%, #F5EFE0 70%);
-            --bg-panel: #FBF6E9;
-            --bg-sidebar: #EFE8D5;
-            --card: rgba(61, 54, 42, 0.04);
-            --card-hover: rgba(61, 54, 42, 0.07);
-            --card-border: rgba(61, 54, 42, 0.12);
-            --card-border-hover: rgba(61, 54, 42, 0.20);
-            --text: #3D362A;
-            --text-secondary: rgba(61, 54, 42, 0.62);
-            --primary: #9A7B4A;
-            --primary-light: #B0925E;
-            --accent: #9A7B4A;
-            --success: #5B8A6F;
+            --bg: #F3EFE4;
+            --bg-gradient: linear-gradient(180deg, #F9F6EE 0%, #F3EFE4 100%);
+            --bg-panel: #FCF9F3;
+            --bg-sidebar: #F6F2E9;
+            --card: #FEFCF9;
+            --card-hover: #F8F4EA;
+            --card-border: #E2D9C8;
+            --card-border-hover: #C8BDA5;
+            --text: #383226;
+            --text-secondary: #8C8272;
+            --text-muted: #B0A895;
+            --text-tertiary: #C4BCAA;
+            --primary: #9E7D4E;
+            --primary-light: #B8955E;
+            --accent: #9E7D4E;
+            --success: #5A8A6E;
             --danger: #A85A4A;
-            --warning: #9A7A30;
-            --text-muted: rgba(61, 54, 42, 0.42);
-            --separator: rgba(61, 54, 42, 0.10);
-            --shadow-card: 0 1px 4px rgba(61,54,42,0.08), 0 2px 8px rgba(61,54,42,0.05);
-            --shadow-modal: 0 2px 12px rgba(61,54,42,0.12);
-            --shadow-gameover: 0 4px 24px rgba(61,54,42,0.16);
-            --overlay-bg: rgba(61,54,42,0.28);
-            --overlay-light: rgba(61,54,42,0.22);
-            --overlay-gameover: rgba(61,54,42,0.38);
-            --scrollbar-thumb: rgba(61,54,42,0.18);
-            --radio-inner: #FBF6E9;
-            --btn-primary-text: #FBF6E9;
+            --warning: #9A7A38;
+            --separator: #E8E0D0;
+            --shadow-card: 0 1px 2px rgba(140,130,110,0.10);
+            --shadow-modal: 0 2px 16px rgba(140,130,110,0.15);
+            --shadow-gameover: 0 4px 28px rgba(140,130,110,0.20);
+            --overlay-bg: rgba(56,50,38,0.28);
+            --overlay-light: rgba(56,50,38,0.18);
+            --overlay-gameover: rgba(56,50,38,0.35);
+            --scrollbar-thumb: rgba(140,130,110,0.22);
+            --radio-inner: #FCF9F3;
+            --btn-primary-text: #FCF9F3;
+            --card-bg: #FEFCF9;
+            --log-entry-bg: #FEFCF8;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         .hidden { display: none !important; }
@@ -79,6 +86,7 @@
             margin: 0;
             padding: 0;
             height: 100%;
+            height: 100dvh;
             overflow: hidden;
             background: var(--bg-gradient);
             color: var(--text);
@@ -112,7 +120,7 @@
             background: var(--bg-panel);
             border-bottom: 1px solid var(--separator);
             position: relative;
-            min-height: 48px;
+            min-height: 52px;
             flex: none;
         }
         .nav-header .back-btn {
@@ -208,13 +216,62 @@
         }
         .menu-btn.full-width {
             grid-column: 1 / -1;
-            flex-direction: row;
-            justify-content: center;
-            gap: 12px;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
             padding: 20px 16px;
+        }
+        .menu-btn.primary-btn {
+            background: var(--card-hover);
+            border-color: var(--primary);
+            border-width: 1.5px;
+        }
+        .menu-btn.primary-btn .label { color: var(--primary); }
+        .menu-btn.primary-btn:hover {
+            background: rgba(201, 168, 124, 0.12);
+            border-color: var(--primary-light);
+        }
+        .home-disclaimer {
+            margin-top: 28px;
+            font-size: 11px;
+            color: var(--text-tertiary);
+            line-height: 1.6;
+            text-align: center;
         }
 
         /* 列表屏幕 */
+        .create-world-bar {
+            margin: 12px 16px 0;
+            padding: 14px 18px;
+            border-radius: var(--radius-m);
+            background: rgba(201, 168, 124, 0.08);
+            border: 1px dashed rgba(201, 168, 124, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .create-world-bar:hover {
+            background: rgba(201, 168, 124, 0.14);
+            border-color: rgba(201, 168, 124, 0.5);
+        }
+        .create-world-bar .create-icon {
+            font-size: 22px;
+            color: var(--primary-light);
+            line-height: 1;
+            font-weight: 300;
+        }
+        .create-world-bar .create-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--primary-light);
+        }
+        .create-world-bar .create-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
         .list-content {
             flex: 1;
             overflow-y: auto;
@@ -239,6 +296,33 @@
         .list-item .item-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; color: var(--text); }
         .list-item .item-meta { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
         .list-item .item-tags { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+        .list-item.dead-save { border-color: rgba(226, 75, 74, 0.3); background: rgba(226, 75, 74, 0.05); }
+        .save-item {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        }
+        .save-info { flex: 1; min-width: 0; }
+        .save-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+        .save-play-btn {
+            padding: 10px 20px; border-radius: var(--radius-m); border: none;
+            background: rgba(201, 168, 124, 0.15); color: var(--primary-light);
+            font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap;
+            transition: background 0.15s;
+        }
+        .save-play-btn:hover { background: rgba(201, 168, 124, 0.25); }
+        .save-del-btn {
+            padding: 4px 0; border: none; background: transparent;
+            color: var(--danger); font-size: 11px; cursor: pointer; text-align: center;
+        }
+        .save-del-btn:hover { opacity: 0.7; }
+        .list-item.new-world { border-color: rgba(201, 168, 124, 0.25); }
+        .new-badge {
+            display: inline-block;
+            font-size: 10px; font-weight: 500;
+            color: #fff; background: #1D9E75;
+            padding: 1px 6px; border-radius: 3px;
+            margin-left: 6px; vertical-align: middle;
+        }
+        .dead-badge { font-size: 12px; color: #E24B4A; font-weight: 500; }
         .world-list-item { position: relative; }
         .delete-world-btn {
             position: absolute;
@@ -494,6 +578,16 @@
             flex-direction: column;
             gap: 8px;
         }
+
+        .font-size-controls { display: flex; gap: 8px; }
+        .font-size-btn {
+            flex: 1; padding: 12px; border-radius: var(--radius-m);
+            border: 1px solid var(--card-border); background: var(--card);
+            color: var(--text-secondary); font-size: 14px; cursor: pointer;
+            text-align: center; transition: all 0.15s;
+        }
+        .font-size-btn:hover { border-color: var(--card-border-hover); background: var(--card-hover); }
+        .font-size-btn.active { color: var(--text); border-color: var(--primary); background: rgba(201,168,124,0.12); }
         .range-slider-wrapper input[type="range"] {
             -webkit-appearance: none;
             width: 100%;
@@ -588,10 +682,10 @@
             background: var(--bg-panel);
             border-bottom: 1px solid var(--separator);
             flex: none;
-            height: 48px;
+            height: 56px;
         }
-        .game-header .world-name { font-size: 13px; font-weight: 500; color: var(--text); letter-spacing: 0.04em; }
-        .game-header .day-info { font-size: 11px; color: var(--text-muted); }
+        .game-header .world-name { font-size: 14px; font-weight: 500; color: var(--text); letter-spacing: 0.04em; }
+        .game-header .day-info { font-size: 12px; color: var(--text-muted); }
         .cache-indicator { font-size: 10px; color: var(--text-tertiary); margin-left: 8px; padding: 2px 6px; border-radius: 4px;
             background: var(--card-bg); border: 1px solid var(--card-border); cursor: default; }
         .cache-indicator.good { color: #1D9E75; border-color: #5DCAA5; }
@@ -612,7 +706,7 @@
             background: transparent;
         }
         .log-entry {
-            background: var(--card);
+            background: var(--log-entry-bg);
             border: 1px solid var(--card-border);
             border-radius: var(--radius-m);
             padding: 16px 18px;
@@ -690,9 +784,25 @@
             scrollbar-width: none;
         }
         .choices-row::-webkit-scrollbar { display: none; }
+        .loading-indicator {
+            display: none; align-items: center; gap: 8px; padding: 6px 0;
+            font-size: 12px; color: var(--text-muted); margin-bottom: 4px;
+        }
+        .loading-indicator.show { display: flex; }
+        .loading-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary);
+            animation: pulse-dot 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 0.25; transform: scale(0.8); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
+        .loading-text { flex: 1; }
+        .loading-time { color: var(--text-tertiary); font-size: 11px; }
         .choice-chip {
             white-space: nowrap;
-            padding: 7px 14px;
+            padding: 10px 16px;
+            min-height: 44px;
             border-radius: var(--radius-m);
             border: 1px solid var(--card-border);
             background: var(--card);
@@ -700,9 +810,23 @@
             font-size: 13px;
             cursor: pointer;
             transition: all 0.15s;
+            animation: choiceIn 0.35s ease-out both;
+        }
+        .choice-chip:nth-child(1) { animation-delay: 0s; }
+        .choice-chip:nth-child(2) { animation-delay: 0.08s; }
+        .choice-chip:nth-child(3) { animation-delay: 0.16s; }
+        .choice-chip:nth-child(4) { animation-delay: 0.24s; }
+        @keyframes choiceIn {
+            from { opacity: 0; transform: translateX(-16px); }
+            to { opacity: 1; transform: translateX(0); }
         }
         .choice-chip:hover { color: var(--text); border-color: var(--card-border-hover); background: var(--card-hover); }
         .choice-chip:active { color: var(--primary); border-color: var(--primary); }
+        .choices-row.in-log {
+            padding: 0 0 16px 0;
+            margin-top: 4px;
+            flex-wrap: wrap;
+        }
         .input-row {
             display: flex;
             gap: 6px;
@@ -715,7 +839,7 @@
             font-size: 14px;
             outline: none;
             background: var(--card);
-            color: var(--text); 0.2s;
+            color: var(--text);
             font-family: inherit;
         }
         .input-row input:focus { border-color: var(--primary); }
@@ -735,17 +859,29 @@
         .input-row .send-btn:hover { opacity: 0.85; }
         .game-header .header-actions { display: flex; gap: 6px; }
         .game-header .header-actions button {
-            padding: 4px 10px;
+            padding: 6px 14px;
             border: 1px solid var(--card-border);
             background: transparent;
             color: var(--text-secondary);
             border-radius: var(--radius-s);
-            font-size: 11px;
+            font-size: 12px;
             cursor: pointer;
             transition: all 0.15s;
             letter-spacing: 0.04em;
+            min-height: 36px;
         }
         .game-header .header-actions button:hover { color: var(--text); border-color: var(--card-border-hover); background: var(--card-hover); }
+
+        .death-banner {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 16px;
+            margin: 0 0 0 0;
+            background: rgba(226, 75, 74, 0.12);
+            border-bottom: 1px solid rgba(226, 75, 74, 0.3);
+            font-size: 13px; color: #E24B4A;
+        }
+        .death-banner-icon { font-size: 16px; }
+        .death-banner-text { flex: 1; }
 
         /* 角色状态面板 */
         .status-panel-overlay {
@@ -973,22 +1109,53 @@
         <p class="home-subtitle-en">AETHERNARRATOR</p>
         <p class="home-subtitle">自定义世界 · AI 生成 · 自由冒险</p>
         <div class="menu-grid">
-            <button class="menu-btn" onclick="showApiModal()">
+            <button class="menu-btn full-width" onclick="showApiModal()">
                 <span class="label">API 配置</span>
                 <span class="desc">填写 AI 接口密钥</span>
             </button>
-            <button class="menu-btn" onclick="showCreateWorldModal()">
-                <span class="label">创建世界</span>
-                <span class="desc">输入 IP 或原创世界观</span>
-            </button>
-            <button class="menu-btn full-width" onclick="showWorldList()">
+            <button class="menu-btn full-width primary-btn" onclick="showWorldList()">
                 <span class="label">进入世界 →</span>
-                <span class="desc">选择已创建的世界开始游玩</span>
+                <span class="desc">选择已创建的世界开始游玩（也可以在这里创建新世界）</span>
             </button>
             <button class="menu-btn full-width" onclick="showSaveList()">
                 <span class="label">读取存档 →</span>
                 <span class="desc">管理不同世界的游玩进度</span>
             </button>
+            <button class="menu-btn full-width" onclick="showSettingsModal()">
+                <span class="label">选项</span>
+                <span class="desc">字体大小 · 显示设置</span>
+            </button>
+        </div>
+        <div class="home-disclaimer">
+            内容由 AI 生成，仅供参考。请认真辨别信息，勿将虚构内容视为事实。
+        </div>
+    </div>
+</div>
+
+<!-- ================= 选项弹窗 ================= -->
+<div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2>选项</h2>
+            <button class="modal-close" onclick="closeModal('settingsModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>字体大小</label>
+                <div class="font-size-controls">
+                    <button class="font-size-btn" onclick="changeFontSize('small')" id="fontSmall">小</button>
+                    <button class="font-size-btn" onclick="changeFontSize('normal')" id="fontNormal">中</button>
+                    <button class="font-size-btn" onclick="changeFontSize('large')" id="fontLarge">大</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>AI 创造性（温度）</label>
+                <input type="range" id="temperatureSlider" min="0" max="1" step="0.1" value="0.5" oninput="updateTempLabel()">
+                <div class="hint" id="tempLabel">0.5 — 剧情模式（稳定连贯）</div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn primary full-width" onclick="closeModal('settingsModal')">完成</button>
         </div>
     </div>
 </div>
@@ -998,6 +1165,11 @@
     <div class="nav-header">
         <button class="back-btn" onclick="goHome()">←</button>
         <h2 class="title">选择世界</h2>
+    </div>
+    <div class="create-world-bar" onclick="showCreateWorldModal()">
+        <span class="create-icon">+</span>
+        <span class="create-label">创建新世界</span>
+        <span class="create-desc">输入 IP 或原创世界观</span>
     </div>
     <div class="list-content" id="worldListContent"></div>
 </div>
@@ -1027,12 +1199,20 @@
             <button onclick="goHome()">返回主界面</button>
         </div>
     </div>
+    <div class="death-banner hidden" id="deathBanner">
+        <span class="death-banner-icon">&#x2620;</span>
+        <span class="death-banner-text" id="deathBannerText">角色已死亡</span>
+    </div>
     <div class="game-body">
-        <div class="game-log" id="gameLog"></div>
+        <div class="game-log" id="gameLog"><div class="choices-row in-log" id="choicesArea"></div></div>
         <div class="game-input-area">
-            <div class="choices-row" id="choicesArea"></div>
+            <div class="loading-indicator" id="loadingIndicator">
+                <span class="loading-dot"></span>
+                <span class="loading-text">正在思考...</span>
+                <span class="loading-time">0.0s</span>
+            </div>
             <div class="input-row">
-                <input type="text" id="playerInput" placeholder="输入你想做的事..." onkeydown="if(event.key==='Enter') submitInput()">
+                <input type="text" id="playerInput" placeholder="输入你想做的事..." onkeydown="if(!event.isComposing&&event.key==='Enter') submitInput()" inputmode="text" enterkeyhint="send" autocomplete="off" autocorrect="off" autocapitalize="none">
                 <button class="send-btn" onclick="submitInput()">发送</button>
             </div>
         </div>
@@ -1082,6 +1262,12 @@
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                     <input type="checkbox" id="mockMode" style="width:auto;">
                     <span>模拟模式（不调用真实 API，仅供体验）</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="noStreamMode" style="width:auto;">
+                    <span>禁用流式输出（CORS 代理不支持时开启）</span>
                 </label>
             </div>
         </div>
@@ -1137,10 +1323,10 @@
             <div class="form-group">
                 <label>上传世界观/小说源文件（可选）</label>
                 <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('sourceFile').click()">
-                    <span id="fileUploadText">点击上传 TXT / DOCX 文件</span>
+                    <span id="fileUploadText">点击上传 TXT / DOCX / EPUB 文件</span>
                 </div>
-                <input type="file" id="sourceFile" accept=".txt,.docx" onchange="handleFileSelect(event)">
-                <div class="upload-hint">支持 .txt 和 .docx 格式，源文件内容将作为世界观生成的参考材料</div>
+                <input type="file" id="sourceFile" accept=".txt,.docx,.epub" onchange="handleFileSelect(event)">
+                <div class="upload-hint">支持 .txt、.docx 和 .epub 格式，源文件内容将作为世界观生成的参考材料</div>
             </div>
 
             <!-- 文风参考 -->
@@ -1245,6 +1431,7 @@
         <h2>游戏结束</h2>
         <div class="reason" id="gameOverReason">你的旅程到此为止。</div>
         <button class="btn primary full-width" onclick="backToHomeAfterGameOver()">返回主界面</button>
+        <button class="btn secondary full-width" style="margin-top:8px;" onclick="reviewDeathScene()">查看结局</button>
     </div>
 </div>
 
@@ -1308,42 +1495,76 @@ function applyTheme() {
 /* ================= 初始化 ================= */
 async function init() {
     applyTheme();
+    applyFontSize();
     loadConfig();
-    loadWorlds();
     loadSaves();
+
+    // 逐个加载数据文件，各自独立降级，一个失败不影响其他
     try {
-        const [kb, emb, prompt, state] = await Promise.all([
-            fetch("./data/lore_kb.json").then(r => r.json()),
-            fetch("./data/lore_kb_with_embeddings.json").then(r => r.json()).catch(() => null),
-            fetch("./data/system_prompt_template.md").then(r => r.text()),
-            fetch("./data/initial_state.json").then(r => r.json())
-        ]);
-        loreKB = kb;
-        loreEmbeddings = emb;
-        systemPromptTemplate = prompt;
+        const res = await fetch("./data/lore_kb.json");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        loreKB = await res.json();
+    } catch (e) { console.warn("lore_kb.json 加载失败:", e.message); loreKB = { ip: "默认世界", snippets: [] }; }
+
+    try {
+        const res = await fetch("./data/lore_kb_with_embeddings.json");
+        if (res.ok) loreEmbeddings = await res.json();
+    } catch (e) { console.warn("向量知识库加载失败:", e.message); loreEmbeddings = null; }
+
+    try {
+        const res = await fetch("./data/system_prompt_template.md");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        systemPromptTemplate = await res.text();
+    } catch (e) { console.warn("system_prompt_template.md 加载失败:", e.message); systemPromptTemplate = ""; }
+
+    try {
+        const res = await fetch("./data/initial_state.json");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const state = await res.json();
         const saved = localStorage.getItem(STORAGE_KEYS.state);
         if (saved) {
             try { gameState = JSON.parse(saved); } catch (e) { gameState = deepClone(state); }
         } else {
             gameState = deepClone(state);
         }
-        const savedHistory = localStorage.getItem(STORAGE_KEYS.history);
-        if (savedHistory) {
-            try { conversationHistory = JSON.parse(savedHistory); } catch (e) { conversationHistory = []; }
-        }
-        const savedChat = localStorage.getItem(STORAGE_KEYS.chatHistory);
-        if (savedChat) {
-            try { chatHistory = JSON.parse(savedChat); } catch (e) { chatHistory = []; }
-        }
-        renderWorldList();
-        renderSaveList();
-    } catch (e) {
-        showToast("加载游戏数据失败：" + e.message, "error");
+    } catch (e) { console.warn("initial_state.json 加载失败:", e.message); gameState = null; }
+
+    // loreKB 已就绪，现在创建 demo 世界
+    loadWorlds();
+
+    const savedHistory = localStorage.getItem(STORAGE_KEYS.history);
+    if (savedHistory) {
+        try { conversationHistory = JSON.parse(savedHistory); } catch (e) { conversationHistory = []; }
+    }
+    const savedChat = localStorage.getItem(STORAGE_KEYS.chatHistory);
+    if (savedChat) {
+        try { chatHistory = JSON.parse(savedChat); } catch (e) { chatHistory = []; }
+    }
+    renderWorldList();
+    renderSaveList();
+
+    // 后台预热 embedding 模型
+    if (loreEmbeddings && typeof transformers !== "undefined") {
+        setTimeout(async () => {
+            try {
+                if (!embeddingModel) {
+                    embeddingModel = await transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+                    console.log("Embedding model pre-warmed");
+                }
+            } catch (e) { console.warn("Embedding model pre-warm failed:", e.message); }
+        }, 500);
+    }
+
+    // iOS 键盘适配
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", () => {
+            document.body.style.height = window.visualViewport.height + "px";
+        });
     }
 }
 
 function deepClone(obj) {
-    return JSON.parse(JSON.stringify(obj));
+    return typeof structuredClone !== "undefined" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj));
 }
 
 function loadConfig() {
@@ -1353,14 +1574,20 @@ function loadConfig() {
     document.getElementById("apiKey").value = cfg.apiKey || "";
     document.getElementById("modelName").value = cfg.modelName || "deepseek-v4-flash";
     document.getElementById("mockMode").checked = cfg.mockMode === true;
+    document.getElementById("noStreamMode").checked = cfg.noStreamMode === true;
 }
 
 function loadWorlds() {
     const data = localStorage.getItem(STORAGE_KEYS.worlds);
     worlds = data ? JSON.parse(data) : [
-        createDemoWorld("剑来", "ip", "大千世界，万族林立，修行者求长生。", ["仙侠", "已有IP"]),
-        createDemoWorld("蒸汽与魔法", "original", "维多利亚风格的蒸汽朋克世界，魔法被机械束缚。", ["原创", "蒸汽朋克"])
+        createDemoWorld("蒸汽与魔法", "original", "维多利亚风格的蒸汽朋克世界，魔法被机械束缚。", ["原创", "蒸汽朋克"]),
+        createHongLouMengWorld()
     ];
+    // 迁移：如果已有数据但缺少红楼梦 demo，自动注入
+    if (data && !worlds.some(w => w.id === "demo_红楼梦")) {
+        worlds.push(createHongLouMengWorld());
+        saveWorlds();
+    }
 }
 
 function createDemoWorld(name, type, desc, tags) {
@@ -1376,7 +1603,122 @@ function createDemoWorld(name, type, desc, tags) {
         initial_state: null,
         lore_kb: deepClone(loreKB || { ip: name, snippets: [] }),
         system_prompt: "",
-        behavior_records: []
+        behavior_records: [],
+        initial_choices: []
+    };
+}
+
+function createHongLouMengWorld() {
+    return {
+        id: "demo_红楼梦",
+        name: "红楼梦 · 大观园",
+        type: "ip",
+        desc: "清代乾隆年间，金陵四大家族之首的贾府煊赫一时。宁国府与荣国府比邻而居，园林之中，儿女情长、家族兴衰、命运纠葛交织成一部「千红一哭，万艳同悲」的大戏。",
+        hero: "贾府中一位身份待定的年轻公子/小姐，寄居荣国府。",
+        ip_name: "红楼梦",
+        createdAt: new Date().toISOString().split("T")[0],
+        tags: ["已有IP", "古典文学", "家族兴衰"],
+        schema: {
+            progression_label: "情缘",
+            progression_path_label: "身份",
+            has_skills: true,
+            skill_label: "才艺",
+            attribute_labels: {
+                courage: "胆识", perception: "灵慧", patience: "涵养", luck: "机缘", will: "心性"
+            },
+            time_periods: { morning: "晨起", forenoon: "午前", afternoon: "午后", evening: "黄昏", night: "入夜" },
+            game_over_conditions: ["is_alive === false"]
+        },
+        initial_state: {
+            name: "瑾玉",
+            age: 15,
+            background: "贾府旁支之后，父母早亡，由贾母作主接入荣国府抚养。自幼聪慧，琴棋书画皆有所涉，但性情敏感，常感寄人篱下之伤。",
+            personality: ["聪慧敏感", "多愁善感", "心地纯良"],
+            attributes: {
+                courage: "你向来胆小，丫鬟们放个炮仗你都要捂耳。但若有人欺辱你亲近之人，你又能鼓起莫名的勇气。",
+                perception: "你的眼睛总能捕捉到旁人忽略的细节——丫头们谁和谁走得近了、太太今天嘴角含笑还是暗沉，你总比别人先察觉。",
+                patience: "你能在窗下临半天字帖不挪窝，也能为一首残诗翻来覆去琢磨到三更。",
+                luck: "命运待你不薄不厚，恰似大观园里一阵穿堂风，不知会吹开哪扇门。",
+                will: "心性绵软，凡事容易往心里去。但骨子里又有一股不服的倔劲。"
+            },
+            progression: { path: "贾府旁支", rank: "寄居", progress: 0 },
+            relationships: {
+                "贾母": "老太太疼你，说你眉眼间有几分她年轻时的样子。常唤你到跟前说话解闷。",
+                "林黛玉": "她是老太太的外孙女，比你早来一年。你们一见如故，她常说你是这府里唯一懂她的人。",
+                "贾宝玉": "荣国府的混世魔王，衔玉而生。他待你极好，可你总觉得他看你的眼神里藏着什么说不清的东西。",
+                "薛宝钗": "皇商薛家的千金，端庄大方。你敬她事事周全，却也隐隐感到她对你有所保留。",
+                "王熙凤": "荣国府的管事奶奶，精明强干。她对你还算客气，可你知道她眼里只有利益。",
+                "袭人": "宝玉房里的大丫鬟，温柔体贴。你与她说过几句话，觉得她是个可托付的人。"
+            },
+            skills: {
+                "诗词": "能凑出几首工整的五言七律，偶尔也有惊人之句。黛玉说你灵气有余、火候不足。",
+                "琴艺": "能弹几支《平沙落雁》《梅花三弄》，技法尚可但情感还不够沉厚。",
+                "书画": "临过几年帖，字迹清秀有余，筋骨不足。",
+                "女红": "能绣些简单花样，但绣鸳鸯时总把两只绣得一模一样，被黛玉笑说是个呆子。"
+            },
+            inventory: [
+                { item_id: "jade_pendant", name: "羊脂玉佩", count: 1 },
+                { item_id: "poetry_book", name: "诗集手稿", count: 1 },
+                { item_id: "silver", name: "碎银", count: 5 }
+            ],
+            completed_events: [],
+            current_location: "荣国府 · 贾母院",
+            current_date: { day: 1, period: "morning" },
+            goals: [
+                { goal_id: "greet_grandma", name: "给贾母请安", type: "完成事件", deadline: { day: 1, period: "morning" }, visible: true },
+                { goal_id: "meet_cousins", name: "认识大观园里的兄弟姐妹", type: "关系变化", deadline: { day: 3, period: "night" }, visible: true }
+            ],
+            status_effects: [],
+            is_alive: true,
+            death_reason: null
+        },
+        lore_kb: {
+            ip: "红楼梦",
+            snippets: [
+                { id: "hlm1", category: "规则", title: "贾府规矩", content: "贾府是金陵四大家族之首，分为宁国府与荣国府。府中等级森严：老太君（贾母）为最高权威，然后是老爷太太、少爷小姐、大丫鬟、小丫鬟、婆子仆役。晨昏定省不可废，逢年过节祭祀、宴请各有规矩。", keywords: ["贾府", "规矩", "等级", "请安"] },
+                { id: "hlm2", category: "规则", title: "男女大防", content: "虽是一家人，男女之间仍有内外之别。小姐们不可随意抛头露面，与外人接触须有人陪同。宝玉是例外——贾母特许他住在大观园中与众姐妹为伴。", keywords: ["男女", "内外", "大观园"] },
+                { id: "hlm3", category: "规则", title: "世俗与出世", content: "红楼世界有现实与超现实两个层面：一面是贾府的日常起居、官场往来、家族兴衰；另一面是太虚幻境、通灵宝玉、绛珠仙草的宿世之缘。两者交织，不可分割。", keywords: ["太虚幻境", "宿命", "通灵宝玉"] },
+                { id: "hlm4", category: "地点", title: "大观园", content: "为迎接贾元春省亲而建，元春省亲后命众姐妹与宝玉搬入居住。园中有潇湘馆（黛玉居所）、蘅芜苑（宝钗居所）、怡红院（宝玉居所）、稻香村、拢翠庵等多处院落。曲径通幽、花木扶疏，是一方世外桃源。", keywords: ["大观园", "潇湘馆", "蘅芜苑", "怡红院"] },
+                { id: "hlm5", category: "地点", title: "荣国府", content: "贾母与贾政、王夫人所居。正房、耳房、穿堂、后院层次分明。贾母院在最深处，花厅日常摆着各色点心，丫头婆子往来不绝。", keywords: ["荣国府", "贾母", "贾政"] },
+                { id: "hlm6", category: "地点", title: "宁国府", content: "贾珍、尤氏所居。与荣国府仅一墙之隔，格局相似，但风气更奢靡。府中有一座天香楼，常设宴席。", keywords: ["宁国府", "贾珍", "天香楼"] },
+                { id: "hlm7", category: "人物", title: "贾宝玉", content: "荣国府贾政之子，衔玉而生。性格叛逆、厌恶仕途经济，却对女儿家极尽温柔。常住大观园怡红院，身边有袭人、晴雯、麝月等一众丫鬟。他与林黛玉青梅竹马、心灵相通，与薛宝钗则有金玉良缘之说。", keywords: ["贾宝玉", "怡红院", "黛玉", "宝钗", "袭人"] },
+                { id: "hlm8", category: "人物", title: "林黛玉", content: "贾母外孙女，父母双亡后投奔贾府。才华横溢，诗词冠绝大观园，但体弱多病、性情敏感。居潇湘馆，与宝玉情投意合，却常因小事生隙。前世为绛珠仙草，以泪还神瑛侍者灌溉之恩。", keywords: ["林黛玉", "潇湘馆", "绛珠仙草", "诗词"] },
+                { id: "hlm9", category: "人物", title: "薛宝钗", content: "皇商薛家之女，随母兄投奔贾府。端庄大方、处事周全，深得上下欢心。居蘅芜苑，佩戴金锁，与宝玉的通灵宝玉相传是一对「金玉良缘」。", keywords: ["薛宝钗", "蘅芜苑", "金锁", "金玉良缘"] },
+                { id: "hlm10", category: "人物", title: "王熙凤", content: "荣国府管家奶奶，贾琏之妻。精明强干、心狠手辣，偌大贾府在她手里运转自如。嘴甜心苦，对下人恩威并施，对利益锱铢必较。人称「凤辣子」。", keywords: ["王熙凤", "管家", "凤辣子"] },
+                { id: "hlm11", category: "人物", title: "贾母", content: "贾府最高权威，史老太君。年过七旬，经历了贾府的鼎盛与初显败象。极疼孙子宝玉和外孙女黛玉，是府中真正的定海神针。", keywords: ["贾母", "史老太君", "权威"] },
+                { id: "hlm12", category: "人物", title: "其他姐妹", content: "大观园中还有贾迎春（懦弱温和）、贾探春（精明刚烈）、贾惜春（孤僻冷傲）三春姐妹，以及李纨（寡居的珠大奶奶）、史湘云（活泼豪爽的史家小姐）、妙玉（带发修行的拢翠庵主人）等一众女子。", keywords: ["迎春", "探春", "惜春", "湘云", "妙玉"] },
+                { id: "hlm13", category: "事件", title: "前世之缘", content: "宝玉前世为赤瑕宫神瑛侍者，黛玉前世为灵河岸绛珠仙草。神瑛侍者以甘露灌溉，绛珠仙草得以久延岁月。终修成女体后，欲以一生之泪偿还灌溉之恩。", keywords: ["前世", "神瑛侍者", "绛珠仙草", "还泪"] },
+                { id: "hlm14", category: "物品", title: "通灵宝玉", content: "宝玉出生时口中衔来的一块五彩晶莹的玉石，正面刻着'莫失莫忘，仙寿恒昌'，反面是'一除邪祟，二疗冤疾，三知祸福'。它不仅是宝玉的命根子，也是整部书的灵魂象征。", keywords: ["通灵宝玉", "莫失莫忘"] },
+                { id: "hlm15", category: "势力", title: "四大家族", content: "贾、史、王、薛四大家族，祖上皆是勋贵。贾不假，白玉为堂金作马；阿房宫，三百里，住不下金陵一个史；东海缺少白玉床，龙王来请金陵王；丰年好大雪，珍珠如土金如铁。如今的四大家族已显颓势。", keywords: ["四大家族", "贾史王薛", "金陵"] }
+            ]
+        },
+        system_prompt: `你是《红楼梦》前八十回世界观的 AI 文字游戏叙事主持人。请严格遵循以下设定：
+
+1. 时间：清代乾隆年间，地点：金陵贾府（宁国府/荣国府）及大观园。不得出现现代物品、观念或用语。
+2. 语言风格：模仿曹雪芹的白话章回体，可用简洁雅致的文白夹杂。叙事要含蓄、留白、有诗意。对话需符合人物身份和性格。
+3. 硬性约束：
+   - 不可篡改原著核心设定的命运走向（如黛玉注定泪尽而亡、宝玉终将出家），但可以在细节上自由发挥。
+   - 贾母为最高权威，宝玉不能做违逆贾母之事。
+   - 男女大防不可逾越，小姐们不能随意与外人独处。
+   - 超自然元素（太虚幻境、通灵宝玉的灵异）可以出现，但要保持神秘感和诗意，不可过度直白。
+4. 输出必须是 JSON 格式。`,
+        opening_narrative: `这一日正是仲春时节，荣国府里的海棠开得正盛，一阵风过，花瓣簌簌落了满庭。
+
+你站在贾母院的花厅外，手里绞着帕子，心里七上八下的。老太太今早传话说要见你，你本就寄人篱下、处处小心，哪禁得起这般郑重其事的召唤？是福是祸，一时竟也猜不透。
+
+耳边传来小丫鬟银钏的声音："姑娘，老太太请你进去呢。"
+
+你深吸一口气，理了理鬓边碎发，迈步跨进那挂着湘帘的门——`,
+        initial_choices: [
+            { text: "向贾母恭敬请安，问老太太身子可好", hint: "礼数周全，讨老人家欢心" },
+            { text: "悄悄打量屋内还有谁在，心里盘算应对", hint: "先弄清局面，再决定如何说话" },
+            { text: "抬眼环顾，被墙上的一幅字画吸引", hint: "被风雅之物触动，或许会引出故事" }
+        ],
+        behavior_records: [],
+        style_ref: "original",
+        custom_style: "",
+        plot_freedom: 2,
+        custom_prefix: ""
     };
 }
 
@@ -1393,10 +1735,18 @@ function saveSaves() {
     localStorage.setItem(STORAGE_KEYS.saves, JSON.stringify(saves));
 }
 
-function saveState() {
-    localStorage.setItem(STORAGE_KEYS.state, JSON.stringify(gameState));
-    localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(conversationHistory));
-    localStorage.setItem(STORAGE_KEYS.chatHistory, JSON.stringify(chatHistory));
+function saveState(serialized) {
+    // 如果调用方已预序列化，直接使用，避免重复 JSON.stringify
+    const stateStr = serialized ? serialized.state : JSON.stringify(gameState);
+    const historyStr = serialized ? serialized.history : JSON.stringify(conversationHistory);
+    const chatStr = serialized ? serialized.chatHistory : JSON.stringify(chatHistory);
+    try {
+        localStorage.setItem(STORAGE_KEYS.state, stateStr);
+        localStorage.setItem(STORAGE_KEYS.history, historyStr);
+        localStorage.setItem(STORAGE_KEYS.chatHistory, chatStr);
+    } catch (e) {
+        console.warn("localStorage 写入失败，可能空间不足", e);
+    }
 }
 
 function saveConfig() {
@@ -1405,7 +1755,8 @@ function saveConfig() {
         corsProxy: document.getElementById("corsProxy").value.trim(),
         apiKey: document.getElementById("apiKey").value.trim(),
         modelName: document.getElementById("modelName").value.trim(),
-        mockMode: document.getElementById("mockMode").checked
+        mockMode: document.getElementById("mockMode").checked,
+        noStreamMode: document.getElementById("noStreamMode").checked
     };
     localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(cfg));
 }
@@ -1483,6 +1834,53 @@ function showApiModal() {
     showModal("apiModal");
 }
 
+function showSettingsModal() {
+    showModal("settingsModal");
+    updateFontSizeButtons();
+}
+
+let fontSizeSetting = localStorage.getItem("aigame_fontsize") || "normal";
+
+function applyFontSize() {
+    const zooms = { small: "0.85", normal: "1", large: "1.18" };
+    document.body.style.zoom = zooms[fontSizeSetting];
+}
+
+function changeFontSize(size) {
+    fontSizeSetting = size;
+    localStorage.setItem("aigame_fontsize", size);
+    applyFontSize();
+    updateFontSizeButtons();
+}
+
+function updateFontSizeButtons() {
+    ["small", "normal", "large"].forEach(s => {
+        const btn = document.getElementById("font" + s.charAt(0).toUpperCase() + s.slice(1));
+        if (btn) btn.classList.toggle("active", fontSizeSetting === s);
+    });
+}
+
+let temperatureSetting = parseFloat(localStorage.getItem("aigame_temperature") || "0.5");
+
+function showSettingsModal() {
+    showModal("settingsModal");
+    updateFontSizeButtons();
+    document.getElementById("temperatureSlider").value = temperatureSetting;
+    updateTempLabel();
+}
+
+function updateTempLabel() {
+    const v = parseFloat(document.getElementById("temperatureSlider").value);
+    temperatureSetting = v;
+    localStorage.setItem("aigame_temperature", v.toString());
+    const desc = v <= 0.3 ? "严谨模式（高度一致）" : v <= 0.5 ? "剧情模式（稳定连贯）" : v <= 0.7 ? "均衡模式（适中开放）" : "创意模式（自由发散）";
+    document.getElementById("tempLabel").textContent = v.toFixed(1) + " — " + desc;
+}
+
+function getTemperature() {
+    return temperatureSetting;
+}
+
 function showCreateWorldModal() {
     showModal("createWorldModal");
 }
@@ -1529,7 +1927,69 @@ function handleFileSelect(event) {
         } else {
             showToast("DOCX 解析需要 mammoth.js，请使用 .txt 格式", "error");
         }
+    } else if (file.name.endsWith(".epub")) {
+        if (typeof JSZip !== "undefined") {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                text.innerHTML = "正在解析 EPUB...";
+                parseEpub(e.target.result)
+                    .then(function(extracted) {
+                        sourceFileContent = extracted;
+                        area.classList.add("has-file");
+                        text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" onclick="clearSourceFile(event)">✕</span>`;
+                        area.onclick = null;
+                        showToast("EPUB 解析完成，" + Math.round(extracted.length / 1000) + "K 字符", "success");
+                    })
+                    .catch(function(err) {
+                        showToast("EPUB 解析失败：" + err.message, "error");
+                        text.innerHTML = "点击上传 TXT / DOCX / EPUB 文件";
+                    });
+            };
+            reader.readAsArrayBuffer(file);
+        } else {
+            showToast("EPUB 解析需要 JSZip，请使用 .txt 格式", "error");
+        }
     }
+}
+
+async function parseEpub(arrayBuffer) {
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    let containerXml = null;
+    for (const name of Object.keys(zip.files)) {
+        if (name.toLowerCase().endsWith("container.xml")) {
+            containerXml = await zip.files[name].async("string");
+            break;
+        }
+    }
+    if (!containerXml) throw new Error("无法找到 container.xml");
+    const rootfileMatch = containerXml.match(/full-path="([^"]+)"/) || containerXml.match(/full-path='([^']+)'/);
+    if (!rootfileMatch) throw new Error("无法解析 OPF 路径");
+    const opfPath = rootfileMatch[1];
+    const opfContent = await zip.files[opfPath].async("string");
+    const spineMatch = opfContent.match(/<spine[^>]*>([\s\S]*?)<\/spine>/);
+    const manifestMatch = opfContent.match(/<manifest>([\s\S]*?)<\/manifest>/);
+    if (!spineMatch || !manifestMatch) throw new Error("无法解析 OPF");
+    const spineItems = [...spineMatch[1].matchAll(/idref="([^"]+)"/g)].map(m => m[1]);
+    const manifestItems = [...manifestMatch[1].matchAll(/id="([^"]+)"[^>]*href="([^"]+)"/g)].map(m => ({ id: m[1], href: m[2] }));
+    const idToHref = {};
+    manifestItems.forEach(item => { idToHref[item.id] = item.href; });
+    const opfDir = opfPath.substring(0, opfPath.lastIndexOf("/"));
+    let fullText = "";
+    for (const idref of spineItems) {
+        const href = idToHref[idref];
+        if (!href) continue;
+        const targetPath = opfDir ? opfDir + "/" + href : href;
+        let html;
+        try { html = await zip.files[targetPath].async("string"); }
+        catch (e) { try { html = await zip.files[href].async("string"); } catch (e2) { continue; } }
+        let text = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+            .replace(/<[^>]+>/g, "\n").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&\w+;/g, " ").replace(/&#\d+;/g, " ");
+        text = text.replace(/\n\s*\n/g, "\n").trim();
+        if (text.length > 50) fullText += text + "\n\n";
+    }
+    if (!fullText) throw new Error("未能提取到文本内容");
+    return fullText;
 }
 
 function clearSourceFile(e) {
@@ -1650,6 +2110,7 @@ async function generateWorld() {
             initial_state: generated.initial_state,
             lore_kb: generated.lore_kb,
             opening_narrative: generated.opening_narrative || "",
+            initial_choices: generated.initial_choices || [],
             system_prompt: generated.system_prompt,
             behavior_records: [],
             source_content: sourceFileContent || "",
@@ -1727,7 +2188,9 @@ async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceCont
         throw new Error(`HTTP ${res.status}: ${text}`);
     }
     const data = await res.json();
-    return parseResponse(data.choices[0].message.content);
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error("API 返回异常：无法获取响应内容");
+    return parseResponse(content);
 }
 
 function buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom) {
@@ -1813,6 +2276,8 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - 让玩家立即感受到身处该世界，知晓自己的处境和初步目标
    - 结尾暗示玩家的第一个行动方向，但不要强制
    - 篇幅适中（200-500字），不要太短也不要太长
+
+6. initial_choices: 开场选项数组（2-4个），每个选项包含 {text: "选项文本", hint: "简短提示"}，用于玩家首次进入时选择第一个行动。选项要符合世界观和角色设定，引导而非强制。
 
 # 注意
 
@@ -2009,13 +2474,17 @@ function renderWorldList() {
     if (!worlds.length) {
         container.innerHTML = `
             <div class="empty-state">
-                <div class="text">还没有世界<br>先去「创建世界」生成一个吧</div>
+                <div class="text">还没有世界<br>点击上方按钮创建一个吧</div>
             </div>`;
         return;
     }
-    container.innerHTML = worlds.map(w => `
-        <div class="list-item world-list-item" onclick="showWorldDetail('${w.id}')">
-            <div class="item-title">${w.name}</div>
+    const now = Date.now();
+    const newThreshold = 24 * 60 * 60 * 1000; // 24 小时内算新世界
+    container.innerHTML = worlds.map((w, i) => {
+        const isNew = (now - new Date(w.createdAt).getTime()) < newThreshold;
+        return `
+        <div class="list-item world-list-item${isNew ? " new-world" : ""}" onclick="showWorldDetail('${w.id}')">
+            <div class="item-title">${w.name}${isNew ? '<span class="new-badge">新</span>' : ""}</div>
             <div class="item-meta">${w.desc}</div>
             <div class="item-tags">
                 ${w.tags.map(t => `<span class="tag">${t}</span>`).join("")}
@@ -2023,7 +2492,7 @@ function renderWorldList() {
             </div>
             <button class="delete-world-btn" onclick="event.stopPropagation(); deleteWorld('${w.id}')">删除</button>
         </div>
-    `).join("");
+    `}).join("");
 }
 
 function renderSaveList() {
@@ -2035,16 +2504,20 @@ function renderSaveList() {
             </div>`;
         return;
     }
-    container.innerHTML = saves.map(s => `
-        <div class="list-item">
-            <div class="item-title">${s.worldName}</div>
-            <div class="item-meta">${s.progress}<br>最后游玩：${s.updatedAt}</div>
-            <div class="item-tags">
-                <span class="tag primary" onclick="loadSave('${s.id}')">继续游玩</span>
-                <span class="tag" style="color:var(--danger);" onclick="deleteSave('${s.id}')">删除</span>
+    container.innerHTML = saves.map(s => {
+        const isDead = s.state && s.state.is_alive === false;
+        return `
+        <div class="list-item save-item${isDead ? " dead-save" : ""}">
+            <div class="save-info">
+                <div class="item-title">${s.worldName}${isDead ? ' <span class="dead-badge">&#x2620; 已死亡</span>' : ""}</div>
+                <div class="item-meta">${s.progress}<br>最后游玩：${s.updatedAt}</div>
+            </div>
+            <div class="save-actions">
+                <button class="save-play-btn" onclick="loadSave('${s.id}')">继续游玩</button>
+                <button class="save-del-btn" onclick="deleteSave('${s.id}')">删除</button>
             </div>
         </div>
-    `).join("");
+    `}).join("");
 }
 
 function showWorldDetail(worldId) {
@@ -2108,7 +2581,7 @@ function showWorldDetail(worldId) {
     showModal("worldDetailModal");
 }
 
-function startGame() {
+async function startGame() {
     closeModal("worldDetailModal");
     if (!currentWorld) return;
     stopTypewriter();
@@ -2130,7 +2603,7 @@ function startGame() {
     showScreen("gameScreen");
     document.getElementById("gameWorldName").textContent = currentWorld.name;
     updateGameDayInfo();
-    renderLog();
+    renderLog(true);
     renderChoices([]);
 
     // 开场白（UI 展示，不推入 chatHistory）
@@ -2150,7 +2623,13 @@ function startGame() {
 
     saveState();
     renderLog();
-    startTypewriter(conversationHistory.length - 1);
+    await startTypewriter(conversationHistory.length - 1);
+
+    // 打字完成后显示开场选项
+    if (currentWorld.initial_choices && currentWorld.initial_choices.length) {
+        currentChoices = currentWorld.initial_choices;
+        renderChoices(currentChoices);
+    }
 }
 
 function defaultInitialState() {
@@ -2185,7 +2664,7 @@ function loadSave(saveId) {
     if (!save) return;
     stopTypewriter();
     currentWorld = worlds.find(w => w.id === save.worldId);
-    invalidateSystemPromptCache();  // P0: 加载存档可能换世界，失效缓存
+    invalidateSystemPromptCache();
     if (save.state) gameState = deepClone(save.state);
     if (save.history) conversationHistory = deepClone(save.history);
     chatHistory = save.chatHistory ? deepClone(save.chatHistory) : rebuildChatFromHistory(save.history);
@@ -2193,8 +2672,16 @@ function loadSave(saveId) {
     showScreen("gameScreen");
     document.getElementById("gameWorldName").textContent = save.worldName;
     updateGameDayInfo();
-    renderLog();
+
+    // 检查存档是否为死亡状态
+    checkDeathBanner();
+
+    renderLog(true);
     renderChoices([]);
+    updateInputState();
+
+    // ★ 从历史恢复最后一条有选项的记录
+    restoreLastChoices();
 }
 
 function deleteSave(saveId) {
@@ -2235,29 +2722,27 @@ function createOrUpdateSave() {
     const existing = saves.find(s => s.worldId === currentWorld.id);
     const progress = `第 ${gameState.current_date.day} 天 · ${getPeriodLabel(gameState.current_date.period)}`;
     const now = new Date().toLocaleString("zh-CN", { hour12: false });
-    // 过滤掉警告条目，存档中只保留故事内容
     const cleanHistory = conversationHistory.filter(e => !e.isWarning);
-    // 多轮对话历史也一并存档（同样过滤掉警告轮次对应的消息）
     const cleanChat = deepClone(chatHistory);
+    // 预序列化，共享给 saveState，避免重复 JSON.stringify
+    const stateStr = JSON.stringify(gameState);
+    const historyStr = JSON.stringify(conversationHistory);
+    const cleanHistoryStr = JSON.stringify(cleanHistory);
     if (existing) {
-        existing.progress = progress;
-        existing.updatedAt = now;
-        existing.state = deepClone(gameState);
-        existing.history = deepClone(cleanHistory);
+        existing.progress = progress; existing.updatedAt = now;
+        existing.state = JSON.parse(stateStr);
+        existing.history = JSON.parse(cleanHistoryStr);
         existing.chatHistory = cleanChat;
     } else {
         saves.unshift({
-            id: "s" + Date.now(),
-            worldId: currentWorld.id,
-            worldName: currentWorld.name,
-            progress,
-            updatedAt: now,
-            state: deepClone(gameState),
-            history: deepClone(cleanHistory),
-            chatHistory: cleanChat
+            id: "s" + Date.now(), worldId: currentWorld.id, worldName: currentWorld.name,
+            progress, updatedAt: now,
+            state: JSON.parse(stateStr), history: JSON.parse(cleanHistoryStr), chatHistory: cleanChat
         });
     }
     saveSaves();
+    // 使用已序列化的字符串保存 localStorage，避免 saveState 再次序列化
+    saveState({ state: stateStr, history: historyStr, chatHistory: JSON.stringify(chatHistory) });
 }
 
 /* ================= 角色状态面板 ================= */
@@ -2506,14 +2991,20 @@ function escapeHtml(str) {
         .replace(/'/g, "&#039;");
 }
 
-function renderLog() {
+let renderedEntryCount = 0;  // 增量渲染计数器，避免每轮重建整个日志 DOM
+
+function renderLog(reset) {
     const log = document.getElementById("gameLog");
-    log.innerHTML = conversationHistory.map(entry => {
+    if (reset) { renderedEntryCount = 0; log.innerHTML = '<div class="choices-row in-log" id="choicesArea"></div>'; }
+
+    // 只追加新增的条目
+    for (let i = renderedEntryCount; i < conversationHistory.length; i++) {
+        const entry = conversationHistory[i];
         const warningClass = entry.isWarning ? " warning" : "";
         const metaLabel = entry.isWarning
-            ? "⚠️ 系统提示"
+            ? "系统提示"
             : (entry.player ? "你" : "开场");
-        return `
+        const html = `
         <div class="log-entry${warningClass}">
             <div class="meta">
                 <span>${metaLabel} · 第${entry.day}天 ${getPeriodLabel(entry.period)}</span>
@@ -2522,8 +3013,16 @@ function renderLog() {
             <div class="narrative">${entry.isWarning ? escapeHtml(entry.narrative) : highlightItems(entry.narrative)}</div>
         </div>
         `;
-    }).join("");
+        log.insertBefore(createElementFromHTML(html), document.getElementById("choicesArea"));
+    }
+    renderedEntryCount = conversationHistory.length;
     log.scrollTop = log.scrollHeight;
+}
+
+function createElementFromHTML(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html.trim();
+    return template.content.firstChild;
 }
 
 /* ================= 打字机效果 ================= */
@@ -2639,7 +3138,9 @@ function getWorldLoreKB() {
 function keywordRetrieve(input, topK = 5) {
     const kb = getWorldLoreKB();
     if (!kb || !kb.snippets) return [];
-    const terms = input.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+    // 中文分词：Intl.Segmenter 按词语切分，"我要去大观园找林黛玉" → ["我","要","去","大观园","找","林黛玉"]
+    const terms = segmentChinese(input);
+    if (!terms.length) return [];
     const scored = kb.snippets.map(s => {
         let score = 0;
         const text = (s.category + " " + s.title + " " + s.content + " " + (s.keywords || []).join(" ")).toLowerCase();
@@ -2651,6 +3152,35 @@ function keywordRetrieve(input, topK = 5) {
         return { snippet: s, score };
     }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
     return scored.map(x => x.snippet);
+}
+
+// 中文 + 英文通用分词：使用 Intl.Segmenter（现代浏览器均支持）
+function segmentChinese(text) {
+    const terms = [];
+    // 先按空白/标点切出英文单词和中文片段
+    const chunks = text.split(/[\s,，。！？、；：""''「」《》（）【】]+/).filter(Boolean);
+    for (const chunk of chunks) {
+        // 纯英文/数字 → 直接作为关键词
+        if (/^[a-zA-Z0-9]+$/.test(chunk)) {
+            if (chunk.length >= 2) terms.push(chunk.toLowerCase());
+            continue;
+        }
+        // 中文 → Intl.Segmenter 分词
+        try {
+            const segmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
+            const segments = segmenter.segment(chunk);
+            for (const seg of segments) {
+                if (seg.isWordLike && seg.segment.length >= 2) {
+                    terms.push(seg.segment);
+                }
+            }
+        } catch (e) {
+            // 降级：如果 Segmenter 不可用，对大块中文直接作为关键词
+            if (chunk.length >= 2 && chunk.length <= 10) terms.push(chunk);
+        }
+    }
+    // 去重
+    return [...new Set(terms)];
 }
 
 async function embeddingRetrieve(input, topK = 5) {
@@ -2684,8 +3214,11 @@ function cosineSimilarity(a, b) {
 }
 
 async function retrieve(input) {
-    const keyword = keywordRetrieve(input, 7);
-    const embedding = await embeddingRetrieve(input, 7);
+    // RAG 并行化：关键词检索和向量检索同时进行
+    const [keyword, embedding] = await Promise.all([
+        Promise.resolve(keywordRetrieve(input, 7)),
+        embeddingRetrieve(input, 7)
+    ]);
     const merged = new Map();
     for (const s of keyword) merged.set(s.id, { snippet: s, score: 1 });
     for (const s of embedding) {
@@ -2706,7 +3239,8 @@ async function retrieve(input) {
 /* ================= 关键事实 / 玩家行为记录 ================= */
 function retrieveBehaviorRecords(input, topK = 3) {
     if (!currentWorld || !currentWorld.behavior_records) return [];
-    const terms = input.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+    const terms = segmentChinese(input);
+    if (!terms.length) return [];
     const scored = currentWorld.behavior_records.map(b => {
         let score = 0;
         const text = b.text.toLowerCase();
@@ -2722,7 +3256,7 @@ function addBehaviorRecords(facts) {
     for (const text of facts) {
         if (!text || currentWorld.behavior_records.some(b => b.text === text)) continue;
         currentWorld.behavior_records.push({
-            id: "b" + Date.now() + Math.random().toString(36).slice(2, 6),
+            id: "b" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Date.now() + Math.random().toString(36).slice(2, 6)),
             text,
             createdAt: new Date().toISOString()
         });
@@ -2845,6 +3379,9 @@ function buildSystemPrompt() {
         systemPrompt += "\n\n# 故事起点 / 开场白（固定上下文）\n\n你正在讲述的故事始于以下场景。后续所有叙事都应从此处展开，保持世界观和氛围的一致性：\n\n---\n" + currentWorld.opening_narrative + "\n---";
     }
 
+    // ★ NPC 一致性自检指令（静态，注入 system prompt）
+    systemPrompt += "\n\n# 叙事一致性要求\n\n每次生成叙事前，请确认：\n- 叙事中的 NPC 性格、立场、说话方式是否与之前的描述一致\n- 场景切换是否合理（不能上一段在屋内，下一段突然到了千里之外）\n- 若涉及已知角色，是否引用了他们已有的关系描述\n- 剧情推进是否符合世界观规则，不可出现逻辑跳跃";
+
     // P0: 硬化缓存
     cachedSystemPrompt = systemPrompt;
     cachedSysPromptWorldId = worldId;
@@ -2887,6 +3424,24 @@ function buildCompactGameState() {
 function buildTurnUserMessage(input, retrieved) {
     let userPrompt = "";
 
+    // ★ 永久记忆：无条件注入最近关键事实（解决 AI 失忆问题）
+    const recentFacts = getRecentKeyFacts(5);
+    if (recentFacts.length) {
+        userPrompt += "# 已发生的关键事件（务必记住）\n\n";
+        recentFacts.forEach((f, i) => { userPrompt += (i + 1) + ". " + f + "\n"; });
+        userPrompt += "\n";
+    }
+
+    // ★ NPC 关系注入：当前所有角色的关系描述，辅助 AI 保持一致性
+    if (gameState && gameState.relationships && Object.keys(gameState.relationships).length > 0) {
+        const rels = gameState.relationships;
+        userPrompt += "# 当前 NPC 关系（请保持一致）\n\n";
+        for (const [npc, desc] of Object.entries(rels)) {
+            userPrompt += "- " + npc + "：" + desc + "\n";
+        }
+        userPrompt += "\n";
+    }
+
     // 动态知识检索补充（仅当知识库未全量入 system 时）
     if (!isLoreFullInSystem()) {
         const snippetsText = retrieved.filter(s => !String(s.id).startsWith("behavior_"))
@@ -2896,14 +3451,19 @@ function buildTurnUserMessage(input, retrieved) {
         }
     }
 
-    // P0: 紧凑游戏状态 — 无 pretty-print，去掉了 personality/background/name/age 等静态字段
-    // 预期削减 50-70% miss tokens
+    // P0: 紧凑游戏状态
     userPrompt += "# 当前游戏状态\n\n" + buildCompactGameState() + "\n\n";
 
     // 玩家输入（每轮变化，放最后）
     userPrompt += "# 玩家输入\n\n" + input;
 
     return userPrompt;
+}
+
+function getRecentKeyFacts(count) {
+    if (!currentWorld || !currentWorld.behavior_records) return [];
+    const records = currentWorld.behavior_records;
+    return records.slice(-count).map(r => r.text);
 }
 
 // 将一轮 user/assistant 推入多轮对话历史（仅在正常故事轮次调用，警告轮次跳过）
@@ -2919,7 +3479,7 @@ function pushChatTurn(userContent, parsed) {
     trimChatHistory();
 }
 
-// 滑动窗口截断：超过上限时保留最近 MAX_CHAT_MESSAGES 条（会牺牲部分早期缓存，但不频繁）
+// 滑动窗口截断 + 压缩：超过上限时保留最近消息，丢弃最老的
 function trimChatHistory() {
     if (chatHistory.length > MAX_CHAT_MESSAGES) {
         chatHistory = chatHistory.slice(-MAX_CHAT_MESSAGES);
@@ -2946,7 +3506,6 @@ async function callLLM(input, retrieved) {
     const systemPrompt = buildSystemPrompt();
     const userContent = buildTurnUserMessage(input, retrieved);
 
-    // 多轮对话：[system(硬化·100%命中), ...chatHistory(历史·命中前缀), user(本轮·miss)]
     const messages = [
         { role: "system", content: systemPrompt },
         ...chatHistory,
@@ -2965,6 +3524,30 @@ async function callLLM(input, retrieved) {
             throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
         }
         const url = buildApiUrl(baseUrl, corsProxy);
+        const useStream = !document.getElementById("noStreamMode") || !document.getElementById("noStreamMode").checked;
+
+        try {
+            parsed = useStream
+                ? await callLLMStreaming(url, apiKey, model, messages)
+                : await callLLMNonStreaming(url, apiKey, model, messages);
+        } catch (streamErr) {
+            // 流式失败（如 CORS 代理不支持），自动降级为非流式
+            if (useStream) {
+                console.warn("Streaming failed, falling back to non-streaming:", streamErr.message);
+                parsed = await callLLMNonStreaming(url, apiKey, model, messages);
+            } else {
+                throw streamErr;
+            }
+        }
+    }
+    parsed._turnUserContent = userContent;
+    return parsed;
+}
+
+async function callLLMNonStreaming(url, apiKey, model, messages) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
         const res = await fetch(url, {
             method: "POST",
             headers: {
@@ -2972,37 +3555,113 @@ async function callLLM(input, retrieved) {
                 "Authorization": "Bearer " + apiKey
             },
             body: JSON.stringify({
-                model: model,
-                messages: messages,
-                temperature: 0.7,
+                model, messages,
+                temperature: getTemperature(),
                 response_format: { type: "json_object" }
-            })
+            }),
+            signal: controller.signal
         });
-        if (!res.ok) {
-            const text = await res.text();
-            throw new Error(`HTTP ${res.status}: ${text}`);
-        }
-        const data = await res.json();
-        const content = data.choices[0].message.content;
-        parsed = parseResponse(content);
+        clearTimeout(timeoutId);
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error("API 返回异常：无法获取响应内容");
+    const parsed = parseResponse(content);
 
-        // ★ P2: 提取缓存命中统计
-        if (data.usage) {
-            const hit = data.usage.prompt_cache_hit_tokens || 0;
-            const miss = data.usage.prompt_cache_miss_tokens || 0;
-            const total = hit + miss;
-            lastCacheStats = {
-                hitTokens: hit,
-                missTokens: miss,
-                totalTokens: total,
-                hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
-            };
-            updateCacheIndicator();
+    if (data.usage) {
+        const hit = data.usage.prompt_cache_hit_tokens || 0;
+        const miss = data.usage.prompt_cache_miss_tokens || 0;
+        const total = hit + miss;
+        lastCacheStats = {
+            hitTokens: hit, missTokens: miss, totalTokens: total,
+            hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
+        };
+        updateCacheIndicator();
+    }
+    return parsed;
+    } catch (e) {
+        clearTimeout(timeoutId);
+        if (e.name === "AbortError") throw new Error("请求超时（60秒），请检查网络或 API 配置");
+        throw e;
+    }
+}
+
+async function callLLMStreaming(url, apiKey, model, messages) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + apiKey
+        },
+        body: JSON.stringify({
+            model, messages,
+            temperature: getTemperature(),
+            stream: true,
+            response_format: { type: "json_object" }
+        }),
+        signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = "";
+    let usage = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data: ")) continue;
+            const data = trimmed.slice(6);
+            if (data === "[DONE]") continue;
+            try {
+                const json = JSON.parse(data);
+                if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
+                    fullContent += json.choices[0].delta.content;
+                    updateLoadingProgress(fullContent.length);
+                }
+                if (json.usage) {
+                    usage = json.usage;
+                }
+            } catch (e) {
+                // 跳过无法解析的行
+            }
         }
     }
-    // 暂存本轮 user 内容，供 processTurn 在非警告时推入历史
-    parsed._turnUserContent = userContent;
+
+    const parsed = parseResponse(fullContent);
+
+    if (usage) {
+        const hit = usage.prompt_cache_hit_tokens || 0;
+        const miss = usage.prompt_cache_miss_tokens || 0;
+        const total = hit + miss;
+        lastCacheStats = {
+            hitTokens: hit, missTokens: miss, totalTokens: total,
+            hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
+        };
+        updateCacheIndicator();
+    }
     return parsed;
+    } catch (e) {
+        if (e.name === "AbortError") throw new Error("请求超时（60秒），请检查网络或 API 配置");
+        throw e;
+    }
 }
 
 function parseResponse(content) {
@@ -3012,10 +3671,13 @@ function parseResponse(content) {
     } else if (text.startsWith("```") && text.endsWith("```")) {
         text = text.slice(3, -3).trim();
     }
+    // 提取第一个完整 JSON 对象，忽略 AI 可能在后面多输出的文字
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) text = jsonMatch[0];
     try {
         return JSON.parse(text);
     } catch (e) {
-        throw new Error("AI 返回的 JSON 解析失败：" + e.message + "\n原始内容：" + content);
+        throw new Error("AI 返回的 JSON 解析失败：" + e.message + "\n原始内容：" + content.slice(0, 500));
     }
 }
 
@@ -3240,12 +3902,12 @@ function applyStateChanges(changes) {
 
 /* ================= 交互处理 ================= */
 async function submitInput() {
-    // 若上一段叙事还在打字，先跳过，再处理新输入
     skipTypewriter();
     const inputEl = document.getElementById("playerInput");
     const input = inputEl.value.trim();
     if (!input) return;
     inputEl.value = "";
+    renderChoices([]); // 发送时立即隐藏选项
     await processTurn(input);
 }
 
@@ -3259,14 +3921,16 @@ function chooseOption(index) {
 async function processTurn(input) {
     if (!gameState) return;
     if (gameState.is_alive === false) {
-        showGameOver();
+        checkDeathBanner();
+        showToast("角色已死亡，无法继续操作", "error", 3000);
         return;
     }
 
-    showToast("正在思考...", "", 2000);
+    showLoading("正在思考...");
     try {
         const retrieved = await retrieve(input);
         const resp = await callLLM(input, retrieved);
+        hideLoading();
 
         // 检测是否为非故事内容（拒绝/限制/错误响应）
         const isWarning = isNonStoryResponse(resp.narrative);
@@ -3304,9 +3968,14 @@ async function processTurn(input) {
             // 添加关键事实到 RAG
             const facts = resp.key_facts || summarizeFactsFromChanges(input, resp.narrative, resp.state_changes);
             addBehaviorRecords(facts);
+
+            // 如果刚死亡，立即显示横幅 + 禁用输入
+            if (gameState.is_alive === false) {
+                checkDeathBanner();
+                updateInputState();
+            }
         }
 
-        saveState();
         createOrUpdateSave();
 
         renderLog();
@@ -3315,6 +3984,10 @@ async function processTurn(input) {
             // 正常故事内容：先逐字打字，打字完成后再显示选项（避免玩家跳过阅读）
             await startTypewriter(conversationHistory.length - 1);
             renderChoices(resp.choices);
+            // ★ 将本轮选项存入 conversationHistory，保证退出后读档还能看到
+            if (conversationHistory.length > 0) {
+                conversationHistory[conversationHistory.length - 1].choices = resp.choices || [];
+            }
             if (gameState.is_alive === false) {
                 setTimeout(showGameOver, 800);
             }
@@ -3348,6 +4021,52 @@ async function processTurn(input) {
 }
 
 /* ================= 游戏结束 ================= */
+function checkDeathBanner() {
+    if (!gameState || gameState.is_alive !== false) {
+        document.getElementById("deathBanner").classList.add("hidden");
+        return;
+    }
+    const reason = gameState.death_reason || "你的旅程到此为止。";
+    document.getElementById("deathBannerText").textContent = "角色已死亡 — " + reason;
+    document.getElementById("deathBanner").classList.remove("hidden");
+}
+
+function updateInputState() {
+    const inputEl = document.getElementById("playerInput");
+    const sendBtn = document.querySelector(".send-btn");
+    const isDead = gameState && gameState.is_alive === false;
+    if (inputEl) {
+        inputEl.disabled = isDead;
+        inputEl.placeholder = isDead ? "角色已死亡，仅供回顾..." : "输入你想做的事...";
+    }
+    if (sendBtn) sendBtn.disabled = isDead;
+}
+
+function restoreLastChoices() {
+    if (!conversationHistory.length) {
+        // 新游戏，用世界初始选项
+        if (currentWorld && currentWorld.initial_choices && currentWorld.initial_choices.length) {
+            currentChoices = currentWorld.initial_choices;
+            renderChoices(currentChoices);
+        }
+        return;
+    }
+    // 倒序找最后一条有 choices 的记录
+    for (let i = conversationHistory.length - 1; i >= 0; i--) {
+        const entry = conversationHistory[i];
+        if (entry.choices && entry.choices.length) {
+            currentChoices = entry.choices;
+            renderChoices(currentChoices);
+            return;
+        }
+    }
+    // 没找到，检查初始选项
+    if (currentWorld && currentWorld.initial_choices && currentWorld.initial_choices.length) {
+        currentChoices = currentWorld.initial_choices;
+        renderChoices(currentChoices);
+    }
+}
+
 function showGameOver() {
     const reason = gameState && gameState.death_reason ? gameState.death_reason : "你的旅程到此为止。";
     document.getElementById("gameOverReason").textContent = reason;
@@ -3359,13 +4078,56 @@ function backToHomeAfterGameOver() {
     goHome();
 }
 
+function reviewDeathScene() {
+    document.getElementById("gameOverOverlay").classList.remove("show");
+    checkDeathBanner();
+    updateInputState();
+    renderLog(true);
+}
+
+let toastTimer = null;
+
 function showToast(msg, type = "", duration = 2000) {
     const el = document.getElementById("toast");
+    if (toastTimer) clearTimeout(toastTimer);
     el.textContent = msg;
     el.className = "toast show " + type;
-    setTimeout(() => {
+    toastTimer = setTimeout(() => {
         el.classList.remove("show");
+        toastTimer = null;
     }, duration);
+}
+
+let loadingStartTime = 0;
+let loadingInterval = null;
+
+function showLoading(msg) {
+    const el = document.getElementById("loadingIndicator");
+    if (!el) return;
+    loadingStartTime = Date.now();
+    el.querySelector(".loading-text").textContent = msg;
+    el.querySelector(".loading-time").textContent = "0.0s";
+    el.classList.add("show");
+    loadingInterval = setInterval(() => {
+        const elapsed = ((Date.now() - loadingStartTime) / 1000).toFixed(1);
+        el.querySelector(".loading-time").textContent = elapsed + "s";
+    }, 200);
+}
+
+function updateLoadingProgress(charCount) {
+    const el = document.getElementById("loadingIndicator");
+    if (!el || !el.classList.contains("show")) return;
+    const elapsed = ((Date.now() - loadingStartTime) / 1000).toFixed(1);
+    const kChars = charCount > 1000 ? (charCount / 1000).toFixed(1) + "K" : charCount;
+    el.querySelector(".loading-text").textContent = "已接收 " + kChars + " 字符...";
+    el.querySelector(".loading-time").textContent = elapsed + "s";
+}
+
+function hideLoading() {
+    const el = document.getElementById("loadingIndicator");
+    if (!el) return;
+    el.classList.remove("show");
+    if (loadingInterval) { clearInterval(loadingInterval); loadingInterval = null; }
 }
 
 // ★ P2: 更新缓存命中率指示器
