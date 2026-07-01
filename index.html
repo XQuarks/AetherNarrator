@@ -4045,9 +4045,9 @@ function isNonStoryResponse(text) {
         if (lower.includes(p.toLowerCase())) return true;
     }
 
-    // 弱信号：需要多个命中才判定
+    // 弱信号：需要多个命中才判定。去掉了"无法""不能"等常见叙事词汇
     const weakPatterns = [
-        "抱歉", "无法", "不能", "unable to", "cannot",
+        "抱歉", "unable to", "cannot",
         "请提供", "请换一个", "请尝试", "please provide",
         "不恰当", "不适当", "违反", "违规",
         "涉及敏感", "敏感内容"
@@ -4259,7 +4259,16 @@ async function processTurn(input) {
 
             // 打字完成后显示选项（延迟渲染，不延迟存储）
             await startTypewriter(conversationHistory.length - 1);
-            renderChoices(resp.choices);
+            // 如果 AI 没返回选项，生成默认兜底选项
+            let finalChoices = resp.choices;
+            if (!finalChoices || finalChoices.length === 0) {
+                finalChoices = [
+                    { text: "环顾四周", action: "look" },
+                    { text: "大脑放空", action: "idle" },
+                    { text: "静静等待", action: "wait" }
+                ];
+            }
+            renderChoices(finalChoices);
             if (gameState.is_alive === false) {
                 setTimeout(showGameOver, 800);
             }
