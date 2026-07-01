@@ -3795,6 +3795,7 @@ async function callLLMNonStreaming(url, apiKey, model, messages) {
             body: JSON.stringify({
                 model, messages,
                 temperature: getTemperature(),
+                max_tokens: 4096,
                 response_format: { type: "json_object" }
             }),
             signal: controller.signal
@@ -3840,6 +3841,7 @@ async function callLLMStreaming(url, apiKey, model, messages) {
         body: JSON.stringify({
             model, messages,
             temperature: getTemperature(),
+            max_tokens: 4096,
             stream: true,
             response_format: { type: "json_object" }
         }),
@@ -3909,14 +3911,40 @@ function parseResponse(content) {
     } else if (text.startsWith("```") && text.endsWith("```")) {
         text = text.slice(3, -3).trim();
     }
-    // 提取第一个完整 JSON 对象，忽略 AI 可能在后面多输出的文字
+    // 提取第一个 JSON 对象（贪婪匹配到最后一个 }）
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) text = jsonMatch[0];
     try {
         return JSON.parse(text);
     } catch (e) {
-        throw new Error("AI 返回的 JSON 解析失败：" + e.message + "\n原始内容：" + content.slice(0, 500));
+        // JSON 截断/不完整 → 尝试自动补全缺失的括号
+        const fixed = tryRepairJSON(text);
+        try { return JSON.parse(fixed); } catch (e2) {
+            throw new Error("AI 返回的 JSON 解析失败：" + e2.message + "\n原始内容：" + content.slice(0, 500));
+        }
     }
+}
+
+// 自动补全截断的 JSON：闭合缺失的 }、]、"
+function tryRepairJSON(text) {
+    let depth = 0, inString = false, escaped = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (escaped) { escaped = false; continue; }
+        if (ch === "\\" && inString) { escaped = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === "{") depth++;
+        if (ch === "}") depth--;
+    }
+    let repaired = text.trimEnd();
+    // 如果最后一个非空白字符是逗号，去掉它
+    if (repaired.endsWith(",")) repaired = repaired.slice(0, -1);
+    // 补齐缺失的 }
+    while (depth > 0) { repaired += "}"; depth--; }
+    // 如果字符串未闭合，补引号
+    if (inString) repaired += '"';
+    return repaired;
 }
 
 function mockLLM(input, retrieved) {
