@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>以太叙事 · AetherNarrator</title>
-    <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2" integrity="sha384-MDH1XqxE6TxWqH58TwpCV7bDtG0NOeQD/QWbG1Z0uL29JXtG1hCXNT4J2VqvKLtj" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js" integrity="sha384-8HPATDA4Jsp5TTFNT9T2QA/qM0VL0L9/+50MYrVoPaKd39J11rVOBQqNIvROofSK" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-rM2Nrt4ItWFyMQ5rFOA9X9Vf+UOmH3b3MOyvLncC3r7+2Kwv0we/m49vJgl3+eZv" crossorigin="anonymous"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
 
@@ -1168,6 +1168,7 @@
             </div>
         </div>
         <div class="modal-footer">
+            <button class="btn" onclick="exportDebugLog()" style="flex:1">导出调试日志</button>
             <button class="btn primary full-width" onclick="closeModal('settingsModal')">完成</button>
         </div>
     </div>
@@ -1473,12 +1474,15 @@ let sourceFileContent = "";  // 用户上传的源文件内容
 let currentTheme = localStorage.getItem("aigame_theme") || "dark";
 
 // 多轮对话配置
-const MAX_CHAT_MESSAGES = 8;  // 保留最近 4 轮完整对话（8 条消息），更早的用摘要替代
-const CHAT_ANCHOR_MSGS = 4;     // 最早 2 轮固定为缓存锚点，始终不变 → 前缀稳定，缓存持续命中
-const CHAT_RECENT_MSGS = 4;     // 最近 2 轮灵活追加
+const MAX_CHAT_MESSAGES = 40; // 保留 20 轮完整对话，完整历史前缀最大化缓存命中率
+const CHAT_ANCHOR_MSGS = 8;    // 前 4 轮固定为缓存锚点，始终不变
+const CHAT_RECENT_MSGS = 8;    // 最近 4 轮灵活追加
 
 // ★ P2: 缓存统计
 let lastCacheStats = { hitTokens: 0, missTokens: 0, totalTokens: 0, hitRate: "0%" };
+
+// ★ 调试日志收集
+let debugLog = { sessionStart: new Date().toISOString(), worldCreations: [], turns: [] };
 
 const STORAGE_KEYS = {
     config: "aigame_config",
@@ -1983,6 +1987,38 @@ function goHome() {
     showScreen("homeScreen");
 }
 
+// 记录每轮 API 调用的统计信息
+function logTurnStats(hit, miss, total, usage) {
+    const model = document.getElementById("modelName")?.value || "unknown";
+    const temp = getTemperature();
+    const turnNum = debugLog.turns.length + 1;
+    debugLog.turns.push({
+        turn: turnNum,
+        time: new Date().toISOString(),
+        worldId: currentWorld ? currentWorld.id : null,
+        worldName: currentWorld ? currentWorld.name : null,
+        model: model,
+        temperature: temp,
+        inputTokens: usage.prompt_tokens || total,
+        cacheHitTokens: hit,
+        cacheMissTokens: miss,
+        outputTokens: usage.completion_tokens || 0,
+        totalTokens: usage.total_tokens || 0,
+        hitRate: total > 0 ? (hit / total * 100).toFixed(1) : "0"
+    });
+}
+
+function exportDebugLog() {
+    const blob = new Blob([JSON.stringify(debugLog, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.download = "aether_debug_log_" + new Date().toISOString().slice(0, 10) + ".json";
+    a.href = url;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("调试日志已导出 (" + debugLog.turns.length + " 轮对话记录)", "success");
+}
+
 function exportStory() {
     if (!conversationHistory || !conversationHistory.length) {
         showToast("还没有剧情可以导出", "warn");
@@ -2316,6 +2352,16 @@ async function generateWorld() {
         };
         worlds.unshift(world);
         saveWorlds();
+        // 调试日志：记录世界创建
+        debugLog.worldCreations.push({
+            time: new Date().toISOString(),
+            worldName: name,
+            worldType: type,
+            ipName: ipName || null,
+            plotFreedom: plotFreedom,
+            loreSnippets: world.lore_kb ? world.lore_kb.snippets.length : 0,
+            openingTextLen: openingText.length
+        });
         renderWorldList();
 
         document.getElementById("worldName").value = "";
@@ -3570,13 +3616,26 @@ function buildSystemPrompt() {
         .replace(/{WORLD_SCHEMA}/g, JSON.stringify(schema, null, 2))
         .replace(/{PLOT_FREEDOM}/g, plotFreedomText);
 
-    // ★ 全量知识库注入 system（固定，命中缓存）
+    // ★ 核心知识库注入 system（固定，命中缓存）
+    // 无论知识库多大，规则/世界观/地点/人物/冲突永远固定在 system 中作为稳定前缀
     const allSnippets = kb && kb.snippets ? kb.snippets : [];
+    const CORE_CATEGORIES = ["规则", "世界观", "地点", "人物", "冲突"];
+    const coreSnippets = allSnippets.filter(s => CORE_CATEGORIES.includes(s.category));
+    const nonCoreSnippets = allSnippets.filter(s => !CORE_CATEGORIES.includes(s.category));
+
+    // 全量 < 20000 字符 → 全部注入 system
     const fullLoreText = allSnippets.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
-    // P2: 阈值提升到 12000 字符（约 3500 tokens），覆盖更大的知识库
-    const LORE_FULL_THRESHOLD = 12000;
+    const LORE_FULL_THRESHOLD = 20000;
     if (fullLoreText.length > 0 && fullLoreText.length < LORE_FULL_THRESHOLD) {
         systemPrompt += "\n\n# 世界观知识库（全量·固定，命中缓存）\n\n以下为该世界全部知识片段，请作为叙事依据：\n\n```\n" + fullLoreText + "\n```";
+        isCoreLoreCached = true;
+    } else if (coreSnippets.length > 0) {
+        // 大知识库：只将核心片段注入 system，其余走动态 RAG
+        const coreText = coreSnippets.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
+        systemPrompt += "\n\n# 世界观核心知识（规则·世界观·地点·人物·冲突，固定·命中缓存）\n\n```\n" + coreText + "\n```";
+        isCoreLoreCached = true;
+    } else {
+        isCoreLoreCached = false;
     }
 
     // 世界专属指令注入 system 开头（固定）
@@ -3664,10 +3723,15 @@ function buildTurnUserMessage(input, retrieved) {
         userPrompt += "\n";
     }
 
-    // 动态知识检索补充（仅当知识库未全量入 system 时）
+    // 动态知识检索补充：核心知识已在 system 中缓存，这里只补非核心的动态片段
     if (!isLoreFullInSystem()) {
-        const snippetsText = retrieved.filter(s => !String(s.id).startsWith("behavior_"))
-            .map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
+        const CORE_CATS = ["规则", "世界观", "地点", "人物", "冲突"];
+        let dynamicSnippets = retrieved.filter(s => !String(s.id).startsWith("behavior_"));
+        if (isCoreLoreCached) {
+            // 核心片段已在 system prompt 中（命中缓存），只注入非核心的动态片段
+            dynamicSnippets = dynamicSnippets.filter(s => !CORE_CATS.includes(s.category));
+        }
+        const snippetsText = dynamicSnippets.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
         if (snippetsText) {
             userPrompt += "# 相关知识片段（动态检索）\n\n```\n" + snippetsText + "\n```\n\n";
         }
@@ -3698,11 +3762,14 @@ function pushChatTurn(userContent, parsed) {
     };
     chatHistory.push({ role: "assistant", content: JSON.stringify(slim) });
 
-    // ★ 生成本轮摘要（1-2 句中文），追加到 chatSummary
-    const summary = summarizeTurn(parsed);
-    if (summary) chatSummary.push(summary);
-    // 摘要只保留最近 20 条，避免无限增长
-    if (chatSummary.length > 20) chatSummary = chatSummary.slice(-20);
+    // ★ 生成本轮摘要，追加到 chatSummary（每 5 轮冻结一次快照，中间保持不变以稳定缓存前缀）
+    const turnCount = conversationHistory.filter(e => !e.isWarning).length;
+    if (turnCount % 5 === 0 || chatSummary.length === 0) {
+        const summary = summarizeTurn(parsed);
+        if (summary) chatSummary.push(summary);
+        // 摘要只保留最近 10 条
+        if (chatSummary.length > 10) chatSummary = chatSummary.slice(-10);
+    }
 
     trimChatHistory();
 }
@@ -3829,6 +3896,7 @@ async function callLLMNonStreaming(url, apiKey, model, messages) {
                 model, messages,
                 temperature: getTemperature(),
                 max_tokens: 4096,
+                thinking: { type: "disabled" },
                 response_format: { type: "json_object" }
             }),
             signal: controller.signal
@@ -3852,6 +3920,7 @@ async function callLLMNonStreaming(url, apiKey, model, messages) {
             hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
         };
         updateCacheIndicator();
+        logTurnStats(hit, miss, total, data.usage);
     }
     return parsed;
     } catch (e) {
@@ -3875,7 +3944,9 @@ async function callLLMStreaming(url, apiKey, model, messages) {
             model, messages,
             temperature: getTemperature(),
             max_tokens: 4096,
+            thinking: { type: "disabled" },
             stream: true,
+            stream_options: { include_usage: true },
             response_format: { type: "json_object" }
         }),
         signal: controller.signal
@@ -3929,6 +4000,7 @@ async function callLLMStreaming(url, apiKey, model, messages) {
             hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
         };
         updateCacheIndicator();
+        logTurnStats(hit, miss, total, usage);
     }
     return parsed;
     } catch (e) {

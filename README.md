@@ -17,7 +17,7 @@
 
 ## 简介
 
-自定义世界观 × AI 叙事生成 × 角色状态演进 — 打开网页就能玩的文字冒险游戏引擎。支持已有 IP（小说、影视）或原创世界观、上传 EPUB/TXT/DOCX 源文件，填入 DeepSeek API Key 即可由大模型驱动剧情。
+自定义世界观 × AI 叙事生成 × 角色状态演进 — 打开网页就能玩的文字冒险游戏引擎。支持已有 IP（小说、影视）或原创世界观、上传 EPUB/TXT/DOCX 源文件，填入 DeepSeek API Key 即可由大模型驱动剧情；无 Key 也能用内置模拟模式体验。
 
 ---
 
@@ -155,6 +155,35 @@ python -m http.server 8000    # 或 npx serve .
 - 所有用户输入经 `escapeHtml()` 转义，防 XSS
 - API Key 仅存 localStorage，不上传
 - `structuredClone()` / `crypto.randomUUID()` 安全克隆与 ID 生成
+
+---
+
+## 安全声明 ⚠️
+
+**当前版本仅限个人本地使用或私下演示，不建议直接公开部署。**
+
+| 风险 | 说明 | 对策 |
+|------|------|------|
+| **API Key 泄露** | API Key 存储在 `localStorage`，请求从浏览器直发。XSS 或恶意脚本可读取 Key。 | **仅限本地使用**；公开部署需自建代理 |
+| **CDN 脚本注入** | 依赖 3 个 CDN 脚本（embedding、DOCX 解析、ZIP 解析） | 已加 `integrity` SRI 校验，防止篡改 |
+| **第三方代理** | 如果使用第三方 CORS 代理，API Key 会经过该代理 | 自建 Cloudflare Workers / Nginx 代理更安全 |
+
+### 安全部署建议
+
+公开上线请使用以下方案之一：
+
+**方案 A（推荐）：自建代理**
+```
+浏览器 → 你的后端（隐藏 API Key）→ DeepSeek API
+```
+- 后端用 Cloudflare Workers / Vercel Edge Function / 自有 VPS
+- 后端持有 API Key，前端只发请求体
+
+**方案 B：使用 CORS 代理**
+在 API 配置弹窗中填写 CORS 代理 URL。代理端负责添加 Authorization 头并转发请求。
+
+**方案 C：纯离线模式**
+开启模拟模式，不使用任何 API Key。
 
 ---
 
