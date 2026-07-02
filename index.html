@@ -2387,7 +2387,7 @@ async function generateWorld() {
             ipName: ipName || null,
             plotFreedom: plotFreedom,
             loreSnippets: world.lore_kb ? world.lore_kb.snippets.length : 0,
-            openingTextLen: openingText.length
+            openingTextLen: (world.opening_narrative || "").length
         });
         renderWorldList();
 
