@@ -1499,6 +1499,33 @@ const DEFAULT_PERIOD_LABELS = {
     morning: "早晨", forenoon: "上午", afternoon: "下午", evening: "傍晚", night: "夜晚"
 };
 
+// 获取当前时间配置（gameState.time_mode 可被 AI 动态覆盖，用于穿越/世界观变动）
+function getTimeConfig() {
+    const schema = getWorldSchema(currentWorld);
+    const mode = (gameState && gameState.time_mode) || (schema && schema.time_mode) || "periods";
+    if (schema && schema.time_periods && !schema.periods) {
+        const keys = Object.keys(schema.time_periods);
+        return { mode, periods: keys, labels: schema.time_periods };
+    }
+    const periods = (schema && schema.periods) || DEFAULT_PERIOD_ORDER;
+    const labels = (schema && schema.period_labels) || DEFAULT_PERIOD_LABELS;
+    return { mode, periods, labels };
+}
+
+function getPeriodLabel(periodKey) {
+    const tc = getTimeConfig();
+    return tc.labels[periodKey] || periodKey;
+}
+
+function getNextPeriod(period) {
+    const tc = getTimeConfig();
+    if (tc.mode === "continuous" || tc.mode === "hidden") return period;
+    const idx = tc.periods.indexOf(period);
+    if (idx < 0) return tc.periods[0];
+    // 如果是最后一个时段，回到第一个（跨天由 applyStateChanges 处理）
+    return tc.periods[(idx + 1) % tc.periods.length];
+}
+
 /* ================= 主题切换 ================= */
 function toggleTheme() {
     currentTheme = currentTheme === "dark" ? "light" : "dark";
@@ -2489,7 +2516,8 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - has_skills: 该世界是否有技能系统（boolean）
    - skill_label: 技能显示名称，如"功法"/"课程"/"技能"
    - attribute_labels: 属性中文映射，键为 courage/perception/patience/luck/will，值为中文名
-   - time_periods: 时间段映射，如 {"morning":"早晨", ...}
+   - time_mode: "periods"（按时段推进）| "continuous"（自由时间描述，period填任意字符串）| "hidden"（不展示时间）
+   - time_periods: 时间段映射，如 {"morning":"早晨", ...}（periods 模式必填，可自定义任意数量和名称）
 
 2. initial_state: 玩家初始状态对象，包含：
    - name, age, background, personality（数组）
@@ -3224,6 +3252,15 @@ function renderStatusPanel(tab) {
 
 function updateGameDayInfo() {
     if (!gameState) return;
+    const tc = getTimeConfig();
+    if (tc.mode === "hidden") {
+        document.getElementById("gameDayInfo").textContent = gameState.current_location || "";
+        return;
+    }
+    if (tc.mode === "continuous") {
+        document.getElementById("gameDayInfo").textContent = gameState.current_date.period || "";
+        return;
+    }
     document.getElementById("gameDayInfo").textContent = `第 ${gameState.current_date.day} 天 · ${getPeriodLabel(gameState.current_date.period)}`;
 }
 
@@ -3614,7 +3651,8 @@ function buildSystemPrompt() {
         .replace(/{WORLD_RULES}/g, finalWorldRules)
         .replace(/{NARRATIVE_STYLE}/g, finalNarrativeStyle)
         .replace(/{WORLD_SCHEMA}/g, JSON.stringify(schema, null, 2))
-        .replace(/{PLOT_FREEDOM}/g, plotFreedomText);
+        .replace(/{PLOT_FREEDOM}/g, plotFreedomText)
+        .replace(/{TIME_MODE_RULES}/g, buildTimeModeRules());
 
     // ★ 核心知识库注入 system（固定，命中缓存）
     // 无论知识库多大，规则/世界观/地点/人物/冲突永远固定在 system 中作为稳定前缀
@@ -3665,6 +3703,28 @@ function buildSystemPrompt() {
 function invalidateSystemPromptCache() {
     cachedSystemPrompt = null;
     cachedSysPromptWorldId = null;
+}
+
+function buildTimeModeRules() {
+    const tc = getTimeConfig();
+    if (tc.mode === "hidden") {
+        return "本世界不展示时间。叙事中不提及具体时间，不更新 period 字段，只推进剧情。";
+    }
+    if (tc.mode === "continuous") {
+        return `本世界使用连续时间制。叙事中自由描述时间感（如"又过了三个小时""天快黑了"），period 字段可填任意描述性字符串。不用"早晨/上午"等固定标签，也不用 day 计数。`;
+    }
+    const periodList = tc.periods.map(p => tc.labels[p] || p).join(" → ");
+    const periodDesc = tc.periods.map((p, i) => `${tc.labels[p] || p}（\`${p}\`）`).join("、");
+    return `本世界时段顺序：${periodList} → 下一天${tc.labels[tc.periods[0]] || tc.periods[0]}。
+
+时段含义：${periodDesc}。
+
+- **不推进时间**：短对话、观察环境、翻阅物品、同一区域内走动。
+- **推进一个时段**：长篇交谈、跨越区域拜访、小型活动。
+- **推进 2-3 个时段**：远距离移动、大型事件、重大处理。
+- **核心原则**：优先保持时间不变，只在场景自然切换时推进。
+
+日期追踪：叙事中用"次日清晨""又过了一日"或"第N天"等自然表达，AI 根据剧情自行判断哪种更贴合当前叙事氛围。每个世界可有多于或少于5个时段，时段名称由世界设定决定。`;
 }
 
 function isLoreFullInSystem() {
@@ -3895,7 +3955,7 @@ async function callLLMNonStreaming(url, apiKey, model, messages) {
             body: JSON.stringify({
                 model, messages,
                 temperature: getTemperature(),
-                max_tokens: 4096,
+                max_tokens: 8192,
                 thinking: { type: "disabled" },
                 response_format: { type: "json_object" }
             }),
@@ -4043,13 +4103,18 @@ function tryRepairJSON(text) {
         if (ch === "}") depth--;
     }
     let repaired = text.trimEnd();
-    // 如果最后一个非空白字符是逗号，去掉它
     if (repaired.endsWith(",")) repaired = repaired.slice(0, -1);
-    // 补齐缺失的 }
     while (depth > 0) { repaired += "}"; depth--; }
-    // 如果字符串未闭合，补引号
     if (inString) repaired += '"';
-    return repaired;
+
+    try { JSON.parse(repaired); return repaired; } catch (e) { /* 继续降级 */ }
+
+    const narrativeMatch = text.match(/"narrative"\s*:\s*"([\s\S]*?)(?:"\s*,|\s*\})/);
+    if (narrativeMatch) {
+        const extracted = narrativeMatch[1].replace(/"/g, '\\"').replace(/\n/g, '\\n');
+        return '{"narrative": "' + extracted + '", "choices": [{"text": "环顾四周", "action": "look"}, {"text": "大脑放空", "action": "idle"}, {"text": "静静等待", "action": "wait"}], "state_changes": {}}';
+    }
+    return '{"narrative": "叙事内容获取不完整...", "choices": [{"text": "环顾四周", "action": "look"}, {"text": "大脑放空", "action": "idle"}, {"text": "静静等待", "action": "wait"}], "state_changes": {}}';
 }
 
 function mockLLM(input, retrieved) {
@@ -4177,20 +4242,26 @@ function isNonStoryResponse(text) {
     return false;
 }
 
-function getNextPeriod(period) {
-    const idx = DEFAULT_PERIOD_ORDER.indexOf(period);
-    if (idx < 0) return DEFAULT_PERIOD_ORDER[0];
-    return DEFAULT_PERIOD_ORDER[(idx + 1) % DEFAULT_PERIOD_ORDER.length];
-}
-
 /* ================= 状态应用 ================= */
 function applyStateChanges(changes) {
     if (!changes) return;
     const s = gameState;
 
-    if (changes.period) s.current_date.period = changes.period;
+    if (changes.period) {
+        // 检测跨天并自动推进天数（period 倒退 = 新一天开始）
+        const tc = getTimeConfig();
+        if (tc.mode === "periods") {
+            const prevIdx = tc.periods.indexOf(s.current_date.period);
+            const newIdx = tc.periods.indexOf(changes.period);
+            if (prevIdx >= 0 && newIdx >= 0 && newIdx <= prevIdx) {
+                s.current_date.day += 1;
+            }
+        }
+        s.current_date.period = changes.period;
+    }
     if (changes.current_location) s.current_location = changes.current_location;
     if (changes.current_date) s.current_date = { ...s.current_date, ...changes.current_date };
+    if (changes.time_mode) s.time_mode = changes.time_mode;
 
     if (changes.attributes) {
         for (const [k, v] of Object.entries(changes.attributes)) {
@@ -4227,13 +4298,15 @@ function applyStateChanges(changes) {
             if (op.op === "add") {
                 const found = s.inventory.find(i => i.item_id === op.item_id);
                 if (found) found.count += op.count;
-                else s.inventory.push({ item_id: op.item_id, name: op.name, count: op.count });
+                else s.inventory.push({ item_id: op.item_id, name: op.name, count: op.count, world: op.world || null });
             } else if (op.op === "remove") {
                 const found = s.inventory.find(i => i.item_id === op.item_id);
                 if (found) {
                     found.count -= op.count;
                     if (found.count <= 0) s.inventory = s.inventory.filter(i => i.item_id !== op.item_id);
                 }
+            } else if (op.op === "clear_world") {
+                s.inventory = s.inventory.filter(i => i.world !== op.world);
             }
         }
     }
@@ -4264,10 +4337,13 @@ function applyStateChanges(changes) {
         s.death_reason = changes.death_reason || "未知原因";
     }
 
-    // 推进时间（如果 AI 没指定 period）
-    if (!changes.period && !changes.current_date) {
+    // 推进时间（AI 未指定 period 时自动推进，hidden 和 continuous 模式跳过）
+    const tc = getTimeConfig();
+    if (!changes.period && !changes.current_date && tc.mode === "periods") {
         const next = getNextPeriod(s.current_date.period);
-        if (next === "morning") s.current_date.day += 1;
+        const prevIdx = tc.periods.indexOf(s.current_date.period);
+        const nextIdx = tc.periods.indexOf(next);
+        if (prevIdx >= 0 && nextIdx >= 0 && nextIdx <= prevIdx) s.current_date.day += 1;
         s.current_date.period = next;
     }
 
@@ -4356,15 +4432,7 @@ async function processTurn(input) {
         renderLog();
 
         if (!isWarning) {
-            // ★ 先将本轮选项存入记录并持久化，防止打字过程中退出导致选项丢失
-            if (conversationHistory.length > 0) {
-                conversationHistory[conversationHistory.length - 1].choices = resp.choices || [];
-            }
-            saveState();
-
-            // 打字完成后显示选项（延迟渲染，不延迟存储）
-            await startTypewriter(conversationHistory.length - 1);
-            // 如果 AI 没返回选项，生成默认兜底选项
+            // 计算最终选项（AI 返回空时兜底），必须存储 finalChoices 而非原始空值
             let finalChoices = resp.choices;
             if (!finalChoices || finalChoices.length === 0) {
                 finalChoices = [
@@ -4373,6 +4441,14 @@ async function processTurn(input) {
                     { text: "静静等待", action: "wait" }
                 ];
             }
+            // ★ 将最终选项存入记录并持久化（含兜底）
+            if (conversationHistory.length > 0) {
+                conversationHistory[conversationHistory.length - 1].choices = finalChoices;
+            }
+            saveState();
+
+            // 打字完成后显示选项
+            await startTypewriter(conversationHistory.length - 1);
             renderChoices(finalChoices);
             if (gameState.is_alive === false) {
                 setTimeout(showGameOver, 800);
