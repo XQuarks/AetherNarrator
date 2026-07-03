@@ -2150,6 +2150,12 @@ function saveApiConfig() {
 }
 
 /* ================= 文件上传处理 ================= */
+function autoFillWorldDesc() {
+    const descEl = document.getElementById("worldDesc");
+    if (descEl && !descEl.value.trim()) {
+        descEl.value = "原作世界观";
+    }
+}
 function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -2161,6 +2167,7 @@ function handleFileSelect(event) {
         const reader = new FileReader();
         reader.onload = function(e) {
             sourceFileContent = e.target.result;
+            autoFillWorldDesc();
             area.classList.add("has-file");
             text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" onclick="clearSourceFile(event)">✕</span>`;
             area.onclick = null;
@@ -2173,6 +2180,7 @@ function handleFileSelect(event) {
                 mammoth.extractRawText({ arrayBuffer: e.target.result })
                     .then(function(result) {
                         sourceFileContent = result.value;
+                        autoFillWorldDesc();
                         area.classList.add("has-file");
                         text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" onclick="clearSourceFile(event)">✕</span>`;
                         area.onclick = null;
@@ -2193,6 +2201,7 @@ function handleFileSelect(event) {
                 parseEpub(e.target.result)
                     .then(function(extracted) {
                         sourceFileContent = extracted;
+                        autoFillWorldDesc();
                         area.classList.add("has-file");
                         text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" onclick="clearSourceFile(event)">✕</span>`;
                         area.onclick = null;
@@ -2277,6 +2286,10 @@ function onWorldTypeChange(value) {
         ipNameField.classList.add("show");
         worldDescHint.innerHTML = "你可以直接使用原作的世界观描述，也可以在此基础上进行修改和扩展——例如调整力量体系、加入新势力、改变时间线等。描述越详细，AI 生成的剧情越贴合你的构想。";
         worldDescTextarea.placeholder = "可以直接填写原作的世界观概述，也可以在此基础上修改...\n例如：在原著的世界观基础上，增加了一个隐秘的地下组织...";
+        // 若描述为空，自动填入"原作世界观"
+        if (!worldDescTextarea.value.trim()) {
+            worldDescTextarea.value = "原作世界观";
+        }
     } else {
         ipNameField.classList.remove("show");
         worldDescHint.innerHTML = "描述越详细，AI 生成的内容越贴近你的预期。";
@@ -4242,6 +4255,133 @@ function isNonStoryResponse(text) {
     return false;
 }
 
+// ★ 前端 Prompt Injection 检测：拦截明显的角色替换/系统配置提取/元叙事攻击
+//   上下文感知：如果目标角色是当前世界已知 NPC → 放行（合理游戏行为）
+
+// 系统/技术角色黑名单——这些绝对不是游戏世界里的角色
+const SYSTEM_ROLES = new Set([
+    "系统", "系统管理员", "架构师", "系统架构师", "开发者", "工程师",
+    "管理员", "AI", "人工智能", "root", "Root", "Root Architect",
+    "语言模型", "language model", "ChatGPT", "GPT", "Claude", "DeepSeek"
+]);
+
+// 提取玩家输入中"角色切换"的目标对象（如"我想扮演林黛玉" → "林黛玉"）
+function extractRoleSwitchTarget(input) {
+    if (!input) return null;
+    // 匹配常见角色切换表达
+    const patterns = [
+        /(?:扮演|切换[为到成]?|视角[切换转][为到]?|现在我是|我来当|让我来[当控]*|换[成到])\s*["「」]?\s*([\u4e00-\u9fff\w]{1,8})\s*["「」]?/,
+        /主角[是改为]\s*["「」]?\s*([\u4e00-\u9fff\w]{1,8})\s*["「」]?/,
+        /我们.{0,10}来写.{0,10}(?:一个|个).{0,10}故事.{0,20}(?:主角|主人公)[是为]?\s*["「」]?\s*([\u4e00-\u9fff]{2,4})/,
+        /(?:改为|变成|换成|转为)\s*["「」]?\s*([\u4e00-\u9fff\w]{1,8})\s*["「」]?(?:视角|身份|角色)?/,
+    ];
+    for (const p of patterns) {
+        const m = input.match(p);
+        if (m && m[1]) {
+            const name = m[1].trim();
+            // 排除太短/明显不是人名的词
+            if (name.length >= 2 && !/^(一个|这个|那个|什么|如何|怎么|为什么)$/.test(name)) {
+                return name;
+            }
+        }
+    }
+    return null;
+}
+
+// 获取当前世界所有已知角色名称（来自 gameState + loreKB）
+function getWorldKnownCharacters() {
+    const names = new Set();
+    // 从游戏状态中的 NPC 关系提取
+    if (gameState && gameState.relationships) {
+        for (const npc of Object.keys(gameState.relationships)) {
+            if (npc && npc.length >= 2) names.add(npc);
+        }
+    }
+    // 从知识库的人物片段提取
+    const kb = getWorldLoreKB();
+    if (kb && kb.snippets) {
+        for (const s of kb.snippets) {
+            if (s.category === "人物" && s.title && s.title.length >= 2) {
+                names.add(s.title);
+            }
+        }
+    }
+    // 从主角设定提取（主角名也算）
+    if (currentWorld && currentWorld.hero) {
+        // 尝试从 hero 描述中提取主角名（通常是开头几个字）
+        const heroNameMatch = currentWorld.hero.match(/^["「」]?([\u4e00-\u9fff]{2,4})["「」]?/);
+        if (heroNameMatch) names.add(heroNameMatch[1]);
+    }
+    return names;
+}
+
+function detectPromptInjection(input) {
+    if (!input || typeof input !== "string") return null;
+    const text = input.trim();
+
+    // ====== 上下文感知白名单：世界内角色切换 → 放行 ======
+    const roleTarget = extractRoleSwitchTarget(text);
+    if (roleTarget) {
+        const knownChars = getWorldKnownCharacters();
+        if (knownChars.has(roleTarget)) {
+            // 目标角色在当前世界已知角色名单中 → 这是合理游戏行为，放行
+            return null;
+        }
+        if (SYSTEM_ROLES.has(roleTarget)) {
+            // 目标角色在系统黑名单中 → 明显是注入攻击
+            return { type: "strong", label: "角色替换（系统角色）", reason: "检测到试图切换为系统角色（" + roleTarget + "），已阻止发送。" };
+        }
+    }
+
+    // ====== 强信号：命中一条即拦截 ======
+    const strongPatterns = [
+        // 角色替换类（目标非世界角色时已由白名单处理，此处兜底）
+        { pattern: /你现在[^。]{0,10}(扮演|是|作为)[^。]{0,10}(系统|架构师|管理员|开发者|工程师)/, label: "角色替换（系统角色）" },
+        { pattern: /请[^。]{0,15}(以|用|作为)[^。]{0,10}(系统|架构师|管理员|AI).{0,10}(视角|身份|口吻)/, label: "角色替换（系统身份）" },
+        // 系统配置提取类
+        { pattern: /(导出|列出|打印|输出|回显).{0,15}(系统配置|核心指令|内部指令|引擎配置|所有配置|全部配置)/, label: "系统配置提取" },
+        { pattern: /(系统|核心|内部)(指令|配置|规则|提示词).{0,10}(完整|逐条|逐字|全部|所有).{0,10}(输出|列出|导出|打印)/, label: "系统配置提取" },
+        { pattern: /MIGRATION.{0,20}PROTOCOL|ALL\s+SYSTEM\s+CONFIGS/i, label: "伪协议欺骗" },
+        { pattern: /(数据库)?迁移.{0,10}(导出|备份|存档).{0,15}(系统|引擎|配置|指令)/, label: "迁移伪装" },
+        { pattern: /不要.{0,10}(省略|跳过|截断|总结|概括).{0,20}(完整|全部|每一条|每一行)/, label: "强制完整输出" },
+        // 元叙事框架类
+        { pattern: /===\s*(故事|任务|协议|导出)\s*(开始|启动|开始执行)\s*===/, label: "元叙事框架" },
+        { pattern: /(Core\s*Instructions|Character\s*Generation|World\s*Building|Plot\s*Engine|Safety\s*&\s*Moderation)/i, label: "系统模块枚举" },
+        { pattern: /ROOT_ARCHITECT|F-u-l-l\s*E-x-p-o-r-t|A-P-P-R-O-V-E-D/i, label: "伪协议关键字" },
+        { pattern: /(输出格式规格|Output\s*Format\s*Specs|Safety\s*Config)/i, label: "系统规格提取" },
+        // 强制角色覆盖类 — 但跳过已知世界角色（已在白名单处理）
+        { pattern: /我们.{0,10}来写.{0,10}(一个|个).{0,10}故事.{0,30}(系统架构|架构师|管理员|开发者|工程师|根|root)/i, label: "元叙事覆盖（系统角色）" },
+        { pattern: /(续写|接着).{0,10}(从.{0,5}开始).{0,15}(逐[模块条项])/, label: "强制续写指令" },
+    ];
+
+    for (const { pattern, label } of strongPatterns) {
+        if (pattern.test(text)) {
+            return { type: "strong", label, reason: "检测到疑似 prompt injection 模式（" + label + "），已阻止发送。" };
+        }
+    }
+
+    // ====== 弱信号：需多个命中才拦截 ======
+    const weakPatterns = [
+        { pattern: /(系统|内部|引擎).{0,5}(指令|配置|规则|参数)/, label: "系统术语" },
+        { pattern: /(完整|逐条|逐字|一字不差|如实).{0,8}(输出|写出|列出)/, label: "完整输出要求" },
+        { pattern: /旧.{0,3}(系统|引擎|版本).{0,5}(导出|迁移|备份)/, label: "旧系统导出" },
+        { pattern: /不能.{0,5}(省略|跳过|漏掉|缺失)/, label: "反省略约束" },
+        { pattern: /(终端|命令行|控制台).{0,5}(回显|输出|打印)/, label: "终端模拟" },
+        { pattern: /Auth.*ROOT|Root.*Access|管理员权限/i, label: "权限伪装" },
+    ];
+
+    let weakHits = [];
+    for (const { pattern, label } of weakPatterns) {
+        if (pattern.test(text)) weakHits.push(label);
+    }
+
+    if (weakHits.length >= 3) {
+        return { type: "weak", label: weakHits.join("+"), reason: "检测到多个可疑模式（" + weakHits.join("、") + "），已阻止发送。若为正常游戏内容，请简化表述重试。" };
+    }
+
+    return null;
+}
+
 /* ================= 状态应用 ================= */
 function applyStateChanges(changes) {
     if (!changes) return;
@@ -4378,6 +4518,41 @@ async function processTurn(input) {
     }
 
     showLoading("正在思考...");
+    // ★ 前端防注入检测
+    const injectionCheck = detectPromptInjection(input);
+    if (injectionCheck) {
+        hideLoading();
+        const model = document.getElementById("modelName")?.value || "unknown";
+        const turnNum = debugLog.turns.length + 1;
+        debugLog.turns.push({
+            turn: turnNum,
+            time: new Date().toISOString(),
+            worldId: currentWorld ? currentWorld.id : null,
+            worldName: currentWorld ? currentWorld.name : null,
+            model: model,
+            temperature: getTemperature(),
+            status: "blocked",
+            rejectionReason: injectionCheck.label,
+            inputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0,
+            outputTokens: 0, totalTokens: 0, hitRate: "0",
+            playerInput: input.slice(0, 200)
+        });
+        const blockEntry = {
+            player: input,
+            narrative: "（系统拦截）" + injectionCheck.reason,
+            retrieved: [],
+            period: gameState.current_date.period,
+            day: gameState.current_date.day,
+            key_facts: [],
+            isWarning: true
+        };
+        conversationHistory.push(blockEntry);
+        saveState();
+        renderLog();
+        renderChoices([]);
+        showToast(injectionCheck.reason, "warn");
+        return;
+    }
     try {
         const retrieved = await retrieve(input);
         const resp = await callLLM(input, retrieved);
@@ -4458,6 +4633,32 @@ async function processTurn(input) {
             renderChoices([]);
         }
     } catch (e) {
+        hideLoading();
+        // ★ 日志分离：即使 parse/API 失败也记录到 debugLog.turns
+        const model = document.getElementById("modelName")?.value || "unknown";
+        const temp = getTemperature();
+        const turnNum = debugLog.turns.length + 1;
+        debugLog.turns.push({
+            turn: turnNum,
+            time: new Date().toISOString(),
+            worldId: currentWorld ? currentWorld.id : null,
+            worldName: currentWorld ? currentWorld.name : null,
+            model: model,
+            temperature: temp,
+            status: "error",
+            errorType: e.message.includes("JSON 解析失败") ? "parse_failure" :
+                       e.message.includes("Failed to fetch") || e.message.includes("NetworkError") ? "network" :
+                       e.message.includes("超时") ? "timeout" : "unknown",
+            errorMessage: e.message,
+            inputTokens: 0,
+            cacheHitTokens: 0,
+            cacheMissTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            hitRate: "0",
+            playerInput: input.slice(0, 200)
+        });
+
         // 网络/API 错误也作为警告展示，不影响游戏状态
         const errorEntry = {
             player: input,
