@@ -4170,7 +4170,7 @@ async function callLLMNonStreaming(url, apiKey, model, messages) {
             body: JSON.stringify({
                 model, messages,
                 temperature: getTemperature(),
-                max_tokens: 8192,
+                max_tokens: 10240,
                 thinking: { type: "disabled" },
                 response_format: { type: "json_object" }
             }),
@@ -4218,7 +4218,7 @@ async function callLLMStreaming(url, apiKey, model, messages) {
         body: JSON.stringify({
             model, messages,
             temperature: getTemperature(),
-            max_tokens: 4096,
+            max_tokens: 6144,
             thinking: { type: "disabled" },
             stream: true,
             stream_options: { include_usage: true },
@@ -4327,9 +4327,9 @@ function tryRepairJSON(text) {
     const narrativeMatch = text.match(/"narrative"\s*:\s*"([\s\S]*?)(?:"\s*,|\s*\})/);
     if (narrativeMatch) {
         const extracted = narrativeMatch[1].replace(/"/g, '\\"').replace(/\n/g, '\\n');
-        return '{"narrative": "' + extracted + '", "choices": [{"text": "环顾四周", "action": "look"}, {"text": "大脑放空", "action": "idle"}, {"text": "静静等待", "action": "wait"}], "state_changes": {}}';
+        return '{"narrative": "' + extracted + '", "choices": [], "state_changes": {}}';
     }
-    return '{"narrative": "叙事内容获取不完整...", "choices": [{"text": "环顾四周", "action": "look"}, {"text": "大脑放空", "action": "idle"}, {"text": "静静等待", "action": "wait"}], "state_changes": {}}';
+    return '{"narrative": "叙事内容获取不完整...", "choices": [], "state_changes": {}}';
 }
 
 function mockLLM(input, retrieved) {
@@ -4687,6 +4687,52 @@ function applyStateChanges(changes) {
     updateGameDayInfo();
 }
 
+// AI 未返回选项时的智能兜底：根据当前场景/位置/NPC生成有意义的替代选项
+function buildSmartFallbackChoices() {
+    const loc = gameState.current_location || "这里";
+    const npcs = gameState.relationships ? Object.keys(gameState.relationships) : [];
+    const kb = getWorldLoreKB();
+    const locations = (kb && kb.snippets) ? kb.snippets.filter(s => s.category === "地点").map(s => s.title) : [];
+    const events = (kb && kb.snippets) ? kb.snippets.filter(s => s.category === "事件").map(s => s.title) : [];
+
+    const choices = [];
+
+    // 优先：与当前在场的 NPC 互动
+    if (npcs.length > 0) {
+        const npc = npcs[Math.floor(Math.random() * npcs.length)];
+        choices.push({ text: "与" + npc + "交谈", action: "talk_to_" + npc });
+    }
+
+    // 次优先：移动到附近地点
+    const nearby = locations.filter(l => l !== loc);
+    if (nearby.length > 0) {
+        const place = nearby[Math.floor(Math.random() * nearby.length)];
+        choices.push({ text: "前往" + place, action: "go_to_" + place });
+    }
+
+    // 再次：探索当前场景或触发事件
+    choices.push({ text: "仔细打量" + loc + "的每个角落", action: "explore" });
+
+    // 兜底：让事件继续发展
+    choices.push({ text: "让事件继续发展", action: "continue_story" });
+
+    // 第四：推进或休息
+    if (events.length > 0) {
+        const evt = events[Math.floor(Math.random() * events.length)];
+        choices.push({ text: "打听关于「" + evt + "」的线索", action: "investigate" });
+    } else {
+        choices.push({ text: "在原地稍作停留，整理思绪", action: "rest" });
+    }
+
+    // 确保至少 3 个
+    if (choices.length < 3) {
+        choices.push({ text: "环顾四周", action: "look" });
+    }
+
+    // 限制最多 4 个
+    return choices.slice(0, 4);
+}
+
 /* ================= 交互处理 ================= */
 async function submitInput() {
     skipTypewriter();
@@ -4806,11 +4852,7 @@ async function processTurn(input) {
             // 计算最终选项（AI 返回空时兜底），必须存储 finalChoices 而非原始空值
             let finalChoices = resp.choices;
             if (!finalChoices || finalChoices.length === 0) {
-                finalChoices = [
-                    { text: "环顾四周", action: "look" },
-                    { text: "大脑放空", action: "idle" },
-                    { text: "静静等待", action: "wait" }
-                ];
+                finalChoices = buildSmartFallbackChoices();
             }
             // ★ 将最终选项存入记录并持久化（含兜底）
             if (conversationHistory.length > 0) {
