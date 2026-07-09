@@ -31,6 +31,7 @@
     {"item_id": "coin", "name": "铜钱", "count": 10}
   ],
   "completed_events": [],
+  "active_event": null,
   "current_location": "入口小镇",
   "current_date": {
     "day": 1,

@@ -4,6 +4,18 @@
 
 ---
 
+## 快速开始
+
+```bash
+python -m http.server 8000   # 或用 npx serve .
+# 打开 http://localhost:8000
+```
+
+> 不要用 `file://` 打开，安全策略会阻止加载数据文件。
+
+**部署**：Push 到 GitHub → Settings → Pages → GitHub Actions（`.github/workflows/deploy.yml` 已就绪）
+
+---
 
 ## 使用流程
 

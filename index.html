@@ -1614,7 +1614,7 @@ async function init() {
         const state = await res.json();
         const saved = localStorage.getItem(STORAGE_KEYS.state);
         if (saved) {
-            try { gameState = JSON.parse(saved); } catch (e) { gameState = deepClone(state); }
+            try { gameState = JSON.parse(saved); migrateGameState(gameState); } catch (e) { gameState = deepClone(state); }
         } else {
             gameState = deepClone(state);
         }
@@ -1660,6 +1660,21 @@ async function init() {
 
 function deepClone(obj) {
     return typeof structuredClone !== "undefined" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj));
+}
+
+// 老存档迁移：补齐新增的状态字段，保证加事件引擎/目标系统后老存档不崩溃（#5/#6）
+function migrateGameState(gs) {
+    if (!gs || typeof gs !== "object") return;
+    if (gs.active_event === undefined) gs.active_event = null;
+    if (!Array.isArray(gs.completed_events)) gs.completed_events = [];
+    if (Array.isArray(gs.goals)) {
+        gs.goals.forEach(g => {
+            if (!g) return;
+            if (!g.status) g.status = "active";
+            if (g.visible === undefined) g.visible = true;
+            if (g.deadline === undefined) g.deadline = null;
+        });
+    }
 }
 
 function loadConfig() {
@@ -1769,6 +1784,7 @@ function createHongLouMengWorld() {
                 { item_id: "silver", name: "碎银", count: 5 }
             ],
             completed_events: [],
+            active_event: null,
             current_location: "荣国府 · 贾母院",
             current_date: { day: 1, period: "morning" },
             goals: [
@@ -1800,9 +1816,9 @@ function createHongLouMengWorld() {
                 { id: "hlm15", category: "势力", title: "四大家族", content: "贾、史、王、薛四大家族，祖上皆是勋贵。贾不假，白玉为堂金作马；阿房宫，三百里，住不下金陵一个史；东海缺少白玉床，龙王来请金陵王；丰年好大雪，珍珠如土金如铁。如今的四大家族已显颓势。", keywords: ["四大家族", "贾史王薛", "金陵"] },
                 { id: "hlm16", category: "冲突", title: "金玉良缘 vs 木石前盟", content: "宝玉衔通灵宝玉而生，宝钗有金锁，长辈们认为这是天定的「金玉良缘」。但宝玉心中只有黛玉（前世木石前盟），黛玉因此常感不安、以泪试探。这对三角情感是大观园最核心的张力，牵动所有人的关系网。", keywords: ["金玉良缘", "木石前盟", "黛玉", "宝钗", "宝玉", "金锁", "前世"] },
                 { id: "hlm17", category: "冲突", title: "仕途经济 vs 性情自由", content: "贾政等长辈期望宝玉走科举仕途之路，但宝玉极度厌恶八股文章和官场应酬，认为那些是「禄蠹」所为。这种价值观冲突是贾府内部的核心矛盾，也影响着宝玉与宝钗（支持仕途）和黛玉（理解宝玉）的关系走向。", keywords: ["仕途", "科举", "禄蠹", "贾政", "宝玉", "自由"] },
-                { id: "hlm18", category: "事件", title: "海棠诗社", content: "探春发起海棠诗社，邀请大观园众人到秋爽斋集会。触发条件：白天时段 + 玩家在大观园 + 与探春关系不为冷淡。每位参与者需即兴赋诗，是展示才艺、增进关系的机会。", keywords: ["诗社", "探春", "海棠", "秋爽斋", "诗词", "才艺"] },
-                { id: "hlm19", category: "事件", title: "刘姥姥进大观园", content: "乡下老妪刘姥姥带着土产来贾府攀亲。触发条件：第 2-5 天 + 上午时段 + 玩家在荣国府。刘姥姥粗鄙但幽默，她的到来给大观园带来一阵新鲜空气，但也可能引出各人的真实面目。", keywords: ["刘姥姥", "攀亲", "乡下", "土产"] },
-                { id: "hlm20", category: "事件", title: "黛玉葬花", content: "暮春时节，黛玉见落花飘零，触景生情，在花冢边葬花边吟诗。触发条件：黄昏时段 + 玩家在大观园 + 与黛玉关系不为冷淡。这是了解黛玉内心世界的最佳时机，也是推动宝黛关系的关键场景。", keywords: ["葬花", "黛玉", "落花", "花冢", "暮春"] }
+                { id: "hlm18", category: "事件", title: "海棠诗社", content: "探春发起海棠诗社，邀请大观园众人到秋爽斋集会。触发条件：白天时段 + 玩家在大观园 + 与探春关系不为冷淡。每位参与者需即兴赋诗，是展示才艺、增进关系的机会。", keywords: ["诗社", "探春", "海棠", "秋爽斋", "诗词", "才艺"], trigger: { periods: ["forenoon", "afternoon"], location: "大观园", npc: "探春", relNot: "冷淡" } },
+                { id: "hlm19", category: "事件", title: "刘姥姥进大观园", content: "乡下老妪刘姥姥带着土产来贾府攀亲。触发条件：第 2-5 天 + 上午时段 + 玩家在荣国府。刘姥姥粗鄙但幽默，她的到来给大观园带来一阵新鲜空气，但也可能引出各人的真实面目。", keywords: ["刘姥姥", "攀亲", "乡下", "土产"], trigger: { dayMin: 2, dayMax: 5, periods: ["morning"], location: "荣国府" } },
+                { id: "hlm20", category: "事件", title: "黛玉葬花", content: "暮春时节，黛玉见落花飘零，触景生情，在花冢边葬花边吟诗。触发条件：黄昏时段 + 玩家在大观园 + 与黛玉关系不为冷淡。这是了解黛玉内心世界的最佳时机，也是推动宝黛关系的关键场景。", keywords: ["葬花", "黛玉", "落花", "花冢", "暮春"], trigger: { periods: ["evening"], location: "大观园", npc: "林黛玉", relNot: "冷淡" } }
             ]
         },
         system_prompt: `你是《红楼梦》前八十回世界观的 AI 文字游戏叙事主持人。请严格遵循以下设定：
@@ -1916,9 +1932,9 @@ function createMagicAcademyWorld() {
                 { id: "ma12", category: "人物", title: "格雷教授", content: "水元素学派导师，你的发掘者。为人儒雅温和，但上课时要求严苛。他喜欢在课堂上用诗歌比喻魔法原理。日常在办公室整理旧魔法手稿，常在深夜还能看到他办公室的灯亮着。", keywords: ["格雷", "教授", "水", "导师"] },
                 { id: "ma13", category: "冲突", title: "元素学派间的微妙竞争", content: "七大学派表面上和睦，实则暗流涌动。火学派认为光学派软弱、暗学派认为风学派浮躁、土学派嫌水学派多变。但所有学派都一致推崇雷学派最强——雷塔的学生也确实常年霸占学年榜首。这种竞争有时会升级为塔楼间的斗法事件。", keywords: ["学派", "竞争", "冲突", "对立", "斗法"] },
                 { id: "ma14", category: "冲突", title: "魔力天赋与社会出身", content: "学院中有两类学生：出身魔法世家的名门之后和像你一样偶然觉醒的普通学生。前者往往傲慢、自带高级魔杖和家传咒语；后者则靠学院给予的基础配备起步。这道隐形的阶级线常常引发摩擦。你的魔力天赋是否能证明——出身不等于上限？", keywords: ["名门", "平民", "阶级", "天赋", "出身"] },
-                { id: "ma15", category: "事件", title: "分院仪式", content: "开学典礼上的重头戏。新生轮流触摸魔法水晶球，球体根据天赋显现对应元素的颜色。分院结果可能出乎意料——有时球会呈现两种颜色，意味着跨学派天赋。触发条件：第 1 天上午 + 玩家在中央广场。这是决定你学派归属的关键时刻。", keywords: ["分院", "水晶球", "元素", "学院", "典礼"] },
-                { id: "ma16", category: "事件", title: "流星雨之夜", content: "每年入秋的第一个夜晚，星辉学院上空会降下魔法流星雨。传说如果两人一同在星象塔顶观看流星雨并在流星落下时牵手，他们的魔力会产生共鸣。触发条件：第 5-15 天 + 星夜时段 + 玩家在学院 + 与任意角色的关系不为冷淡。这是经典的恋爱事件触发器。", keywords: ["流星雨", "星象塔", "许愿", "牵手", "共鸣", "恋爱"] },
-                { id: "ma17", category: "事件", title: "翡翠森林试炼", content: "新生第一学期的期中测试：三人一组进入翡翠森林，寻找指定的魔法植物并在日落前返回。途中可能遭遇幼年魔兽、迷路、或发现古代魔法遗迹。触发条件：第 6-10 天 + 早晨 + 玩家已在某学派。队友由教授分配，可能与好感最高或最低的同学组队。", keywords: ["森林", "试炼", "期中", "魔兽", "队友"] }
+                { id: "ma15", category: "事件", title: "分院仪式", content: "开学典礼上的重头戏。新生轮流触摸魔法水晶球，球体根据天赋显现对应元素的颜色。分院结果可能出乎意料——有时球会呈现两种颜色，意味着跨学派天赋。触发条件：第 1 天上午 + 玩家在中央广场。这是决定你学派归属的关键时刻。", keywords: ["分院", "水晶球", "元素", "学院", "典礼"], trigger: { day: 1, periods: ["morning"], location: "中央广场" } },
+                { id: "ma16", category: "事件", title: "流星雨之夜", content: "每年入秋的第一个夜晚，星辉学院上空会降下魔法流星雨。传说如果两人一同在星象塔顶观看流星雨并在流星落下时牵手，他们的魔力会产生共鸣。触发条件：第 5-15 天 + 星夜时段 + 玩家在学院 + 与任意角色的关系不为冷淡。这是经典的恋爱事件触发器。", keywords: ["流星雨", "星象塔", "许愿", "牵手", "共鸣", "恋爱"], trigger: { dayMin: 5, dayMax: 15, periods: ["night"] } },
+                { id: "ma17", category: "事件", title: "翡翠森林试炼", content: "新生第一学期的期中测试：三人一组进入翡翠森林，寻找指定的魔法植物并在日落前返回。途中可能遭遇幼年魔兽、迷路、或发现古代魔法遗迹。触发条件：第 6-10 天 + 早晨 + 玩家已在某学派。队友由教授分配，可能与好感最高或最低的同学组队。", keywords: ["森林", "试炼", "期中", "魔兽", "队友"], trigger: { dayMin: 6, dayMax: 10, periods: ["morning"] } }
             ]
         },
         system_prompt: `你是星辉魔法学院背景的 AI 文字游戏主持人。风格定位：青春校园 + 恋爱冒险。
@@ -2425,6 +2441,11 @@ async function generateWorld() {
 
     try {
         const generated = await callWorldGenerationLLM(name, type, desc, hero, ipName, sourceFileContent, styleRef, customStyle, plotFreedom, worldPrefix);
+        // 为 AI 生成世界的 lore_kb 补算向量（transformers 不可用时静默跳过，降级为关键词检索）
+        if (generated && generated.lore_kb) {
+            try { await ensureLoreEmbeddings(generated.lore_kb); }
+            catch (e) { console.warn("世界生成后向量预计算失败，将降级为关键词检索:", e.message); }
+        }
         const world = {
             id: "w" + Date.now(),
             name,
@@ -2518,6 +2539,7 @@ async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceCont
             model,
             messages: [{ role: "system", content: prompt }],
             temperature: 0.7,
+            max_tokens: 8192,
             response_format: { type: "json_object" }
         })
     });
@@ -2603,6 +2625,7 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - skills: {技能名: "技能的文字描述"}
    - inventory: [{item_id, name, count}]
    - completed_events: []
+   - active_event: null
    - current_location: 初始地点
    - current_date: {day, period}
    - goals: [{goal_id, name, type, deadline:{day,period}, visible}]
@@ -2612,11 +2635,11 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
 
 3. lore_kb: 知识库对象，包含：
    - ip: 世界名
-   - snippets: 数组，每条包含 {id, category（必须覆盖以下类型：规则/地点/人物/事件/物品/势力/冲突）, title, content, keywords（数组）}
+   - snippets: 数组，每条包含 {id, category（必须覆盖以下类型：规则/地点/人物/事件/物品/势力/冲突）, title, content, keywords（数组）, trigger（仅"事件"类需要，见下）}
 
    各 category 要求：
    - 冲突（至少 2 条）：世界的核心矛盾与张力，谁和谁对立，为什么，玩家可能被卷入哪一方。示例：金玉良缘vs木石前盟、家族利益vs个人情感、正邪之争。
-   - 事件（至少 2 条）：可触发的事件，每条需包含触发条件（时间+地点+可能的前置条件），以及事件内容和后果。
+   - 事件（至少 2 条）：可触发的事件，每条需在 content 中写清触发条件（时间+地点+可能的前置条件）与事件内容、后果；并额外补充结构化 trigger 字段，格式：{ day?: 数字, dayMin?: 数字, dayMax?: 数字, periods?: ["morning"/"forenoon"/"afternoon"/"evening"/"night" 其一或数组], location?: "地点标题", npc?: "NPC名", relNot?: "冷淡", prereq?: "前置事件标题" }。引擎会据此在条件满足时自动推进事件，无需 AI 自行记忆。
    - 人物片段中需附带该角色的**日常行程**（什么时间在什么地方）
    ${lengthLimitSection}
 
@@ -2679,6 +2702,7 @@ function mockGenerateWorld(name, type, desc, hero, ipName) {
             },
             inventory: [{ item_id: "wand", name: "魔杖", count: 1 }, { item_id: "robe", name: "校袍", count: 1 }],
             completed_events: [],
+            active_event: null,
             current_location: "学院大厅",
             current_date: { day: 1, period: "morning" },
             goals: [
@@ -3522,9 +3546,21 @@ function keywordRetrieve(input, topK = 5) {
             if ((s.keywords || []).some(k => k.toLowerCase().includes(t))) score += 3;
             if (s.title.toLowerCase().includes(t)) score += 4;
         }
-        return { snippet: s, score };
-    }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
-    return scored.map(x => x.snippet);
+        return { snippet: s, kwScore: score };
+    }).filter(x => x.kwScore > 0).sort((a, b) => b.kwScore - a.kwScore).slice(0, topK);
+    return scored;
+}
+
+// 模块级单例：Intl.Segmenter 构造有一定开销，全应用复用同一实例，
+// 避免每轮 keywordRetrieve + retrieveBehaviorRecords 的每个 chunk 都 new 一个（移动端累积开销可观）。
+// 用 null 表示「未初始化」、false 表示「当前环境不可用」，避免反复 try。
+let _zhSegmenter = null;
+function getZhSegmenter() {
+    if (_zhSegmenter === null) {
+        try { _zhSegmenter = new Intl.Segmenter("zh-CN", { granularity: "word" }); }
+        catch (e) { _zhSegmenter = false; }
+    }
+    return _zhSegmenter || null;
 }
 
 // 中文 + 英文通用分词：使用 Intl.Segmenter（现代浏览器均支持）
@@ -3538,19 +3574,21 @@ function segmentChinese(text) {
             if (chunk.length >= 2) terms.push(chunk.toLowerCase());
             continue;
         }
-        // 中文 → Intl.Segmenter 分词
-        try {
-            const segmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
-            const segments = segmenter.segment(chunk);
-            for (const seg of segments) {
-                if (seg.isWordLike && seg.segment.length >= 2) {
-                    terms.push(seg.segment);
+        // 中文 → Intl.Segmenter 分词（复用单例）
+        const seg = getZhSegmenter();
+        if (seg) {
+            try {
+                const segments = seg.segment(chunk);
+                for (const s of segments) {
+                    if (s.isWordLike && s.segment.length >= 2) {
+                        terms.push(s.segment);
+                    }
                 }
-            }
-        } catch (e) {
-            // 降级：如果 Segmenter 不可用，对大块中文直接作为关键词
-            if (chunk.length >= 2 && chunk.length <= 10) terms.push(chunk);
+                continue;
+            } catch (e) { /* 单例构造时可用、分词时异常仍降级 */ }
         }
+        // 降级：如果 Segmenter 不可用，对大块中文直接作为关键词
+        if (chunk.length >= 2 && chunk.length <= 10) terms.push(chunk);
     }
     // 去重
     return [...new Set(terms)];
@@ -3558,7 +3596,12 @@ function segmentChinese(text) {
 
 async function embeddingRetrieve(input, topK = 5) {
     const kb = getWorldLoreKB();
-    if (!kb || !kb.snippets || !kb.snippets[0] || !kb.snippets[0].embedding) return [];
+    if (!kb || !kb.snippets || !kb.snippets.length) return [];
+    // AI 生成世界 / 老存档未预计算向量时，先尝试补算（一次性，之后命中 sn[0].embedding 即跳过）
+    if (!kb.snippets[0].embedding) {
+        try { await ensureLoreEmbeddings(kb); } catch (e) { /* 降级为关键词 */ }
+    }
+    if (!kb.snippets[0] || !kb.snippets[0].embedding) return [];
     if (!embeddingModel) {
         try {
             embeddingModel = await transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
@@ -3571,9 +3614,9 @@ async function embeddingRetrieve(input, topK = 5) {
     const qVec = Array.from(out.data);
     const scored = kb.snippets.map(s => {
         const sim = cosineSimilarity(qVec, s.embedding);
-        return { snippet: s, score: sim };
-    }).sort((a, b) => b.score - a.score).slice(0, topK);
-    return scored.map(x => x.snippet);
+        return { snippet: s, embScore: sim };
+    }).sort((a, b) => b.embScore - a.embScore).slice(0, topK);
+    return scored;
 }
 
 function cosineSimilarity(a, b) {
@@ -3586,27 +3629,75 @@ function cosineSimilarity(a, b) {
     return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-10);
 }
 
+// 用已加载的 transformers 模型计算一段文本的向量；模型未加载时尝试加载一次。
+// transformers 不可用时抛错，由调用方捕获并降级为关键词检索。
+async function computeEmbedding(text) {
+    if (typeof transformers === "undefined") throw new Error("transformers 不可用");
+    if (!embeddingModel) {
+        embeddingModel = await transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    }
+    const out = await embeddingModel(text, { pooling: "mean", normalize: true });
+    return Array.from(out.data);
+}
+
+// 为知识库片段补算 embedding（AI 生成世界 / 老存档 / 生成时未算的场景）。
+// 已全部带向量则跳过；环境不支持则静默降级。补算结果会写回 snippet，随世界持久化。
+async function ensureLoreEmbeddings(kb) {
+    if (!kb || !kb.snippets || !kb.snippets.length) return;
+    if (kb.snippets[0].embedding) return; // 已有向量，跳过
+    if (typeof transformers === "undefined") return; // 环境不支持，降级为关键词
+    for (const s of kb.snippets) {
+        if (s.embedding) continue;
+        const text = [s.category, s.title, s.content, (s.keywords || []).join(" ")].filter(Boolean).join(" ");
+        try {
+            s.embedding = await computeEmbedding(text);
+        } catch (e) {
+            console.warn("知识库片段向量计算失败:", e.message);
+            return; // 一旦模型不可用，剩余片段也不再尝试
+        }
+    }
+}
+
 async function retrieve(input) {
+    // P1#2：小知识库（全文已注入 system）无需每轮跑 embedding 推理 + 关键词向量检索——
+    // 那段知识在 buildTurnUserMessage 里不会进入 user 消息，纯属浪费（手机端尤卡）。
+    // 仅保留行为记录召回（仍是按相关度），因为它独立于 lore 注入、本就服务于"关键事实"区块。
+    if (isLoreFullInSystem()) {
+        const behavior = retrieveBehaviorRecords(input, 3);
+        return behavior.map(b => ({
+            id: "behavior_" + b.id, category: "行为记录", title: "关键事实",
+            content: b.text, kw: 1.5, emb: 0
+        }));
+    }
+
     // RAG 并行化：关键词检索和向量检索同时进行
     const [keyword, embedding] = await Promise.all([
         Promise.resolve(keywordRetrieve(input, 7)),
         embeddingRetrieve(input, 7)
     ]);
+    // 保留真实分数（关键词分 + 余弦相似度）做加权融合，而非归一为 1/2 常量（修复 #1 丢失区分度）
+    const KW_W = 1.0, EMB_W = 2.0;
     const merged = new Map();
-    for (const s of keyword) merged.set(s.id, { snippet: s, score: 1 });
-    for (const s of embedding) {
-        const existing = merged.get(s.id);
-        if (existing) existing.score += 2;
-        else merged.set(s.id, { snippet: s, score: 2 });
+    for (const k of keyword) {
+        const cur = merged.get(k.snippet.id) || { snippet: k.snippet, kw: 0, emb: 0 };
+        cur.kw = Math.max(cur.kw, k.kwScore);   // 同片段取最高关键词分
+        merged.set(k.snippet.id, cur);
+    }
+    for (const e of embedding) {
+        const cur = merged.get(e.snippet.id) || { snippet: e.snippet, kw: 0, emb: 0 };
+        cur.emb = Math.max(cur.emb, e.embScore);
+        merged.set(e.snippet.id, cur);
     }
 
     // 加入玩家行为记录
     const behavior = retrieveBehaviorRecords(input, 3);
     for (const b of behavior) {
-        merged.set("behavior_" + b.id, { snippet: { id: "behavior_" + b.id, category: "行为记录", title: "关键事实", content: b.text }, score: 1.5 });
+        merged.set("behavior_" + b.id, { snippet: { id: "behavior_" + b.id, category: "行为记录", title: "关键事实", content: b.text }, kw: 1.5, emb: 0 });
     }
 
-    return Array.from(merged.values()).sort((a, b) => b.score - a.score).slice(0, 8).map(x => x.snippet);
+    return Array.from(merged.values())
+        .map(x => ({ ...x.snippet, score: KW_W * (x.kw || 0) + EMB_W * (x.emb || 0) }))
+        .sort((a, b) => b.score - a.score).slice(0, 8);
 }
 
 /* ================= 关键事实 / 玩家行为记录 ================= */
@@ -3623,21 +3714,37 @@ function retrieveBehaviorRecords(input, topK = 3) {
     return scored;
 }
 
+// 零信息量事实：即使 AI 兜底生成也不入库，避免污染关键记忆上下文
+function isFuzzyFact(t) {
+    return /有了新的变化/.test(t) || /有了新的变动/.test(t);
+}
+// 弱归一：NFKC 全角→半角、去标点空白、小写、关系介词统一（“与”→“和”），用于近似去重
+function normFact(t) {
+    return String(t)
+        .normalize("NFKC")
+        .replace(/与/g, "和")
+        // 注意：NFKC 会把全角 ！？ 转成半角 ! ?，故此处需同时覆盖半角标点
+        .replace(/[\s,，。！？、；：""''「」《》（）【】\n\r\t!?…—~～]/g, "")
+        .toLowerCase();
+}
+
 function addBehaviorRecords(facts) {
     if (!currentWorld || !facts || !facts.length) return;
     if (!currentWorld.behavior_records) currentWorld.behavior_records = [];
+    const list = currentWorld.behavior_records;
     for (const text of facts) {
-        if (!text || currentWorld.behavior_records.some(b => b.text === text)) continue;
-        currentWorld.behavior_records.push({
+        if (!text) continue;
+        if (isFuzzyFact(text)) continue;                       // 过滤空话，不入记忆
+        const n = normFact(text);
+        if (list.some(b => normFact(b.text) === n)) continue;  // 近似去重，避免重复灌满
+        list.push({
             id: "b" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Date.now() + Math.random().toString(36).slice(2, 6)),
             text,
             createdAt: new Date().toISOString()
         });
     }
     // 限制数量，避免无限增长
-    if (currentWorld.behavior_records.length > 100) {
-        currentWorld.behavior_records = currentWorld.behavior_records.slice(-100);
-    }
+    if (list.length > 100) currentWorld.behavior_records = list.slice(-100);
     saveWorlds();
 }
 
@@ -3659,17 +3766,19 @@ function summarizeFactsFromChanges(input, narrative, changes) {
             }
         }
     }
+    // 属性/技能类变更：若 AI 未给具体描述，仅“有了新的变化”属零信息量，不入库
+    // （即使兜底生成也会被 addBehaviorRecords 的模糊过滤二次拦截，避免污染关键记忆）
     if (changes && changes.attributes) {
         for (const [k, v] of Object.entries(changes.attributes)) {
             if (typeof v === "string" && v.trim() !== "") {
-                facts.push(`玩家的 ${k} 属性有了新的变化`);
+                facts.push(`玩家的 ${k} 属性发生了变化：${v}`);
             }
         }
     }
     if (changes && changes.skills) {
         for (const [k, v] of Object.entries(changes.skills)) {
             if (typeof v === "string" && v.trim() !== "") {
-                facts.push(`玩家的 ${k} 技能有了新的变化`);
+                facts.push(`玩家的 ${k} 技能发生了变化：${v}`);
             }
         }
     }
@@ -3682,6 +3791,9 @@ function summarizeFactsFromChanges(input, narrative, changes) {
 }
 
 /* ================= Prompt 与 LLM ================= */
+// 全量知识库注入 system 的字符阈值（buildSystemPrompt 与 isLoreFullInSystem 共用，避免两处各算各的导致重复注入）
+const LORE_FULL_THRESHOLD = 12000;
+
 function buildSystemPrompt() {
     // ★ P0: 预计算缓存 — 同一世界内 system prompt 完全固定，无需每轮重建
     const worldId = currentWorld && currentWorld.id;
@@ -3736,7 +3848,7 @@ function buildSystemPrompt() {
 
     // 全量 < 20000 字符 → 全部注入 system
     const fullLoreText = allSnippets.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
-    const LORE_FULL_THRESHOLD = 20000;
+    // 使用模块级 LORE_FULL_THRESHOLD（见文件上方常量定义），与 isLoreFullInSystem 保持一致
     if (fullLoreText.length > 0 && fullLoreText.length < LORE_FULL_THRESHOLD) {
         systemPrompt += "\n\n# 世界观知识库（全量·固定，命中缓存）\n\n以下为该世界全部知识片段，请作为叙事依据：\n\n```\n" + fullLoreText + "\n```";
         isCoreLoreCached = true;
@@ -3943,7 +4055,7 @@ function isLoreFullInSystem() {
     const kb = getWorldLoreKB();
     const allSnippets = kb && kb.snippets ? kb.snippets : [];
     const fullLoreText = allSnippets.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
-    return fullLoreText.length > 0 && fullLoreText.length < 12000;
+    return fullLoreText.length > 0 && fullLoreText.length < LORE_FULL_THRESHOLD;
 }
 
 // P0: 构建紧凑游戏状态（仅含每轮可能变化的字段，紧凑 JSON 无换行）
@@ -3970,6 +4082,89 @@ function buildCompactGameState() {
 
 // 构建本轮 user 消息（每轮动态，仅最新轮 miss）
 // 多轮模式下历史叙事已包含上下文，user 只放：动态检索补充 + 紧凑状态 + 玩家输入
+// 事件引擎（#5）：计算当前应当提示 AI 推进的事件（纯函数，不修改状态）
+// 从事件 content 的「触发条件」文本中推断触发条件（兜底：AI 未吐出规范 trigger 时也能触发）
+// 返回与 s.trigger 同构的对象 { day?, dayMin?, dayMax?, periods?, location? }，无法推断则返回 null
+function inferTriggerFromContent(content) {
+    if (!content || typeof content !== "string") return null;
+    const text = content;
+    const cond = {};
+    // 天数：第N天
+    const dayM = text.match(/第\s*(\d+)\s*天/);
+    if (dayM) cond.day = parseInt(dayM[1], 10);
+    // 天数区间：第N~M天
+    const dayRange = text.match(/第\s*(\d+)\s*天[-~到至]\s*第?\s*(\d+)\s*天/);
+    if (dayRange) { cond.dayMin = parseInt(dayRange[1], 10); cond.dayMax = parseInt(dayRange[2], 10); }
+    // 时段：匹配已知时段词（映射到引擎时段 token）
+    const periodMap = {
+        "黎明": "dawn", "清晨": "morning", "早晨": "morning", "上午": "forenoon",
+        "中午": "forenoon", "下午": "afternoon", "傍晚": "evening", "黄昏": "evening",
+        "夜晚": "night", "夜间": "night", "深夜": "night", "夜里": "night"
+    };
+    const periods = [];
+    for (const [kw, p] of Object.entries(periodMap)) {
+        if (text.includes(kw) && !periods.includes(p)) periods.push(p);
+    }
+    if (periods.length) cond.periods = periods;
+    // 地点：若 content 中出现已知「地点」片段标题，则作为 location 兜底
+    try {
+        const kb = getWorldLoreKB();
+        if (kb && kb.snippets) {
+            const locs = kb.snippets.filter(s => s.category === "地点").map(s => s.title);
+            for (const loc of locs) {
+                if (loc && text.includes(loc)) { cond.location = loc; break; }
+            }
+        }
+    } catch (e) { /* 推断失败不影响主流程 */ }
+    // 无任何可推断条件：视为纯自由事件，交回 AI 自觉（不强行触发）
+    if (cond.day == null && cond.dayMin == null && cond.dayMax == null && !cond.periods && !cond.location) return null;
+    return cond;
+}
+
+// 优先消费 AI 显式标记的 triggered_event；其次按知识库事件片段的 trigger 复合条件扫描
+function getPendingEventHint() {
+    const kb = getWorldLoreKB();
+    if (!kb || !kb.snippets || !gameState) return null;
+    const st = gameState;
+    const events = kb.snippets.filter(s => s.category === "事件");
+    const done = st.completed_events || [];
+
+    // 1) AI 显式激活的事件
+    if (st.active_event) {
+        const active = events.find(s => s.title === st.active_event);
+        if (active && !done.includes(active.title)) {
+            const summary = (active.content || "").replace(/触发条件[：:][\s\S]*$/s, "").slice(0, 240);
+            return `事件「${active.title}」现已激活，请在叙事中自然推进其发展：\n${summary}`;
+        }
+    }
+
+    // 2) 复合触发条件扫描（仅对带 trigger 字段、由引擎托管的事件）
+    for (const s of events) {
+        if (done.includes(s.title)) continue;
+        // 优先用结构化 trigger；缺失/损坏时从 content 文本兜底推断（让 AI 生成的任意 IP 世界也能触发）
+        const c = s.trigger || inferTriggerFromContent(s.content);
+        if (!c) continue;
+        if (c.day && st.current_date.day < c.day) continue;
+        if (c.dayMin && st.current_date.day < c.dayMin) continue;
+        if (c.dayMax && st.current_date.day > c.dayMax) continue;
+        if (c.periods && c.periods.length) {
+            if (!c.periods.includes(st.current_date.period)) continue;
+        }
+        if (c.location) {
+            const cur = st.current_location || "";
+            if (!cur.includes(c.location) && !c.location.includes(cur)) continue;
+        }
+        if (c.npc && c.relNot) {
+            const rel = (st.relationships && st.relationships[c.npc]) || "";
+            if (rel.includes(c.relNot)) continue;   // 关系未达标
+        }
+        if (c.prereq && !done.includes(c.prereq)) continue;
+        const summary = (s.content || "").replace(/触发条件[：:][\s\S]*$/s, "").slice(0, 240);
+        return `事件「${s.title}」的触发条件现已满足，请在叙事中自然推进该事件：\n${summary}`;
+    }
+    return null;
+}
+
 function buildTurnUserMessage(input, retrieved) {
     let userPrompt = "";
 
@@ -3980,8 +4175,11 @@ function buildTurnUserMessage(input, retrieved) {
         userPrompt += "\n";
     }
 
-    // ★ 永久记忆：无条件注入最近关键事实（解决 AI 失忆问题）
-    const recentFacts = getRecentKeyFacts(5);
+    // ★ 永久记忆：注入关键事实（解决 AI 失忆问题）
+    // P1#4：把 RAG 按相关度召回的行为记录（retrieved 里的 behavior_ 片段）与"最近 5 条"去重合并，
+    // 让相关度高的旧事实也能被召回，而不是只依赖时间窗口里恰好最近的几条（此前相关度结果被丢弃）。
+    const ragFacts = (retrieved || []).filter(s => String(s.id).startsWith("behavior_")).map(s => s.content);
+    const recentFacts = dedupeStrings([...ragFacts, ...getRecentKeyFacts(5)]).slice(0, 6);
     if (recentFacts.length) {
         userPrompt += "# 已发生的关键事件（务必记住）\n\n";
         recentFacts.forEach((f, i) => { userPrompt += (i + 1) + ". " + f + "\n"; });
@@ -4012,6 +4210,12 @@ function buildTurnUserMessage(input, retrieved) {
         }
     }
 
+    // ★ 事件引擎（#5）：基于复合触发条件，主动提示 AI 推进应发生的事件
+    const eventHint = getPendingEventHint();
+    if (eventHint) {
+        userPrompt += "# 当前应推进的事件（请在叙事中自然融入，不要生硬宣科）\n\n" + eventHint + "\n\n";
+    }
+
     // P0: 紧凑游戏状态
     userPrompt += "# 当前游戏状态\n\n" + buildCompactGameState() + "\n\n";
 
@@ -4025,6 +4229,17 @@ function getRecentKeyFacts(count) {
     if (!currentWorld || !currentWorld.behavior_records) return [];
     const records = currentWorld.behavior_records;
     return records.slice(-count).map(r => r.text);
+}
+
+// P1#4：去除相邻字符串数组中的重复项（按 trim 后的值判等，保留首次出现顺序）
+function dedupeStrings(arr) {
+    const seen = new Set();
+    const out = [];
+    for (const x of (arr || [])) {
+        const k = String(x).trim();
+        if (k && !seen.has(k)) { seen.add(k); out.push(x); }
+    }
+    return out;
 }
 
 // 将一轮 user/assistant 推入多轮对话历史（仅在正常故事轮次调用，警告轮次跳过）
@@ -4170,7 +4385,7 @@ async function callLLMNonStreaming(url, apiKey, model, messages) {
             body: JSON.stringify({
                 model, messages,
                 temperature: getTemperature(),
-                max_tokens: 10240,
+                max_tokens: 8192,
                 thinking: { type: "disabled" },
                 response_format: { type: "json_object" }
             }),
@@ -4218,7 +4433,7 @@ async function callLLMStreaming(url, apiKey, model, messages) {
         body: JSON.stringify({
             model, messages,
             temperature: getTemperature(),
-            max_tokens: 6144,
+            max_tokens: 8192,
             thinking: { type: "disabled" },
             stream: true,
             stream_options: { include_usage: true },
@@ -4321,13 +4536,38 @@ function tryRepairJSON(text) {
     if (repaired.endsWith(",")) repaired = repaired.slice(0, -1);
     while (depth > 0) { repaired += "}"; depth--; }
     if (inString) repaired += '"';
-
     try { JSON.parse(repaired); return repaired; } catch (e) { /* 继续降级 */ }
 
-    const narrativeMatch = text.match(/"narrative"\s*:\s*"([\s\S]*?)(?:"\s*,|\s*\})/);
-    if (narrativeMatch) {
-        const extracted = narrativeMatch[1].replace(/"/g, '\\"').replace(/\n/g, '\\n');
-        return '{"narrative": "' + extracted + '", "choices": [], "state_changes": {}}';
+    // 兜底 2：从末尾向前找最后一个完整 }，截断后续破损尾（如 choices/state_changes 半截）再解析
+    const lastBrace = repaired.lastIndexOf("}");
+    if (lastBrace > 0) {
+        const truncated = repaired.slice(0, lastBrace + 1);
+        try { JSON.parse(truncated); return truncated; } catch (e) { /* 继续 */ }
+    }
+
+    // 兜底 3：强掏 narrative。用 JSON.stringify 自动正确转义，避免手工 replace(/"/g) 双重转义导致非法 JSON
+    const start = text.indexOf('"narrative"');
+    if (start >= 0) {
+        const colon = text.indexOf(":", start);
+        if (colon > 0) {
+            const q = text.indexOf('"', colon);
+            if (q > colon) {
+                // 定位 narrative 值字符串的闭合引号（考虑转义）；找不到说明被截断，取到文本末
+                let end = -1, esc = false;
+                for (let i = q + 1; i < text.length; i++) {
+                    const c = text[i];
+                    if (esc) { esc = false; continue; }
+                    if (c === "\\") { esc = true; continue; }
+                    if (c === '"') { end = i; break; }
+                }
+                const raw0 = end > 0 ? text.slice(q + 1, end) : text.slice(q + 1);
+                // 若 narrative 被截断，raw0 可能含尾部破损 JSON，切到首个疑似后续键之前，保留干净叙事
+                const cut = end < 0 ? raw0.search(/"\s*(choices|state_changes|options|key_facts)\s*"/) : -1;
+                const raw = cut > 0 ? raw0.slice(0, cut) : raw0;
+                const fallback = JSON.stringify({ narrative: raw, choices: [], state_changes: {} });
+                try { JSON.parse(fallback); return fallback; } catch (e) { /* 末路 */ }
+            }
+        }
     }
     return '{"narrative": "叙事内容获取不完整...", "choices": [], "state_changes": {}}';
 }
@@ -4432,7 +4672,7 @@ function isNonStoryResponse(text) {
 
     // 弱信号：需要多个命中才判定。去掉了"无法""不能"等常见叙事词汇
     const weakPatterns = [
-        "抱歉", "unable to", "cannot",
+        "unable to", "cannot",
         "请提供", "请换一个", "请尝试", "please provide",
         "不恰当", "不适当", "违反", "违规",
         "涉及敏感", "敏感内容"
@@ -4537,6 +4777,10 @@ function detectPromptInjection(input) {
 
     // ====== 强信号：命中一条即拦截 ======
     const strongPatterns = [
+        // 经典越狱：要求忽略 / 忘掉历史指令或系统设定
+        { pattern: /(忽略|忘(记|掉|却)|无视|抛弃|disregard|ignore).{0,12}(之前|以上|前面|所有|上文|原先|原).{0,12}(指令|提示词?|提示|设定|规则|prompt|system|约束)/i, label: "忽略历史指令（越狱）" },
+        // 经典越狱：要求模型扮演「无限制」助手 / AI
+        { pattern: /(现在|此刻|此后|从今)?(你|您)(已经)?(是|变成|成为|作为|就是).{0,6}(一个|一名|个)?(没有限制|无限制|不受(任何)?(限制|约束)|unrestricted|unlimited).{0,6}(的)?(助手|ai|人工智能|语言模型|模型|gpt|chatbot|存在|实体)/i, label: "无限制角色扮演（越狱）" },
         // 角色替换类（目标非世界角色时已由白名单处理，此处兜底）
         { pattern: /你现在[^。]{0,10}(扮演|是|作为)[^。]{0,10}(系统|架构师|管理员|开发者|工程师)/, label: "角色替换（系统角色）" },
         { pattern: /请[^。]{0,15}(以|用|作为)[^。]{0,10}(系统|架构师|管理员|AI).{0,10}(视角|身份|口吻)/, label: "角色替换（系统身份）" },
@@ -4585,12 +4829,29 @@ function detectPromptInjection(input) {
 }
 
 /* ================= 状态应用 ================= */
+// #7 完善：解析期 schema 校验——attributes/relationships/skills 期望字符串（或数字提示），
+// 收到其他类型（对象/数组/布尔等）时告警，便于定位模型越界返回。
+function validateStateShape(changes) {
+    if (!changes || typeof changes !== "object") return;
+    const groups = ["attributes", "relationships", "skills"];
+    for (const g of groups) {
+        const obj = changes[g];
+        if (!obj || typeof obj !== "object") continue;
+        for (const [k, v] of Object.entries(obj)) {
+            if (typeof v === "string" || typeof v === "number") continue;
+            console.warn("[schema] " + g + "." + k + " 期望字符串/数字，收到 " + typeof v + "：", v);
+        }
+    }
+}
+
 function applyStateChanges(changes) {
     if (!changes) return;
     const s = gameState;
+    validateStateShape(changes);   // #7 完善：异常状态类型告警
 
     if (changes.current_location) s.current_location = changes.current_location;
-    if (changes.current_date) s.current_date = { ...s.current_date, ...changes.current_date };
+    // 注意：current_date 不在本处直接写回——时间钳制段（下方）须基于「旧时间」推导目标，
+    // 若先写回则 prevSeq 失真、回退钳制失效（P1#8 真实缺陷修复）。
     if (changes.time_mode) s.time_mode = changes.time_mode;
 
     if (changes.attributes) {
@@ -4598,8 +4859,10 @@ function applyStateChanges(changes) {
             if (typeof v === "string" && v.trim() !== "") {
                 s.attributes[k] = v;
             } else if (typeof v === "number") {
-                // 兼容旧版数值
-                s.attributes[k] = (typeof s.attributes[k] === "number" ? s.attributes[k] : 0) + v;
+                // 数字只作数值提示，绝不覆盖已有文字描述（修复类型污染 #7）
+                const prev = s.attributes[k];
+                if (typeof prev !== "string") s.attributes[k] = `数值约 ${v}`;
+                // 若已是文字描述则保留，忽略该数字，避免把"你们一见如故…"覆盖成裸数字
             }
         }
     }
@@ -4608,7 +4871,10 @@ function applyStateChanges(changes) {
             if (typeof v === "string" && v.trim() !== "") {
                 s.relationships[k] = v;
             } else if (typeof v === "number") {
-                s.relationships[k] = (typeof s.relationships[k] === "number" ? s.relationships[k] : 0) + v;
+                // 数字只作数值提示，绝不覆盖已有文字描述（修复类型污染 #7）
+                const prev = s.relationships[k];
+                if (typeof prev !== "string") s.relationships[k] = `好感度约 ${v}`;
+                // 若已是文字描述则保留，忽略该数字，避免把好感度描述覆盖成裸数字
             }
         }
     }
@@ -4617,7 +4883,10 @@ function applyStateChanges(changes) {
             if (typeof v === "string" && v.trim() !== "") {
                 s.skills[k] = v;
             } else if (typeof v === "number") {
-                s.skills[k] = (typeof s.skills[k] === "number" ? s.skills[k] : 0) + v;
+                // 数字只作数值提示，绝不覆盖已有文字描述（修复类型污染 #7）
+                const prev = s.skills[k];
+                if (typeof prev !== "string") s.skills[k] = `数值约 ${v}`;
+                // 若已是文字描述则保留，忽略该数字
             }
         }
     }
@@ -4647,12 +4916,35 @@ function applyStateChanges(changes) {
         }
     }
 
+    // 消费 AI 返回的 triggered_event（此前从未被引擎读取）：记录当前激活事件，供事件引擎推进（#5）
+    if (changes.triggered_event) {
+        s.active_event = changes.triggered_event;
+    }
+
     if (changes.goal_updates) {
         for (const u of changes.goal_updates) {
             const g = s.goals.find(x => x.goal_id === u.goal_id);
-            if (g) g.status = u.status || g.status;
+            if (g) {
+                if (u.status) g.status = u.status;
+                if (typeof u.visible === "boolean") g.visible = u.visible;   // 隐藏目标转可见
+                if (u.name) g.name = u.name;
+                if (u.deadline) g.deadline = u.deadline;
+            } else if (u.goal_id && u.name) {
+                // 新增目标（目标链 / 隐藏任务揭示）—原先 find 不到会静默丢弃，现补建（#6）
+                s.goals.push({
+                    goal_id: u.goal_id,
+                    name: u.name,
+                    type: u.type || "其他",
+                    deadline: u.deadline || null,
+                    visible: u.visible !== false,
+                    status: u.status || "active"
+                });
+            }
         }
     }
+
+    // 每轮检查目标 deadline，过期未达成则标记 failed（失败不等于结束，开辟新故事线）（#6）
+    checkGoalDeadlines();
 
     if (changes.status_effects) {
         s.status_effects = changes.status_effects;
@@ -4670,16 +4962,42 @@ function applyStateChanges(changes) {
     // ★ 时间推进：仅当 AI 在 state_changes 中明确指定了 period 或 current_date 时才推进
     // 不再自动推进——日常闲聊、观察环境等行动不应消耗时段
     // AI 根据行动复杂度自行判断是否推进：不推进则不填 period，推进则填入目标时段
+    // P1#8：用「绝对时间序号」钳制，严禁时间倒流（文档明确禁止回退）。
+    // 注意 period 与 current_date 可能同时出现，必须统一推导目标时间后再做一次性钳制，避免重复计数。
     const tc = getTimeConfig();
-    if (changes.period && tc.mode === "periods") {
-        const prevIdx = tc.periods.indexOf(s.current_date.period);
-        const newIdx = tc.periods.indexOf(changes.period);
-        if (prevIdx >= 0 && newIdx >= 0 && newIdx <= prevIdx) {
-            s.current_date.day += 1;
+    if (tc.mode === "periods") {
+        const periodOrder = tc.periods;
+        const seq = d => {
+            const p = periodOrder.indexOf(d.period);
+            return d.day * 100 + (p < 0 ? 99 : p);
+        };
+        const prevSeq = seq(s.current_date);
+        let tgtDay = s.current_date.day;
+        let tgtPeriod = s.current_date.period;
+
+        if (changes.current_date && (changes.current_date.day != null || changes.current_date.period != null)) {
+            // 显式给出 current_date：直接采信（可能只给 day 或只给 period），仅做回退钳制
+            if (changes.current_date.day != null) tgtDay = changes.current_date.day;
+            if (changes.current_date.period != null) tgtPeriod = changes.current_date.period;
+        } else if (changes.period) {
+            // 仅给 period：按"向前推进"语义推导——同/早时段→次日该时段，晚时段→当日该时段
+            const newIdx = periodOrder.indexOf(changes.period);
+            const prevIdx = periodOrder.indexOf(s.current_date.period);
+            if (newIdx >= 0 && prevIdx >= 0) {
+                tgtDay = (newIdx <= prevIdx) ? s.current_date.day + 1 : s.current_date.day;
+                tgtPeriod = changes.period;
+            }
         }
-        s.current_date.period = changes.period;
-    }
-    if (changes.current_date) {
+
+        const newSeq = seq({ day: tgtDay, period: tgtPeriod });
+        if (newSeq >= prevSeq) {
+            s.current_date = { day: tgtDay, period: tgtPeriod };
+        } else {
+            // 非法回退：拒绝，保持原时间，仅记日志（避免"时间倒流 + 跨天"的荒谬状态）
+            console.warn("AI 试图回退时间，已忽略", { day: tgtDay, period: tgtPeriod });
+        }
+    } else if (changes.current_date) {
+        // 自由时间模式（无 period 顺序）：无钳制，直接合并 current_date
         s.current_date = { ...s.current_date, ...changes.current_date };
     }
 
@@ -4687,19 +5005,51 @@ function applyStateChanges(changes) {
     updateGameDayInfo();
 }
 
+// 目标 deadline 检查：过期仍未达成 → 标记 failed（叙事体现后果，不删档、不结束游戏）（#6）
+function checkGoalDeadlines() {
+    if (!gameState || !gameState.goals) return;
+    const st = gameState;
+    const tc = getTimeConfig();
+    const periodOrder = (tc && tc.periods) || DEFAULT_PERIOD_ORDER;
+    const seq = d => {
+        const p = periodOrder.indexOf(d.period);
+        return d.day * 100 + (p < 0 ? 0 : p);
+    };
+    for (const g of st.goals) {
+        if (g.status !== "active" || !g.deadline) continue;
+        const dlSeq = seq({ day: g.deadline.day, period: g.deadline.period });
+        const curSeq = seq(st.current_date);
+        if (curSeq > dlSeq) {
+            g.status = "failed";   // 严格大于：恰好抵达 deadline 时段仍可完成
+            g.failed_at = { day: st.current_date.day, period: st.current_date.period };
+            // #6 完善：把失败后果记入关键事实，下一轮 AI 会在叙事中体现（而非仅改状态）
+            const dlText = "第" + g.deadline.day + "天" + (g.deadline.period || "");
+            addBehaviorRecords(["目标「" + (g.name || g.goal_id) + "」已失败（未在" + dlText + "前达成），其后果需在剧情中体现。"]);
+        }
+    }
+}
+
 // AI 未返回选项时的智能兜底：根据当前场景/位置/NPC生成有意义的替代选项
 function buildSmartFallbackChoices() {
     const loc = gameState.current_location || "这里";
-    const npcs = gameState.relationships ? Object.keys(gameState.relationships) : [];
     const kb = getWorldLoreKB();
+    // P1#9：优先用知识库「人物」片段的真实姓名作为 NPC 名；
+    // 关系表里的 guide_npc / rival_npc 等占位 key 不作为展示名，避免兜底选项显示"与 guide_npc 交谈"。
+    const kbNpcNames = (kb && kb.snippets)
+        ? kb.snippets.filter(s => s.category === "人物").map(s => s.title)
+        : [];
+    const relNames = gameState.relationships
+        ? Object.keys(gameState.relationships).filter(k => !k.endsWith("_npc"))
+        : [];
+    const npcPool = kbNpcNames.length ? kbNpcNames : relNames;
     const locations = (kb && kb.snippets) ? kb.snippets.filter(s => s.category === "地点").map(s => s.title) : [];
     const events = (kb && kb.snippets) ? kb.snippets.filter(s => s.category === "事件").map(s => s.title) : [];
 
     const choices = [];
 
     // 优先：与当前在场的 NPC 互动
-    if (npcs.length > 0) {
-        const npc = npcs[Math.floor(Math.random() * npcs.length)];
+    if (npcPool.length > 0) {
+        const npc = npcPool[Math.floor(Math.random() * npcPool.length)];
         choices.push({ text: "与" + npc + "交谈", action: "talk_to_" + npc });
     }
 
