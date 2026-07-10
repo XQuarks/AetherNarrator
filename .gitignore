@@ -1,0 +1,9 @@
+# 开发期依赖（仅 tools/ 下的模块校验脚本需要，纯静态部署无关）
+node_modules/
+
+# 临时/日志
+*.log
+chkerr.txt
+
+# WorkBuddy 本地工作产物（记忆/agent 状态，非项目源码，不进仓库）
+.workbuddy/

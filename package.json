@@ -1,0 +1,14 @@
+{
+  "name": "aethernarrator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "以太叙事 · 零后端 AI 互动叙事引擎（纯静态，GitHub Pages 可直接部署）",
+  "scripts": {
+    "verify": "node tools/verify-modules.cjs && node tools/load-check.mjs",
+    "serve": "python -m http.server 8123 --bind 127.0.0.1"
+  },
+  "devDependencies": {
+    "acorn": "^8.17.0",
+    "acorn-walk": "^8.3.5"
+  }
+}

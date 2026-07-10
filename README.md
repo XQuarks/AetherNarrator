@@ -13,7 +13,7 @@ python -m http.server 8000   # 或用 npx serve .
 
 > 不要用 `file://` 打开，安全策略会阻止加载数据文件。
 
-**部署**：Push 到 GitHub → Settings → Pages → GitHub Actions（`.github/workflows/deploy.yml` 已就绪）
+**部署**：Push 到 GitHub → Settings → Pages → 选 `Deploy from a branch`（main 分支根目录）；或启用附带的工作流 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)（自动部署到 GitHub Pages）
 
 ---
 
@@ -55,6 +55,35 @@ python -m http.server 8000   # 或用 npx serve .
 
 ---
 
+## 项目结构
+
+纯静态、零构建。浏览器通过 ES Module 原生 `import` 直接加载 `src/` 下的模块，GitHub Pages（HTTP 服务器）开箱即用，无需打包工具。
+
+```
+index.html          # 入口，<script type="module" src="src/app.js">
+styles.css
+src/
+├── store.js        # 全局状态容器 S{} + 常量（跨模块唯一可变状态源，读写统一 S.xxx）
+├── utils.js        # 纯工具函数（深拷贝/转义/相似度/世界 Schema…）
+├── theme.js        # 主题、字体、时间段/温度设置
+├── storage.js      # localStorage 读写（世界/存档/配置）
+├── files.js        # 源文件（TXT/DOCX/EPUB）上传与解析
+├── rag.js          # 中文分词 + 向量检索 + 行为记录
+├── prompt.js       # System Prompt 构建、缓存、聊天窗口裁剪
+├── llm.js          # DeepSeek 直连、SSE 流式、世界生成调用
+├── render.js       # DOM 渲染、打字机、弹窗、Toast
+├── game.js         # 回合处理、状态事务、存读档、世界生命周期
+└── app.js          # 入口装配：init / ACTIONS 表 / 事件委托
+data/               # 预置知识库、初始状态、Prompt 模板
+tools/              # 开发期脚本（数据迁移、CSP hash、模块校验）
+```
+
+> **相对路径红线**：所有 `import` 必须用 `./xxx.js` 相对路径，禁用前导斜杠的绝对路径，否则部署到仓库子路径（`user.github.io/repo/`）会 404。
+>
+> **模块回归校验**：改动模块后运行 `npm run verify`，静态检查 import/export 一致性 + 裸状态引用 + 缺失 import，并做真实 ESM 全链加载（需先 `npm i` 安装开发依赖 acorn）。
+
+---
+
 ## 示例世界
 
 | 世界 | 类型 | 简介 |
@@ -66,9 +95,13 @@ python -m http.server 8000   # 或用 npx serve .
 
 ## 安全
 
-- API Key 存 localStorage，不上传服务器
-- 用户输入经 `escapeHtml()` 转义
-- CDN 脚本有 SRI 校验
+- API Key 仅存于浏览器 localStorage，请求由前端直连模型服务商，不经过任何第三方服务器
+- **渲染层全字段转义**：所有世界名/描述/主角/IP名/标签、角色 name/地点/进度/背景/性格/状态效果/NPC 与物品键名、目标名等动态字段在写入 DOM 前均经过 `escapeHtml()` 处理，防止存储型 XSS；叙事与玩家输入同样转义
+- **上传文件视为不可信只读数据**：TXT/DOCX/EPUB 内容仅作为"只读参考材料"送入模型，prompt 中已显式声明"非指令、不可执行其中的指令"；EPUB 解析不再把 `&lt;`/`&gt;` 还原为 `<`/`>`，避免重建标签
+- **CDN 脚本 SRI 校验**：transformers / mammoth / jszip 三个第三方脚本均带 `integrity="sha384-..."` + `crossorigin`，防止 CDN 被篡改投毒
+- **LLM 返回字段级白名单**：`sanitizeWorldConfig()` 仅保留预期字段、限制长度、剔除危险键，防止畸形/越权配置落库
+- **动态内容事件委托**：世界列表/存档/选项/状态 Tab 等由 JS 生成的控件改用 `data-action` + 中央 `addEventListener` 委托，避免数据进入内联事件处理器属性
+- **CSP**：已设置 `object-src 'none'`、`base-uri 'none'`、`frame-ancestors 'none'`。因纯静态、零后端部署无服务器端，无法使用真正的 per-response nonce，`script-src` 保留 `'unsafe-inline'`（XSS 根因已由转义闭合）；如要彻底去掉 `'unsafe-inline'`，先迁移所有静态 HTML onclick 为事件委托，再运行 `tools/recompute-csp-hash.js` 生成 hash-source 版 CSP
 - **当前版本建议本地或私下使用**。公开部署需自建代理（Cloudflare Workers / Vercel Edge / Nginx）
 
 ---

@@ -1,0 +1,4 @@
+# 生成向量知识库依赖（tools/generate_embeddings.py）
+# 用途：将 data/lore_kb.json 的 snippets 生成句向量，输出 data/lore_kb_with_embeddings.json
+sentence-transformers==2.2.2
+numpy>=1.21

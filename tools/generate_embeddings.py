@@ -1,4 +1,5 @@
 import json
+import sys
 import numpy as np
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
@@ -16,6 +17,14 @@ with open(INPUT, "r", encoding="utf-8") as f:
     kb = json.load(f)
 
 snippets = kb.get("snippets", [])
+if not snippets:
+    print("No snippets found in knowledge base; writing empty embeddings file.")
+    kb["embedding_model"] = MODEL_NAME
+    kb["embedding_dim"] = 0
+    with open(OUTPUT, "w", encoding="utf-8") as f:
+        json.dump(kb, f, ensure_ascii=False, indent=2)
+    print(f"Saved empty knowledge base to {OUTPUT}")
+    sys.exit(0)
 print(f"Generating embeddings for {len(snippets)} snippets...")
 
 contents = [f"{s['category']} {s['title']} {s['content']} {' '.join(s.get('keywords', []))}" for s in snippets]
