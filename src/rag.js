@@ -119,6 +119,74 @@ export async function ensureLoreEmbeddings(kb) {
     }
 }
 
+// ★ B1: lore 触发门禁（混合触发：关键词命中 或 向量相似度≥阈值 → 注入）
+const EMBED_TRIGGER_THRESHOLD = 0.30; // 语义相似度触发阈值（可调：低→多灌，高→易漏）
+
+function getRecentTurnTexts(maxTurns) {
+    const hist = S.conversationHistory || [];
+    return hist.slice(-Math.max(0, maxTurns))
+        .map(e => ((e && e.player ? e.player : "") + " " + (e && e.narrative ? e.narrative : "")))
+        .filter(Boolean);
+}
+
+function buildActivationContext(input, depth) {
+    const turns = getRecentTurnTexts(Math.max(0, (depth || 1) - 1));
+    return [input || "", ...turns].join("\n");
+}
+
+function loreTriggeredByKeyword(snip, context) {
+    const keys = snip.activation_keys || [];
+    if (!keys.length) return true; // 无关键词 → 视为常驻，不拦截
+    const lowerCtx = (context || "").toLowerCase();
+    for (const k of keys) {
+        if (!k) continue;
+        const kk = String(k).toLowerCase();
+        if (snip.trigger_mode === "regex") {
+            try {
+                if (new RegExp(kk, "i").test(context || "")) return true;
+            } catch (e) {
+                if (lowerCtx.includes(kk)) return true; // 正则非法 → 退化子串匹配
+            }
+        } else if (lowerCtx.includes(kk)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function isLoreTriggered(snip, context, embScore) {
+    const mode = snip.trigger_mode
+        || (snip.activation_keys && snip.activation_keys.length ? "keyword" : "always");
+    if (mode === "always") return true;
+    const kw = loreTriggeredByKeyword(snip, context);
+    const emb = (typeof embScore === "number") && embScore >= EMBED_TRIGGER_THRESHOLD;
+    return kw || emb; // 关键词命中 或 语义足够近 → 注入
+}
+
+// ★ B4：递归触发 —— 已注入片段的正文里若出现其它片段的激活词，则连带触发它们
+// （复用 B1 的关键词门槛，基于"已注入内容"动态连锁，而非依赖预定义硬链；深度封顶避免爆炸）
+const RECURSIVE_MAX_DEPTH = 3;
+
+function expandRecursiveTriggers(seedSnips, kb, maxDepth) {
+    const chosen = new Map();
+    for (const s of seedSnips) if (s && s.id != null) chosen.set(s.id, s);
+    let frontier = seedSnips.slice();
+    for (let d = 0; d < maxDepth; d++) {
+        const ctx = frontier.map(s => ((s.title || "") + " " + (s.content || ""))).join("\n");
+        if (!ctx.trim()) break;
+        const next = [];
+        for (const s of kb.snippets) {
+            if (chosen.has(s.id)) continue;
+            if (s.recursive === false) continue;         // 该条显式关闭递归
+            if (s.trigger_mode === "always") continue;    // 常驻条本就已注入，无需递归带入
+            if (loreTriggeredByKeyword(s, ctx)) { chosen.set(s.id, s); next.push(s); }
+        }
+        if (!next.length) break;
+        frontier = next;
+    }
+    return chosen;
+}
+
 export async function retrieve(input) {
     // P1#2：小知识库（全文已注入 system）无需每轮跑 embedding 推理 + 关键词向量检索——
     // 那段知识在 buildTurnUserMessage 里不会进入 user 消息，纯属浪费（手机端尤卡）。
@@ -162,9 +230,57 @@ export async function retrieve(input) {
         merged.set("behavior_" + b.id, { snippet: { id: "behavior_" + b.id, category: "行为记录", title: "关键事实", content: b.text }, kw: 1.5, emb: 0 });
     }
 
-    return Array.from(merged.values())
+    // ★ B1: 触发门禁（混合触发）。老存档（所有 snippet 均无 activation_keys 元数据）→ 跳过，沿用原全量 Top8，零回退
+    const _kb = getWorldLoreKB();
+    const hasTriggerMeta = _kb && _kb.snippets && _kb.snippets.some(s => Array.isArray(s.activation_keys) && s.activation_keys.length > 0);
+    if (hasTriggerMeta) {
+        for (const [key, val] of merged.entries()) {
+            if (String(key).startsWith("behavior_")) continue; // 行为记录（记忆）不受门禁影响，始终按相关度召回
+            const snip = val && val.snippet;
+            if (!snip) continue;
+            const ctx = buildActivationContext(input, snip.scan_depth || 1);
+            if (!isLoreTriggered(snip, ctx, val.emb || 0)) merged.delete(key);
+        }
+
+        // ★ B4：递归触发（默认开；用 _kb.recursive_enabled === false 关闭）。
+        // 已注入片段的正文里若出现其它片段的激活词 → 连带触发（复用 B1 关键词门槛，非硬链）
+        if (_kb.recursive_enabled !== false) {
+            const seeds = [];
+            for (const [key, val] of merged.entries()) {
+                if (String(key).startsWith("behavior_")) continue;
+                if (val && val.snippet) seeds.push(val.snippet);
+            }
+            const expanded = expandRecursiveTriggers(seeds, _kb, RECURSIVE_MAX_DEPTH);
+            for (const s of expanded.values()) {
+                if (!merged.has(s.id)) merged.set(s.id, { snippet: s, kw: 0.5, emb: 0 }); // 连带触发给较低基础分
+            }
+        }
+    }
+
+    // 老存档（无触发元数据）：完全沿用原逻辑，零回退
+    if (!hasTriggerMeta) {
+        return Array.from(merged.values())
+            .map(x => ({ ...x.snippet, score: KW_W * (x.kw || 0) + EMB_W * (x.emb || 0) }))
+            .sort((a, b) => b.score - a.score).slice(0, 8);
+    }
+
+    // ★ B4：token 预算裁剪 —— 先按 priority（重要度）再按相关度排序，累计到预算上限即停。
+    // 预算用字符数近似（1 token ≈ 2 中文字符）。行为记录（记忆）不占 lore 预算、始终保留。
+    const BUDGET_CHARS = (_kb && typeof _kb.budget_tokens === "number" && _kb.budget_tokens > 0)
+        ? _kb.budget_tokens * 2 : 1600;
+    const ranked = Array.from(merged.values())
         .map(x => ({ ...x.snippet, score: KW_W * (x.kw || 0) + EMB_W * (x.emb || 0) }))
-        .sort((a, b) => b.score - a.score).slice(0, 8);
+        .sort((a, b) => ((b.priority || 0) - (a.priority || 0)) || (b.score - a.score));
+    const out = [];
+    let usedChars = 0, loreCount = 0;
+    for (const s of ranked) {
+        if (String(s.id).startsWith("behavior_")) { out.push(s); continue; } // 记忆始终保留
+        const cost = (s.content || "").length + (s.title || "").length;
+        if (usedChars + cost > BUDGET_CHARS && loreCount >= 3) continue; // 至少保底 3 条 lore
+        usedChars += cost; loreCount++; out.push(s);
+        if (loreCount >= 12) break; // 硬上限，正常由预算先触发
+    }
+    return out;
 }
 
 export function retrieveBehaviorRecords(input, topK = 3) {

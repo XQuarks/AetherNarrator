@@ -8,7 +8,7 @@ import { applyFontSize, applyTheme, changeFontSize, toggleTheme, updateTempLabel
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig } from "./storage.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel } from "./render.js";
-import { backToHomeAfterGameOver, chooseOption, confirmRestart, continueLatestSave, deleteSave, deleteWorld, exportDebugLog, exportStory, generateWorld, goHome, loadSave, reviewDeathScene, showSaveList, showWorldList, startGame, submitInput } from "./game.js";
+import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmRestart, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportStory, generateWorld, goHome, loadSave, openLoreReview, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showSaveList, showWorldList, startGame, submitInput } from "./game.js";
 
 async function init() {
     applyTheme();
@@ -160,6 +160,7 @@ const ACTIONS = {
     showWorldDetail: (el) => showWorldDetail(el.dataset.id),
     continueLatestSave: (el) => continueLatestSave(el.dataset.id),
     confirmRestart: (el) => confirmRestart(el.dataset.id),
+    doRestartConfirmed: () => doRestartConfirmed(),
     loadSave: (el) => loadSave(el.dataset.id),
     deleteSave: (el) => deleteSave(el.dataset.id),
     deleteWorld: (el) => deleteWorld(el.dataset.id),
@@ -169,6 +170,15 @@ const ACTIONS = {
     clearSourceFile: () => clearSourceFile(),
     // 选择按钮（修复：此前 choice-chip 仅渲染无监听，点击无效）
     chooseOption: (el) => chooseOption(Number(el.dataset.index)),
+    // ★ B2：导演提示 / 持续约束
+    showAuthorNoteModal: () => showAuthorNoteModal(),
+    saveAuthorNote: () => saveAuthorNote(),
+    // ★ B3：知识库编辑面板
+    editWorldLore: (el) => editWorldLore(el.dataset.id),
+    openLoreReview: () => openLoreReview(),
+    addLoreEntry: () => addLoreEntry(),
+    deleteLoreEntry: (el) => deleteLoreEntry(el.dataset.idx),
+    saveLoreReview: () => saveLoreReview(),
 };
 
 document.addEventListener("keydown", (e) => {

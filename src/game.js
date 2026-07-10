@@ -2,15 +2,15 @@
 // AetherNarrator · game.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_ORDER, STORAGE_KEYS } from "./store.js";
-import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
+import { DEFAULT_PERIOD_ORDER, STORAGE_KEYS, getBannedConcepts } from "./store.js";
+import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig } from "./theme.js";
 import { saveSaves, saveState, saveWorlds } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, getWorldLoreKB, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
-import { callLLM, callWorldGenerationLLM } from "./llm.js";
-import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveList, renderWorldList, restoreLastChoices, showGameOver, showLoading, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
+import { callLLM, callWorldGenerationLLM, judgeWorldviewConsistency } from "./llm.js";
+import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveList, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
 
 export function abortCurrentRequest() {
     if (S.currentAbortController) {
@@ -154,7 +154,10 @@ export async function generateWorld() {
         document.getElementById("customPrefixField").classList.remove("show");
         clearSourceFile();
         closeModal("createWorldModal");
-        showToast("世界生成成功！", "success");
+        showToast("世界生成成功！可先审阅知识库再开玩。", "success");
+        // ★ B3：生成后自动弹出知识库初览，让玩家审阅/修正 AI 生成的 lore
+        S.currentWorld = world;
+        openLoreReview();
     } catch (e) {
         let errorMsg = e.message;
         if (errorMsg.includes("Failed to fetch") || errorMsg.includes("NetworkError") || errorMsg.includes("failed to fetch")) {
@@ -177,6 +180,158 @@ export function showWorldList() {
 export function showSaveList() {
     renderSaveList();
     showScreen("saveListScreen");
+}
+
+// ★ B2：打开「导演提示 / 持续约束」弹窗，载入当前世界已保存的约束
+export function showAuthorNoteModal() {
+    if (!S.currentWorld) { showToast("请先进入一个世界", "warn"); return; }
+    const ta = document.getElementById("authorNoteInput");
+    if (ta) ta.value = (typeof S.currentWorld.author_note === "string") ? S.currentWorld.author_note : "";
+    showModal("authorNoteModal");
+}
+
+// ★ B2：保存玩家手动约束到当前世界（持续生效，随世界存档）
+export function saveAuthorNote() {
+    if (!S.currentWorld) { closeModal("authorNoteModal"); return; }
+    const ta = document.getElementById("authorNoteInput");
+    const val = ta ? ta.value.trim().slice(0, 2000) : "";
+    S.currentWorld.author_note = val;
+    saveWorlds();
+    closeModal("authorNoteModal");
+    showToast(val ? "持续约束已保存，之后每轮生效" : "已清空持续约束", "success");
+}
+
+// ★ B3：知识库初览与编辑面板 ------------------------------------------------
+
+// 重渲染前先把 DOM 里的输入读回草稿，避免丢失未保存编辑
+function syncLoreEditFromDOM() {
+    if (!Array.isArray(S._loreEdit)) return;
+    S._loreEdit.forEach((s, i) => {
+        const g = (p) => document.getElementById(p + i);
+        const title = g("le_title_"), cat = g("le_cat_"), content = g("le_content_");
+        const keys = g("le_keys_"), mode = g("le_mode_"), pri = g("le_pri_");
+        if (title) s.title = title.value;
+        if (cat) s.category = cat.value;
+        if (content) s.content = content.value;
+        if (keys) s.activation_keys = keys.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean);
+        if (mode) s.trigger_mode = mode.value;
+        if (pri) s.priority = parseInt(pri.value) || 0;
+    });
+}
+
+// 质量校验：空标题 / 内容过短 / 触发词跨条重复
+function checkLoreQuality(list) {
+    const warns = [];
+    const keyCount = {};
+    list.forEach((s, i) => {
+        const label = `#${i + 1} ${s.title || "(无标题)"}`;
+        if (!s.title || !s.title.trim()) warns.push(`${label}：缺少标题`);
+        if (!s.content || s.content.trim().length < 30) warns.push(`${label}：内容过短（<30 字），信息量可能不足`);
+        (s.activation_keys || []).forEach(k => {
+            const kk = String(k).toLowerCase();
+            if (kk) keyCount[kk] = (keyCount[kk] || 0) + 1;
+        });
+    });
+    for (const [k, n] of Object.entries(keyCount)) {
+        if (n > 1) warns.push(`触发词「${k}」在 ${n} 条里重复，可能导致过度触发`);
+    }
+    return warns;
+}
+
+function renderLoreReviewBody() {
+    const body = document.getElementById("loreReviewBody");
+    if (!body) return;
+    const list = S._loreEdit || [];
+    const warns = checkLoreQuality(list);
+    const warnHtml = warns.length
+        ? `<div class="lore-warn"><strong>⚠ 质量提示（${warns.length}）</strong><ul>${warns.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>`
+        : `<div class="lore-ok">✓ 未发现明显质量问题</div>`;
+    const rows = list.map((s, i) => {
+        const mode = s.trigger_mode || (s.activation_keys && s.activation_keys.length ? "keyword" : "always");
+        return `
+        <div class="lore-row">
+            <div class="lore-row-head">
+                <input id="le_title_${i}" class="lore-inp" value="${escapeHtml(s.title || "")}" placeholder="标题">
+                <input id="le_cat_${i}" class="lore-inp lore-cat" value="${escapeHtml(s.category || "")}" placeholder="类别">
+                <button class="btn-del" data-action="deleteLoreEntry" data-idx="${i}" title="删除此条">删除</button>
+            </div>
+            <textarea id="le_content_${i}" class="lore-inp lore-content" placeholder="内容（建议 ≥30 字）">${escapeHtml(s.content || "")}</textarea>
+            <div class="lore-row-meta">
+                <label>触发词<input id="le_keys_${i}" class="lore-inp" value="${escapeHtml((s.activation_keys || []).join("，"))}" placeholder="逗号分隔，如：分院帽，帽子"></label>
+                <label>模式
+                    <select id="le_mode_${i}" class="lore-inp lore-sel">
+                        <option value="keyword"${mode === "keyword" ? " selected" : ""}>关键词</option>
+                        <option value="always"${mode === "always" ? " selected" : ""}>常驻</option>
+                        <option value="regex"${mode === "regex" ? " selected" : ""}>正则</option>
+                    </select>
+                </label>
+                <label>优先级<input id="le_pri_${i}" class="lore-inp lore-pri" type="number" value="${Number(s.priority) || 0}"></label>
+            </div>
+        </div>`;
+    }).join("");
+    body.innerHTML = warnHtml + (rows || `<p style="color:var(--text-secondary);">暂无条目，点下方"添加条目"新建。</p>`);
+}
+
+export function openLoreReview() {
+    if (!S.currentWorld) { showToast("请先选择一个世界", "warn"); return; }
+    if (!S.currentWorld.lore_kb) S.currentWorld.lore_kb = { ip: "", snippets: [] };
+    if (!Array.isArray(S.currentWorld.lore_kb.snippets)) S.currentWorld.lore_kb.snippets = [];
+    S._loreEdit = deepClone(S.currentWorld.lore_kb.snippets); // 深拷贝到缓冲，取消不影响原数据
+    renderLoreReviewBody();
+    showModal("loreReviewModal");
+}
+
+// 从世界详情进入编辑（指定世界 id）
+export function editWorldLore(worldId) {
+    const w = S.worlds.find(x => x.id === worldId);
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    S.currentWorld = w;
+    closeModal("worldDetailModal");
+    openLoreReview();
+}
+
+export function addLoreEntry() {
+    syncLoreEditFromDOM();
+    if (!Array.isArray(S._loreEdit)) S._loreEdit = [];
+    S._loreEdit.push({
+        id: "u" + Date.now().toString(36),
+        category: "补充", title: "", content: "",
+        keywords: [], activation_keys: [], trigger_mode: "keyword", scan_depth: 1, priority: 0
+    });
+    renderLoreReviewBody();
+}
+
+export function deleteLoreEntry(idx) {
+    syncLoreEditFromDOM();
+    const i = parseInt(idx);
+    if (Array.isArray(S._loreEdit) && i >= 0 && i < S._loreEdit.length) {
+        S._loreEdit.splice(i, 1);
+        renderLoreReviewBody();
+    }
+}
+
+export async function saveLoreReview() {
+    syncLoreEditFromDOM();
+    if (!S.currentWorld) { closeModal("loreReviewModal"); return; }
+    const list = (S._loreEdit || []).filter(s => (s.title && s.title.trim()) || (s.content && s.content.trim()));
+    list.forEach(s => {
+        s.title = (s.title || "").trim().slice(0, 200);
+        s.category = (s.category || "补充").trim().slice(0, 50);
+        s.content = (s.content || "").trim().slice(0, 1000);
+        s.activation_keys = (s.activation_keys || []).slice(0, 20);
+        if (!s.trigger_mode) s.trigger_mode = s.activation_keys.length ? "keyword" : "always";
+        s.scan_depth = (typeof s.scan_depth === "number" && s.scan_depth > 0) ? s.scan_depth : 1;
+        s.priority = Number(s.priority) || 0;
+        if (!Array.isArray(s.keywords) || !s.keywords.length) s.keywords = s.activation_keys.slice();
+        delete s.embedding; // 内容可能已改，清空向量以便按需重算
+    });
+    S.currentWorld.lore_kb.snippets = list;
+    try { await ensureLoreEmbeddings(S.currentWorld.lore_kb); }
+    catch (e) { console.warn("知识库编辑后向量重算失败，降级关键词：", e.message); }
+    saveWorlds();
+    S._loreEdit = null;
+    closeModal("loreReviewModal");
+    showToast(`知识库已保存（${list.length} 条）`, "success");
 }
 
 export async function startGame(opts = {}) {
@@ -247,10 +402,22 @@ export function continueLatestSave(worldId) {
 }
 
 export function confirmRestart(worldId) {
-    if (confirm("重新开始将覆盖该世界的现有存档，确定吗？")) {
-        S.currentWorld = S.worlds.find(w => w.id === worldId) || S.currentWorld;
-        startGame({ resetBehavior: true });
-    }
+    // ★ 修复：原生 confirm() 在预览/webview 沙箱常被静默拦截，导致点击无反应；改用项目统一弹窗
+    if (!worldId && S.currentWorld) worldId = S.currentWorld.id;
+    S._restartWorldId = worldId;
+    closeModal("worldDetailModal");
+    showModal("restartConfirmModal");
+}
+
+// ★ 修复：自定义确认弹窗里点「确认重启」后的实际执行
+export function doRestartConfirmed() {
+    const worldId = S._restartWorldId;
+    const w = S.worlds.find(x => x.id === worldId);
+    if (w) S.currentWorld = w;
+    closeModal("restartConfirmModal");
+    S._restartWorldId = null;
+    // 新周目：重置剧情进度 + 清空行为记忆（不继承旧存档）；知识库沿用世界默认（lore_kb 挂在 world 上，startGame 不改动它）
+    startGame({ resetBehavior: true });
 }
 
 export function loadSave(saveId) {
@@ -352,6 +519,50 @@ export function applyStateChanges(changes) {
     const s = S.gameState;
     validateStateShape(changes);   // #7 完善：异常状态类型告警
 
+    // ★ A4 state_changes 世界观校验（自由度 ≤3）：扫描文本叶子与键名，命中则就地删除并警告（不阻断回合）
+    const bannedA4 = getBannedConcepts();
+    if (bannedA4.length) {
+        const removed = [];
+        const stripBanned = (obj) => {
+            if (!obj || typeof obj !== "object") return;
+            for (const key of Object.keys(obj)) {
+                const v = obj[key];
+                if (bannedA4.some(c => key.includes(c))) { removed.push(key); delete obj[key]; continue; }
+                if (typeof v === "string") {
+                    if (bannedA4.some(c => v.includes(c))) { removed.push(key); delete obj[key]; }
+                } else if (v && typeof v === "object") {
+                    stripBanned(v);
+                }
+            }
+        };
+        stripBanned(changes);
+        if (removed.length) {
+            showToast("⚠️ 已忽略与世界观不符的状态变更：" + removed.join("、"), "warn", 4000);
+        }
+    }
+
+    // ★ A6 解锁标签运算（在 banned 扫描之后、应用之前）：
+    // changes.tags / changes.present_npcs 支持 {add:[...], remove:[...]} 增量操作。
+    // 标签变化会改变「仍被禁用的概念」集合，故失效 system prompt 缓存以便按新解锁状态重建禁律。
+    if (changes.tags || changes.present_npcs) {
+        if (!Array.isArray(s.tags)) s.tags = [];
+        if (!Array.isArray(s.present_npcs)) s.present_npcs = [];
+        // 兼容两种格式：{add:[...],remove:[...]} 或纯数组（视为 add）
+        const normTagOp = (op) => Array.isArray(op) ? { add: op } : (op && typeof op === "object" ? op : null);
+        const applyTagOp = (target, op) => {
+            const o = normTagOp(op);
+            if (!o) return;
+            if (Array.isArray(o.add)) for (const t of o.add) if (!target.includes(t)) target.push(t);
+            if (Array.isArray(o.remove)) {
+                for (const t of o.remove) { const i = target.indexOf(t); if (i >= 0) target.splice(i, 1); }
+            }
+        };
+        applyTagOp(s.tags, changes.tags);
+        applyTagOp(s.present_npcs, changes.present_npcs);
+        invalidateSystemPromptCache();
+        saveState();
+    }
+
     if (changes.current_location) s.current_location = changes.current_location;
     // 注意：current_date 不在本处直接写回——时间钳制段（下方）须基于「旧时间」推导目标，
     // 若先写回则 prevSeq 失真、回退钳制失效（P1#8 真实缺陷修复）。
@@ -397,10 +608,15 @@ export function applyStateChanges(changes) {
 
     if (changes.inventory) {
         for (const op of changes.inventory) {
+            const itemTags = (op.tags && Array.isArray(op.tags)) ? op.tags : null;
             if (op.op === "add") {
                 const found = s.inventory.find(i => i.item_id === op.item_id);
-                if (found) found.count += op.count;
-                else s.inventory.push({ item_id: op.item_id, name: op.name, count: op.count, world: op.world || null });
+                if (found) {
+                    found.count += op.count;
+                    if (itemTags) found.tags = itemTags; // ★ A6：持有期间激活物品标签（如 has_firearm）
+                } else {
+                    s.inventory.push({ item_id: op.item_id, name: op.name, count: op.count, world: op.world || null, tags: itemTags });
+                }
             } else if (op.op === "remove") {
                 const found = s.inventory.find(i => i.item_id === op.item_id);
                 if (found) {
@@ -682,6 +898,27 @@ export async function processTurn(input) {
         } else {
             // ✅ 正常故事内容
             applyStateChanges(resp.state_changes);
+
+            // ★ A2 生成后世界观合规守卫（柔和提醒，不阻断回合）
+            const banned = getBannedConcepts();
+            if (banned.length && resp.narrative) {
+                const hit = banned.find(c => resp.narrative.includes(c));
+                if (hit) {
+                    showToast("⚠️ 叙事似乎偏离了世界观（出现「" + hit + "」），若非有意为之可重述或忽略。", "warn", 4000);
+                }
+            }
+
+            // ★ A7 AI 灵活世界观裁判（语义判断是否超出世界观，非阻断，仅提示）
+            // 异步进行，不阻塞回合渲染；裁判只看世界设定+叙事，不被玩家输入带偏
+            judgeWorldviewConsistency(resp.narrative, resp.state_changes, { playerInput: input }).then(result => {
+                if (result && result.consistent === false && result.violations && result.violations.length) {
+                    const v = result.violations.slice(0, 2).join("、");
+                    const msg = result.severity === "hard"
+                        ? "⚠️ AI 裁判：叙事似乎引入了世界观之外的内容（如：" + v + "）。若非有意为之，可重述或忽略。"
+                        : "💡 AI 提示：以下内容可能与世界观不太契合（" + v + "），供参考。";
+                    showToast(msg, "warn", 5000);
+                }
+            }).catch(() => { /* 裁判异常不影响主流程 */ });
 
             const entry = {
                 player: input,

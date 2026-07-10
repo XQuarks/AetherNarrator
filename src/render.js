@@ -259,11 +259,13 @@ export function showWorldDetail(worldId) {
     if (hasSave) {
         footer.innerHTML = `
             <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
-            <button class="btn" data-action="continueLatestSave" data-id="${S.currentWorld.id}">继续游戏</button>
-            <button class="btn primary" data-action="confirmRestart" data-id="${S.currentWorld.id}">重新开始</button>`;
+            <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">编辑知识库</button>
+            <button class="btn primary" data-action="continueLatestSave" data-id="${S.currentWorld.id}">继续游戏</button>
+            <button class="btn secondary" data-action="confirmRestart" data-id="${S.currentWorld.id}">重新开始</button>`;
     } else {
         footer.innerHTML = `
             <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
+            <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">编辑知识库</button>
             <button class="btn primary" data-action="startGame" data-opts='{"resetBehavior":true}'>开始游玩</button>`;
     }
 

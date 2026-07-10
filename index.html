@@ -27,38 +27,46 @@
 
 <!-- ================= 主界面 ================= -->
 <div class="screen home-screen active" id="homeScreen">
+    <canvas id="homeMotes"></canvas>
+    <div class="mist"></div>
+    <div class="vignette"></div>
+
     <div class="home-content">
-        <div style="position:absolute;top:16px;right:16px;">
-            <button class="theme-toggle-btn" data-action="toggleTheme" id="homeThemeToggle" title="切换白天/夜间模式">
-                <svg class="theme-icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                <svg class="theme-icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            </button>
-        </div>
-        <p class="home-est">Est. 2026</p>
-        <h1 class="home-title">以太叙事</h1>
-        <p class="home-subtitle-en">AETHERNARRATOR</p>
-        <p class="home-subtitle">自定义世界 · AI 生成 · 自由冒险</p>
+        <button class="theme-toggle-btn" data-action="toggleTheme" id="homeThemeToggle" title="切换白天/夜间模式">
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <p class="home-est rise">Est. 2026</p>
+        <h1 class="home-title rise"><span class="glyph">以太叙事</span><span class="title-sheen">以太叙事</span></h1>
+        <p class="home-subtitle-en rise">AetherNarrator</p>
+        <div class="divider rise"><span class="line"></span><span class="rune"></span><span class="line r"></span></div>
+        <p class="home-subtitle rise">自定义世界 · AI 生成 · 自由冒险</p>
+
         <div class="menu-grid">
-            <button class="menu-btn full-width" data-action="showApiModal">
-                <span class="label">API 配置</span>
-                <span class="desc">填写 AI 接口密钥</span>
+            <button class="menu-btn primary-btn rise d1" data-action="showWorldList">
+                <span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+                <span class="txt"><span class="label">进入世界</span><span class="desc">选择已创建的世界开始游玩（也可以在这里创建新世界）</span></span>
+                <span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
             </button>
-            <button class="menu-btn full-width primary-btn" data-action="showWorldList">
-                <span class="label">进入世界 →</span>
-                <span class="desc">选择已创建的世界开始游玩（也可以在这里创建新世界）</span>
+            <button class="menu-btn rise d2" data-action="showSaveList">
+                <span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></span>
+                <span class="txt"><span class="label">读取存档</span><span class="desc">管理不同世界的游玩进度</span></span>
+                <span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
             </button>
-            <button class="menu-btn full-width" data-action="showSaveList">
-                <span class="label">读取存档 →</span>
-                <span class="desc">管理不同世界的游玩进度</span>
+            <button class="menu-btn rise d3" data-action="showApiModal">
+                <span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+                <span class="txt"><span class="label">API 配置</span><span class="desc">填写 AI 接口密钥</span></span>
+                <span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
             </button>
-            <button class="menu-btn full-width" data-action="showSettingsModal">
-                <span class="label">选项</span>
-                <span class="desc">字体大小 · 显示设置</span>
+            <button class="menu-btn rise d4" data-action="showSettingsModal">
+                <span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+                <span class="txt"><span class="label">选项</span><span class="desc">字体大小 · 显示设置</span></span>
+                <span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
             </button>
         </div>
-        <div class="home-disclaimer">
-            内容由 AI 生成，仅供参考。请认真辨别信息，勿将虚构内容视为事实。
-        </div>
+
+        <div class="home-disclaimer rise">内容由 AI 生成，仅供参考。请认真辨别信息，勿将虚构内容视为事实。</div>
+        <div class="home-local-note rise">数据仅存于本地浏览器</div>
     </div>
 </div>
 
@@ -116,6 +124,9 @@
 
 <!-- ================= 游戏界面 ================= -->
 <div class="screen game-screen" id="gameScreen">
+    <canvas id="gameMotes"></canvas>
+    <div class="mist"></div>
+    <div class="vignette"></div>
     <div class="game-header">
         <div>
             <div class="world-name" id="gameWorldName">未知世界</div>
@@ -127,6 +138,7 @@
                 <svg class="theme-icon-sun" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                 <svg class="theme-icon-moon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             </button>
+            <button data-action="showAuthorNoteModal" title="设定持续剧情约束（作者注）">导演</button>
             <button data-action="goHome">返回主界面</button>
             <button data-action="exportStory" title="导出剧情文本">导出</button>
         </div>
@@ -383,6 +395,68 @@
     </div>
 </div>
 
+<!-- ================= 作者注 / 持续约束弹窗（B2） ================= -->
+<div class="modal-overlay" id="authorNoteModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="authorNoteModalTitle">
+        <div class="modal-header">
+            <h2 id="authorNoteModalTitle">导演提示（持续约束）</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="authorNoteModal">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="authorNoteInput">持续剧情约束</label>
+                <p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:var(--text-secondary);">
+                    这里写的要求会作为"导演提示"在每一轮都提醒 AI，持续生效，直到你修改或清空。<br>
+                    例如：多描写环境与感官细节 / 保持第三人称 / 对话更口语化 / 节奏放慢别急着推进主线。
+                </p>
+                <textarea id="authorNoteInput" placeholder="输入你希望 AI 长期遵守的叙事约束..." style="min-height:120px;"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="authorNoteModal">取消</button>
+            <button class="btn primary" data-action="saveAuthorNote">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 重新开始确认弹窗（修复原生 confirm 在沙箱被吞） ================= -->
+<div class="modal-overlay" id="restartConfirmModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="restartConfirmModalTitle">
+        <div class="modal-header">
+            <h2 id="restartConfirmModalTitle">重新开始</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="restartConfirmModal">×</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin:0;font-size:14px;line-height:1.7;color:var(--text-secondary);">
+                将创建一个<strong>同样世界的新存档</strong>：<br>
+                · 不继承之前的剧情进度与行为记忆<br>
+                · 仅保留<strong>世界默认知识库</strong>（手动改过的存档知识库不带入）<br>
+                · 旧存档会被这个新开局覆盖
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="restartConfirmModal">取消</button>
+            <button class="btn primary" data-action="doRestartConfirmed">确认重启</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 知识库编辑面板（B3） ================= -->
+<div class="modal-overlay" id="loreReviewModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="loreReviewModalTitle">
+        <div class="modal-header">
+            <h2 id="loreReviewModalTitle">知识库初览与编辑</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="loreReviewModal">×</button>
+        </div>
+        <div class="modal-body" id="loreReviewBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="addLoreEntry">＋ 添加条目</button>
+            <button class="btn secondary" data-action="closeModal" data-modal="loreReviewModal">取消</button>
+            <button class="btn primary" data-action="saveLoreReview">保存知识库</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= 游戏结束弹窗 ================= -->
 <div class="game-over-overlay" id="gameOverOverlay">
     <div class="game-over-box">
@@ -396,6 +470,56 @@
 <!-- ================= Toast ================= -->
 <div class="toast" id="toast"></div>
 
-<script type="module" src="src/app.js"></script>
+    <script type="module" src="src/app.js"></script>
+    <script>
+    (function () {
+      const root = document.documentElement;
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      function initMotes(canvas) {
+        if (!canvas) return null;
+        const ctx = canvas.getContext('2d');
+        let W, H, motes = [];
+        function resize() {
+          W = canvas.width = window.innerWidth;
+          H = canvas.height = window.innerHeight;
+          const n = Math.min(46, Math.floor(W * H / 26000));
+          motes = Array.from({ length: n }, () => ({
+            x: Math.random() * W, y: Math.random() * H,
+            r: Math.random() * 1.6 + 0.5,
+            vy: -(Math.random() * 0.25 + 0.06),
+            vx: (Math.random() - 0.5) * 0.16,
+            a: Math.random() * 0.5 + 0.2,
+            tw: Math.random() * 0.02 + 0.005
+          }));
+        }
+        resize();
+        function moteColor() {
+          return getComputedStyle(root).getPropertyValue('--mote').trim() || 'rgba(216,188,154,0.5)';
+        }
+        function tick() {
+          ctx.clearRect(0, 0, W, H);
+          const base = moteColor();
+          for (const m of motes) {
+            m.y += m.vy; m.x += m.vx; m.a += m.tw;
+            if (m.y < -6) { m.y = H + 6; m.x = Math.random() * W; }
+            if (m.x < -6) m.x = W + 6; if (m.x > W + 6) m.x = -6;
+            const alpha = 0.35 + Math.sin(m.a) * 0.3;
+            ctx.beginPath();
+            ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+            ctx.fillStyle = base.replace(/[\d.]+\)$/g, (Math.max(0.05, alpha)).toFixed(2) + ')');
+            ctx.fill();
+          }
+          requestAnimationFrame(tick);
+        }
+        tick();
+        return resize;
+      }
+      const resizers = [
+        initMotes(document.getElementById('homeMotes')),
+        initMotes(document.getElementById('gameMotes'))
+      ].filter(Boolean);
+      window.addEventListener('resize', () => resizers.forEach(r => r()));
+    })();
+    </script>
 </body>
 </html>

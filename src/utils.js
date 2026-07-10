@@ -88,12 +88,22 @@ export function sanitizeWorldConfig(raw) {
         const snippets = Array.isArray(out.lore_kb.snippets) ? out.lore_kb.snippets.slice(0, 50) : [];
         out.lore_kb = {
             ip: typeof out.lore_kb.ip === "string" ? out.lore_kb.ip.slice(0, 200) : "",
+            // ★ B4：token 预算（可选，AI/玩家不填则运行时用默认值）
+            budget_tokens: (typeof out.lore_kb.budget_tokens === "number" && out.lore_kb.budget_tokens > 0) ? Math.min(Math.floor(out.lore_kb.budget_tokens), 4000) : undefined,
+            recursive_enabled: out.lore_kb.recursive_enabled === false ? false : undefined,
             snippets: snippets.map(s => ({
                 id: typeof s.id === "string" ? s.id.slice(0, 50) : "",
                 category: typeof s.category === "string" ? s.category.slice(0, 50) : "",
                 title: typeof s.title === "string" ? s.title.slice(0, 200) : "",
                 content: typeof s.content === "string" ? s.content.slice(0, 1000) : "",
-                keywords: Array.isArray(s.keywords) ? s.keywords.slice(0, 20).map(k => typeof k === "string" ? k.slice(0, 50) : "") : []
+                keywords: Array.isArray(s.keywords) ? s.keywords.slice(0, 20).map(k => typeof k === "string" ? k.slice(0, 50) : "") : [],
+                trigger: (s.trigger && typeof s.trigger === "object") ? s.trigger : undefined,
+                activation_keys: Array.isArray(s.activation_keys) ? s.activation_keys.slice(0, 20).map(k => typeof k === "string" ? k.slice(0, 50) : "") : [],
+                trigger_mode: typeof s.trigger_mode === "string" ? s.trigger_mode.slice(0, 20) : "",
+                scan_depth: (typeof s.scan_depth === "number" && s.scan_depth > 0) ? Math.min(Math.floor(s.scan_depth), 10) : 1,
+                // ★ B4：priority（重要度，预算裁剪时优先保留）+ recursive（是否允许被连带触发）
+                priority: (typeof s.priority === "number") ? Math.max(-10, Math.min(Math.floor(s.priority), 10)) : 0,
+                recursive: s.recursive === false ? false : undefined
             }))
         };
     }
@@ -142,6 +152,8 @@ export function defaultInitialState() {
         current_date: { day: 1, period: "morning" },
         goals: [],
         status_effects: [],
+        tags: [],            // ★ A6 解锁标签：时代/物品/人物等条件标签，决定禁用概念是否解锁
+        present_npcs: [],    // ★ A6 在场角色：自动激活 char:<姓名> 标签，用于人物型解锁条件
         is_alive: true,
         death_reason: null
     };
