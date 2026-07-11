@@ -1,6 +1,30 @@
 // Persisted-data migrations are intentionally DOM-free so they can run before UI boot.
 export const LATEST_SAVE_SCHEMA_VERSION = 2;
 
+export function parseStoredArray(raw, fallback = []) {
+    if (raw == null || raw === "") return { ok: true, value: clone(fallback) };
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed)
+            ? { ok: true, value: parsed }
+            : { ok: false, value: clone(fallback), error: new Error("存储内容不是数组") };
+    } catch (error) {
+        return { ok: false, value: clone(fallback), error };
+    }
+}
+
+export function parseStoredObject(raw, fallback = {}) {
+    if (raw == null || raw === "") return { ok: true, value: clone(fallback) };
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            ? { ok: true, value: parsed }
+            : { ok: false, value: clone(fallback), error: new Error("存储内容不是对象") };
+    } catch (error) {
+        return { ok: false, value: clone(fallback), error };
+    }
+}
+
 function clone(value) {
     if (value == null) return value;
     if (typeof structuredClone === "function") return structuredClone(value);

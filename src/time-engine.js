@@ -84,3 +84,19 @@ export function advanceWorldTime(currentDate, change, periods = []) {
         elapsedMinutes: targetAbsolute - current.absolute_minutes
     };
 }
+
+export function collectDueDeadlines(currentDate, deadlines, periods = [], triggeredIds = new Set()) {
+    const current = hydrateWorldTime(currentDate, periods);
+    const seen = triggeredIds instanceof Set ? triggeredIds : new Set(triggeredIds || []);
+    return (Array.isArray(deadlines) ? deadlines : []).map((deadline, index) => {
+        if (!deadline) return null;
+        const seed = `${deadline.title || "deadline"}_${deadline.day || 0}_${deadline.period || ""}_${index}`;
+        let hash = 0;
+        for (const char of seed) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+        return { ...deadline, id: deadline.id || `deadline_${Math.abs(hash).toString(36)}` };
+    }).filter(deadline => {
+        if (!deadline || seen.has(deadline.id)) return false;
+        const target = hydrateWorldTime({ day: deadline.day, period: deadline.period }, periods);
+        return current.absolute_minutes >= target.absolute_minutes;
+    });
+}

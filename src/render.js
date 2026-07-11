@@ -498,7 +498,7 @@ export function renderStatusPanel(tab) {
                     ${sorted.length ? sorted.map(r => `
                         <div class="memory-card ${r.pinned ? 'pinned' : ''}">
                             <div class="memory-header">
-                                <span class="memory-type type-${r.type || 'other'}">${escapeHtml(MEMORY_TYPE_LABELS[r.type] || (r.type || '其他'))}</span>
+                                <span class="memory-type type-${escapeHtml(r.type || 'other')}">${escapeHtml(MEMORY_TYPE_LABELS[r.type] || (r.type || '其他'))}</span>
                                 <span class="memory-stars">${'★'.repeat(r.importance || 3)}${'☆'.repeat(5 - (r.importance || 3))}</span>
                                 <span class="memory-time">${escapeHtml(r.time || '')}</span>
                             </div>
@@ -506,8 +506,8 @@ export function renderStatusPanel(tab) {
                             ${r.location ? `<div class="memory-meta">📍 ${escapeHtml(r.location)}</div>` : ''}
                             ${(r.npcs || []).length ? `<div class="memory-meta">👤 ${(r.npcs || []).slice(0, 5).map(n => escapeHtml(n)).join(', ')}${(r.npcs || []).length > 5 ? '…' : ''}</div>` : ''}
                             <div class="memory-actions">
-                                <button class="mem-act" data-action="togglePinMemory" data-id="${r.id}">${r.pinned ? '📌 取消置顶' : '📌 置顶'}</button>
-                                <button class="mem-act danger" data-action="deleteMemory" data-id="${r.id}">🗑 删除</button>
+                                <button class="mem-act" data-action="togglePinMemory" data-id="${escapeHtml(r.id || '')}">${r.pinned ? '📌 取消置顶' : '📌 置顶'}</button>
+                                <button class="mem-act danger" data-action="deleteMemory" data-id="${escapeHtml(r.id || '')}">🗑 删除</button>
                             </div>
                         </div>
                     `).join("") : '<div class="empty-hint">暂无行为记忆。开始游玩后，AI 会把重要事件记录在这里。</div>'}

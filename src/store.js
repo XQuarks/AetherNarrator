@@ -26,6 +26,7 @@ export const S = {
   currentTheme: localStorage.getItem("aigame_theme") || "dark",
   currentSession: { epoch: 0, worldId: null },
   currentAbortController: null,
+  auxiliaryControllers: new Set(),
   isGenerating: false,
   lastCacheStats: { hitTokens: 0, missTokens: 0, totalTokens: 0, hitRate: "0%" },
   debugLog: { sessionStart: new Date().toISOString(), worldCreations: [], turns: [] },
@@ -44,6 +45,7 @@ export const S = {
   loadingStartTime: 0,
   loadingInterval: null,
   _loreEdit: null,   // ★ B3：知识库编辑面板的临时草稿缓冲（取消编辑不影响原数据）
+  _loreEditingWorldDefault: false,
   _restartWorldId: null, // ★ 修复：重新开始确认弹窗暂存目标世界 id（原生 confirm 在沙箱被吞，改用自定义弹窗）
   _loreRevisionBuffer: null, // ★ B5：AI 修订后待审阅的知识库条目缓冲
   lastLoreReviewMsgCount: 0,  // ★ B5：上次回写时的对话条数，用于触发阈值判断

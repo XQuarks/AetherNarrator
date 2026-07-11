@@ -39,3 +39,14 @@ test("导入时合并重复记忆并保留更高重要性与置顶", () => {
 test("拒绝未知格式的导入文件", () => {
     assert.throws(() => mergeMemoryPack([], { format: "other", memories: [] }), /不是有效的以太叙事记忆包/);
 });
+
+test("导入记忆包会清理可注入 HTML 属性的 id 与 type", () => {
+    const pack = {
+        format: "aethernarrator-memory-pack",
+        version: 1,
+        memories: [{ id: 'x" onclick="alert(1)', type: 'event" onmouseover="alert(1)', text: "安全正文" }]
+    };
+    const result = mergeMemoryPack([], pack);
+    assert.match(result.memories[0].id, /^[A-Za-z0-9_-]+$/);
+    assert.equal(result.memories[0].type, "other");
+});

@@ -5,10 +5,12 @@ import { S } from "./store.js";
 import { STORAGE_KEYS } from "./store.js";
 import { deepClone, defaultWorldSchema } from "./utils.js";
 import { closeModal, showToast } from "./render.js";
-import { migrateSaveRecord, migrateWorldRecord } from "./migrations.js";
+import { migrateSaveRecord, migrateWorldRecord, parseStoredArray, parseStoredObject } from "./migrations.js";
 
 export function loadConfig() {
-    const cfg = JSON.parse(localStorage.getItem(STORAGE_KEYS.config) || "{}");
+    const parsed = parseStoredObject(localStorage.getItem(STORAGE_KEYS.config), {});
+    if (!parsed.ok) console.warn("API 配置损坏，已使用默认配置；原 localStorage 未覆盖", parsed.error);
+    const cfg = parsed.value;
     document.getElementById("baseUrl").value = cfg.baseUrl || "https://api.deepseek.com";
     document.getElementById("corsProxy").value = cfg.corsProxy || "";
     document.getElementById("apiKey").value = cfg.apiKey || "";
@@ -19,10 +21,13 @@ export function loadConfig() {
 
 export function loadWorlds() {
     const data = localStorage.getItem(STORAGE_KEYS.worlds);
-    S.worlds = (data ? JSON.parse(data) : [
+    const defaults = [
         createMagicAcademyWorld(),
         createHongLouMengWorld()
-    ]).map(migrateWorldRecord);
+    ];
+    const parsed = parseStoredArray(data, defaults);
+    if (!parsed.ok) console.warn("世界数据损坏，已使用安全默认值；原 localStorage 未覆盖", parsed.error);
+    S.worlds = parsed.value.map(migrateWorldRecord);
     // 迁移：旧世界的清理与新的 demo 注入
     let changed = false;
     // 删除旧的蒸汽与魔法 demo
@@ -307,12 +312,14 @@ export function createMagicAcademyWorld() {
 
 export function loadSaves() {
     const data = localStorage.getItem(STORAGE_KEYS.saves);
-    const raw = data ? JSON.parse(data) : [];
+    const parsed = parseStoredArray(data, []);
+    if (!parsed.ok) console.warn("存档数据损坏，已进入空列表兼容模式；原 localStorage 未覆盖", parsed.error);
+    const raw = parsed.value;
     S.saves = raw.map(save => migrateSaveRecord(
         save,
         S.worlds.find(world => world.id === save.worldId) || null
     ));
-    if (data && JSON.stringify(raw) !== JSON.stringify(S.saves)) saveSaves();
+    if (parsed.ok && data && JSON.stringify(raw) !== JSON.stringify(S.saves)) saveSaves();
 }
 
 export function saveWorlds() {

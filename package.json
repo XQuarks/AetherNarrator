@@ -7,10 +7,12 @@
     "check:syntax": "node tools/syntax_check.cjs",
     "check:modules": "node tools/verify-modules.cjs",
     "check:load": "node tools/load-check.mjs",
-    "verify": "npm run check:syntax && npm run check:modules && npm run check:load && npm test"
+    "check:browser": "node tools/browser-smoke.mjs",
+    "verify": "npm run check:syntax && npm run check:modules && npm run check:load && npm test && npm run check:browser"
   },
   "devDependencies": {
     "acorn": "^8.17.0",
-    "acorn-walk": "^8.3.5"
+    "acorn-walk": "^8.3.5",
+    "playwright-core": "^1.55.0"
   }
 }

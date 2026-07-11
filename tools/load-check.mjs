@@ -29,7 +29,7 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener: () => {}, add
 let rejections = 0;
 process.on("unhandledRejection", (r) => { rejections++; /* init() 内部异步失败，不算 link 错误 */ });
 
-const MODULES = ["store","migrations","worldview","memory-transfer","lore-revision","time-engine","simulation","utils","theme","storage","files","rag","prompt","llm","render","game","app"];
+const MODULES = ["store","migrations","worldview","memory-transfer","lore-revision","time-engine","simulation","turn-lifecycle","utils","theme","storage","files","rag","prompt","llm","render","game","app"];
 
 let ok = 0, fail = 0;
 for (const m of MODULES) {

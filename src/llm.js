@@ -597,6 +597,7 @@ async function callLLMJson(systemContent, userContent, opts = {}) {
     const url = buildApiUrl(baseUrl, corsProxy);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
+    S.auxiliaryControllers.add(controller);
     try {
         const res = await fetch(url, {
             method: "POST",
@@ -614,7 +615,6 @@ async function callLLMJson(systemContent, userContent, opts = {}) {
             }),
             signal: controller.signal
         });
-        clearTimeout(timeoutId);
         if (!res.ok) {
             const text = await res.text();
             throw new Error(`HTTP ${res.status}: ${text}`);
@@ -622,8 +622,10 @@ async function callLLMJson(systemContent, userContent, opts = {}) {
         const data = await res.json();
         return data?.choices?.[0]?.message?.content || null;
     } catch (e) {
-        clearTimeout(timeoutId);
         throw e;
+    } finally {
+        clearTimeout(timeoutId);
+        S.auxiliaryControllers.delete(controller);
     }
 }
 
@@ -736,9 +738,10 @@ ${recentChat || "无"}
 - 不要删除已有条目（除非确实过时/错误）
 - 只输出 JSON，不要额外解释。`;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    S.auxiliaryControllers.add(controller);
     try {
-        const controller = new AbortController();
-        const t0 = Date.now();
         const resp = await fetch(apiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
@@ -756,6 +759,9 @@ ${recentChat || "无"}
         if (diff.updates.length || diff.additions.length) return diff;
     } catch (e) {
         console.warn("B5 知识库修订调用失败：", e && e.message);
+    } finally {
+        clearTimeout(timeoutId);
+        S.auxiliaryControllers.delete(controller);
     }
     return null;
 }

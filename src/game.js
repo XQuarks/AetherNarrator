@@ -15,14 +15,19 @@ import { LATEST_SAVE_SCHEMA_VERSION, migrateSaveRecord } from "./migrations.js";
 import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
-import { advanceWorldTime, hydrateWorldTime } from "./time-engine.js";
-import { applySimulationChanges, normalizeSimulationState } from "./simulation.js";
+import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
+import { applySimulationChanges, createRestEvent, normalizeSimulationState } from "./simulation.js";
+import { acquireTurn, releaseTurn } from "./turn-lifecycle.js";
 
 export function abortCurrentRequest() {
     if (S.currentAbortController) {
         try { S.currentAbortController.abort(); } catch (e) {}
         S.currentAbortController = null;
     }
+    for (const controller of S.auxiliaryControllers) {
+        try { controller.abort(); } catch (_) {}
+    }
+    S.auxiliaryControllers.clear();
     S.currentSession.epoch++; // 任何尚未返回的响应将因 epoch 不匹配而被丢弃
 }
 
@@ -312,8 +317,9 @@ function renderLoreReviewBody() {
     body.innerHTML = spoilerBtn + revisionHint + warnHtml + `<div style="margin-bottom:10px"><button class="btn secondary" data-action="showLoreGraph" style="font-size:12px;padding:4px 12px;">🔗 查看关联图</button></div>` + (rows || `<p style="color:var(--text-secondary);">暂无条目，点下方"添加条目"新建。</p>`);
 }
 
-export function openLoreReview() {
+export function openLoreReview(mode = "save") {
     if (!S.currentWorld) { showToast("请先选择一个世界", "warn"); return; }
+    S._loreEditingWorldDefault = mode === "world";
     if (!S.activeLoreKB) S.activeLoreKB = { ip: "", snippets: [] };
     if (!Array.isArray(S.activeLoreKB.snippets)) S.activeLoreKB.snippets = [];
     S._loreEdit = deepClone(S.activeLoreKB.snippets); // 深拷贝到缓冲，取消不影响原数据
@@ -326,8 +332,9 @@ export function editWorldLore(worldId) {
     const w = S.worlds.find(x => x.id === worldId);
     if (!w) { showToast("未找到该世界", "error"); return; }
     S.currentWorld = w;
+    S.activeLoreKB = deepClone(w.lore_kb || { ip: w.name || "", snippets: [] });
     closeModal("worldDetailModal");
-    openLoreReview();
+    openLoreReview("world");
 }
 
 export function addLoreEntry() {
@@ -354,6 +361,12 @@ export async function saveLoreReview() {
     syncLoreEditFromDOM();
     if (!S.currentWorld) { closeModal("loreReviewModal"); return; }
     const list = (S._loreEdit || []).filter(s => (s.title && s.title.trim()) || (s.content && s.content.trim()));
+    const blockingIssues = checkLoreQuality(list).filter(issue => /ID 缺失或重复|正则触发词.+无效|关联目标.+不存在/.test(issue));
+    if (blockingIssues.length) {
+        showToast("知识库存在阻断错误，请先修复红色质量提示", "error", 4000);
+        renderLoreReviewBody();
+        return;
+    }
     list.forEach(s => {
         s.title = (s.title || "").trim().slice(0, 200);
         s.category = (s.category || "补充").trim().slice(0, 50);
@@ -365,11 +378,21 @@ export async function saveLoreReview() {
         if (!Array.isArray(s.keywords) || !s.keywords.length) s.keywords = s.activation_keys.slice();
         delete s.embedding; // 内容可能已改，清空向量以便按需重算
     });
-    S.activeLoreKB.snippets = list;
-    try { await ensureLoreEmbeddings(S.activeLoreKB); }
+    const candidateKB = { ...deepClone(S.activeLoreKB || {}), snippets: list };
+    const context = { worldId: S.currentWorld.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
+    try { await ensureLoreEmbeddings(candidateKB); }
     catch (e) { console.warn("知识库编辑后向量重算失败，降级关键词：", e.message); }
-    createOrUpdateSave();
+    const current = { worldId: S.currentWorld?.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
+    if (!isEnhancementContextCurrent(context, current)) { showToast("会话已切换，本次知识库保存已取消", "warn"); return; }
+    S.activeLoreKB = candidateKB;
+    if (S._loreEditingWorldDefault) {
+        S.currentWorld.lore_kb = deepClone(candidateKB);
+        saveWorlds();
+    } else {
+        createOrUpdateSave();
+    }
     S._loreEdit = null;
+    S._loreEditingWorldDefault = false;
     closeModal("loreReviewModal");
     showToast(`知识库已保存（${list.length} 条）`, "success");
 }
@@ -470,7 +493,9 @@ export function restToNextDay() {
     const firstPeriod = tc.periods[0];
     if (!firstPeriod) return;
     const nextDay = S.gameState.current_date.day + 1;
-    applyStateChanges({ current_date: { day: nextDay, period: firstPeriod } });
+    const from = deepClone(S.gameState.current_date);
+    const to = { day: nextDay, period: firstPeriod };
+    applyStateChanges({ current_date: to, completed_events: [createRestEvent(from, to, S.gameState.current_location)] });
     S.conversationHistory.push({
         player: "（休息到次日清晨）",
         narrative: "你合上眼，再睁开时，天已破晓，新的一天开始了。",
@@ -745,8 +770,31 @@ export function applyStateChanges(changes) {
         s.current_date = hydrateWorldTime(s.current_date, tc.periods || DEFAULT_PERIOD_ORDER);
     }
 
-    // D1：事件与 NPC 状态在时间推进后统一更新，以新时间作为更新时间戳。
-    Object.assign(s, applySimulationChanges(s, changes, s.current_date));
+    // E8/D1：世界级 deadline 到点转成一次性结构化事件，并写入高重要记忆。
+    if (!Array.isArray(s.triggered_deadlines)) s.triggered_deadlines = [];
+    const dueDeadlines = collectDueDeadlines(
+        s.current_date,
+        tc.timeConfig?.deadlines || [],
+        tc.periods || DEFAULT_PERIOD_ORDER,
+        new Set(s.triggered_deadlines)
+    );
+    const simulationChanges = deepClone(changes);
+    if (dueDeadlines.length) {
+        simulationChanges.active_events = [
+            ...(Array.isArray(simulationChanges.active_events) ? simulationChanges.active_events : []),
+            ...dueDeadlines.map(deadline => ({
+                id: "deadline_" + deadline.id,
+                title: deadline.title,
+                stage: "到期",
+                impact: "世界时限已到，请在叙事中体现后果"
+            }))
+        ];
+        for (const deadline of dueDeadlines) {
+            s.triggered_deadlines.push(deadline.id);
+            addBehaviorRecords([{ text: `世界时限「${deadline.title}」已到，后果需要在剧情中体现。`, importance: 5, type: "event" }]);
+        }
+    }
+    Object.assign(s, applySimulationChanges(s, simulationChanges, s.current_date));
     checkGoalDeadlines();
 
     saveState();
@@ -831,6 +879,7 @@ export function buildSmartFallbackChoices() {
 
 export async function submitInput() {
     skipTypewriter();
+    if (S.isGenerating) { showToast("上一回合仍在生成，请稍候", "warn"); return; }
     const inputEl = document.getElementById("playerInput");
     const input = inputEl.value.trim();
     if (!input) return;
@@ -854,7 +903,7 @@ export async function processTurn(input) {
         return;
     }
 
-    S.isGenerating = true;
+    if (!acquireTurn(S)) { showToast("上一回合仍在生成，请稍候", "warn"); return; }
     const myEpoch = S.currentSession.epoch;
     try {
     showLoading("正在思考...");
@@ -1071,7 +1120,7 @@ export async function processTurn(input) {
         showToast("出错了：" + errorMsg, "error");
         console.error(e);
     } finally {
-        S.isGenerating = false; // ★ P0: 无论成功/失败/丢弃均释放串行锁
+        releaseTurn(S);
     }
 }
 
@@ -1104,9 +1153,14 @@ async function triggerLoreRevision(msgCount) {
 // ★ B5：确认修订——将缓冲写入 activeLoreKB
 export async function confirmLoreRevision() {
     if (!S._loreRevisionBuffer) return;
-    S.activeLoreKB.snippets = applyLoreRevisionDiff(S.activeLoreKB.snippets, S._loreRevisionBuffer);
+    const context = { worldId: S.currentWorld?.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
+    const candidateKB = deepClone(S.activeLoreKB);
+    candidateKB.snippets = applyLoreRevisionDiff(candidateKB.snippets, S._loreRevisionBuffer);
+    try { await ensureLoreEmbeddings(candidateKB); } catch (e) {}
+    const current = { worldId: S.currentWorld?.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
+    if (!isEnhancementContextCurrent(context, current)) { showToast("会话已切换，本次修订已取消", "warn"); return; }
+    S.activeLoreKB = candidateKB;
     S._loreRevisionBuffer = null;
-    try { await ensureLoreEmbeddings(S.activeLoreKB); } catch (e) {}
     createOrUpdateSave();
     closeModal("loreReviewModal");
     invalidateSystemPromptCache();

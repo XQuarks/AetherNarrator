@@ -99,3 +99,16 @@ export function buildWorldSummary(state) {
     if (!activeEvent && !activeGoal) parts.push("世界暂时平静");
     return parts.join("；") + "。";
 }
+
+export function createRestEvent(from, to, location = "") {
+    return {
+        id: `rest_${to?.day || 1}_${to?.period || "morning"}`,
+        type: "rest",
+        title: "休息并迎来新的一天",
+        stage: "已完成",
+        status: "completed",
+        location: String(location || "").slice(0, 100),
+        from: clone(from),
+        to: clone(to)
+    };
+}

@@ -1,4 +1,5 @@
 const FORMAT = "aethernarrator-memory-pack";
+const MEMORY_TYPES = new Set(["event", "relationship", "item", "discovery", "other"]);
 
 function normalizeText(value) {
     return String(value || "")
@@ -11,11 +12,11 @@ function sanitizeMemory(raw, fallbackId) {
     const text = String(raw?.text || "").trim().slice(0, 1000);
     if (!text) return null;
     return {
-        id: String(raw?.id || fallbackId).slice(0, 80),
+        id: (String(raw?.id || fallbackId).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80) || fallbackId),
         text,
         importance: Number.isFinite(raw?.importance) ? Math.max(1, Math.min(5, Math.round(raw.importance))) : 3,
         pinned: raw?.pinned === true,
-        type: typeof raw?.type === "string" ? raw.type.slice(0, 30) : "other",
+        type: MEMORY_TYPES.has(raw?.type) ? raw.type : "other",
         time: typeof raw?.time === "string" ? raw.time.slice(0, 100) : "",
         location: typeof raw?.location === "string" ? raw.location.slice(0, 100) : "",
         npcs: Array.isArray(raw?.npcs) ? raw.npcs.slice(0, 8).map(n => String(n).slice(0, 80)) : [],

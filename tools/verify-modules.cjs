@@ -13,7 +13,7 @@ const acorn = require("acorn");
 const walk = require("acorn-walk");
 
 const SRC = path.join(__dirname, "..", "src");
-const MODULES = ["store","migrations","worldview","memory-transfer","lore-revision","time-engine","simulation","utils","theme","storage","files","rag","prompt","llm","render","game","app"];
+const MODULES = ["store","migrations","worldview","memory-transfer","lore-revision","time-engine","simulation","turn-lifecycle","utils","theme","storage","files","rag","prompt","llm","render","game","app"];
 
 // 36 个状态名（store.js 的 S 容器字段）
 const STATE_NAMES = new Set([
