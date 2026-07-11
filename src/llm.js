@@ -9,6 +9,7 @@ import { getWorldLoreKB, summarizeFactsFromChanges } from "./rag.js";
 import { buildSystemPrompt, buildTurnUserMessage, buildWorldGenerationPrompt, buildAuthorNote } from "./prompt.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
 import { processTurn } from "./game.js";
+import { buildLoreRevisionDiff, parseLoreRevisionResponse } from "./lore-revision.js";
 
 export function logTurnStats(hit, miss, total, usage) {
     const model = document.getElementById("modelName")?.value || "unknown";
@@ -750,10 +751,9 @@ ${recentChat || "无"}
         if (!resp.ok) throw new Error("知识库修订请求失败：" + resp.status);
         const data = await resp.json();
         const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-        const parsed = tryRepairJSON(content);
-        if (parsed && Array.isArray(parsed.snippets)) {
-            return parsed.snippets;
-        }
+        const proposed = parseLoreRevisionResponse(content);
+        const diff = buildLoreRevisionDiff(kb.snippets, proposed);
+        if (diff.updates.length || diff.additions.length) return diff;
     } catch (e) {
         console.warn("B5 知识库修订调用失败：", e && e.message);
     }

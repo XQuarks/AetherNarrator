@@ -87,6 +87,7 @@ export const DEFAULT_TIME_CONFIG = {
     calendar_mode: "day",     // day(第N天) | gregorian(月日+星期) | lunar(阴历月日) | custom_calendar(新历法) | none(不显示日期)
     clock_mode: "period",     // period(时段标签) | clock(具体时钟) | none(不显示时刻)
     season: "",               // 春/夏/秋/冬/自定义，可为空，用于驱动节日/氛围（E11）
+    weather: "",              // 当前天气，可随剧情变化
     show: true,               // 是否展示时间（false 等同 hidden）
     deadlines: []             // 世界级截止 [{id,title,day,period}]（E8）
 };
@@ -103,6 +104,7 @@ export function normalizeTimeConfig(raw) {
         const clkModes = ["period", "clock", "none"];
         if (clkModes.includes(raw.clock_mode)) cfg.clock_mode = raw.clock_mode;
         if (typeof raw.season === "string" && raw.season.trim()) cfg.season = raw.season.slice(0, 10);
+        if (typeof raw.weather === "string" && raw.weather.trim()) cfg.weather = raw.weather.slice(0, 20);
         if (typeof raw.show === "boolean") cfg.show = raw.show;
         if (Array.isArray(raw.deadlines)) {
             cfg.deadlines = raw.deadlines.slice(0, 12).map(d => ({

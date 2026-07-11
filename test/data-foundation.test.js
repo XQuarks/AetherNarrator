@@ -77,3 +77,15 @@ test("损坏的可选集合迁移为安全默认值", () => {
     assert.equal(migrated.lore_kb, null);
     assert.equal(migrated.pending_lore_revision, null);
 });
+
+test("旧版整库修订缓冲迁移为增量更新格式", () => {
+    const migrated = migrateSaveRecord({
+        id: "s1",
+        pending_lore_revision: [{ id: "l1", title: "旧建议" }]
+    }, null);
+
+    assert.deepEqual(migrated.pending_lore_revision, {
+        updates: [{ id: "l1", title: "旧建议" }],
+        additions: []
+    });
+});

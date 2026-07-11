@@ -62,6 +62,7 @@ export function formatWorldTime(state) {
     const parts = [];
     if (cfg.era_label) parts.push(cfg.era_label);
     if (cfg.season) parts.push(cfg.season);
+    if (cfg.weather) parts.push(cfg.weather);
     if (cfg.calendar_mode && cfg.calendar_mode !== "none") {
         parts.push(calendarLabel(state.current_date.day, cfg.calendar_mode));
     } else if (cfg.calendar_mode !== "none") {

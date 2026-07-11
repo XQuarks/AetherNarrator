@@ -40,7 +40,7 @@
         <h1 class="home-title rise"><span class="glyph">以太叙事</span><span class="title-sheen">以太叙事</span></h1>
         <p class="home-subtitle-en rise">AetherNarrator</p>
         <div class="divider rise"><span class="line"></span><span class="rune"></span><span class="line r"></span></div>
-        <p class="home-subtitle rise">自定义世界 · AI 生成 · 自由冒险</p>
+        <p class="home-subtitle rise">会自己向前走的世界 · 私密本地存储 · 中文知识记忆</p>
 
         <div class="menu-grid">
             <button class="menu-btn primary-btn rise d1" data-action="showWorldList">
@@ -66,7 +66,7 @@
         </div>
 
         <div class="home-disclaimer rise">内容由 AI 生成，仅供参考。请认真辨别信息，勿将虚构内容视为事实。</div>
-        <div class="home-local-note rise">数据仅存于本地浏览器</div>
+        <div class="home-local-note rise">零后端 · 数据与 API Key 仅存于本地浏览器</div>
     </div>
 </div>
 
@@ -475,6 +475,7 @@
         </div>
         <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;">
             <button class="btn" data-action="showAuthorNoteModal" style="text-align:left;">✍️ 导演提示（作者注）</button>
+            <button class="btn" data-action="showTimeConfigModal" style="text-align:left;">⏰ 世界时间设置</button>
             <button class="btn" id="aiEnhancedToggle" data-action="toggleAIEnhanced" style="text-align:left;">🧠 AI 增强检查：已关闭</button>
             <button class="btn" data-action="toggleTheme" style="text-align:left;">🌓 切换日间 / 夜间模式</button>
             <button class="btn" data-action="toggleLoreSpoilerSettings" style="text-align:left;">🔒 / 🔓 知识库防剧透</button>
@@ -486,8 +487,31 @@
     </div>
 </div>
 
+<!-- ================= 世界时间设置（E13） ================= -->
+<div class="modal-overlay" id="timeConfigModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="timeConfigTitle">
+        <div class="modal-header">
+            <h2 id="timeConfigTitle">世界时间设置</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="timeConfigModal">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group"><label for="timeConfigEra">纪元 / 年份</label><input id="timeConfigEra" maxlength="40" placeholder="例如：大清乾隆年间"></div>
+            <div class="form-group"><label for="timeConfigCalendar">历法</label><select id="timeConfigCalendar"><option value="day">第 N 天</option><option value="gregorian">公历</option><option value="lunar">阴历</option><option value="custom_calendar">自定义历法</option><option value="none">不显示日期</option></select></div>
+            <div class="form-group"><label for="timeConfigClock">时钟</label><select id="timeConfigClock"><option value="period">时段</option><option value="clock">具体时钟</option><option value="none">不显示时钟</option></select></div>
+            <div class="form-group"><label for="timeConfigSeason">季节</label><input id="timeConfigSeason" maxlength="10" placeholder="例如：仲春"></div>
+            <div class="form-group"><label for="timeConfigWeather">当前天气</label><input id="timeConfigWeather" maxlength="20" placeholder="例如：细雨"></div>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="timeConfigShow" style="width:auto;"><span>在界面显示世界时间</span></label>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="timeConfigModal">取消</button>
+            <button class="btn primary" data-action="saveTimeConfig">保存</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= Toast ================= -->
 <div class="toast" id="toast"></div>
+<input type="file" id="memoryPackFile" accept="application/json,.json" hidden data-action="importMemoryPack" data-event="change">
 
     <script type="module" src="src/app.js"></script>
     <script>

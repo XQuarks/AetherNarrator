@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
     filterStateChangesByWorldview,
     findWorldviewViolations,
+    isEnhancementContextCurrent,
     shouldRunAIEnhancements
 } from "../src/worldview.js";
 
@@ -15,6 +16,13 @@ const rules = [
 test("世界观规则识别别名并返回可解释违规", () => {
     const violations = findWorldviewViolations("他掏出智能终端查看地图", rules, new Set());
     assert.deepEqual(violations, [{ concept: "手机", matched: "智能终端", severity: "hard" }]);
+});
+
+test("后台增强结果只允许写回原世界原会话", () => {
+    const expected = { worldId: "w1", epoch: 3, turnId: 8 };
+    assert.equal(isEnhancementContextCurrent(expected, { worldId: "w1", epoch: 3, turnId: 8 }), true);
+    assert.equal(isEnhancementContextCurrent(expected, { worldId: "w2", epoch: 3, turnId: 8 }), false);
+    assert.equal(isEnhancementContextCurrent(expected, { worldId: "w1", epoch: 4, turnId: 8 }), false);
 });
 
 test("任一解锁标签激活后对应概念合法", () => {

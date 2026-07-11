@@ -67,3 +67,10 @@ export function filterStateChangesByWorldview(changes, rules, activeTags = new S
 export function shouldRunAIEnhancements({ enabled, freedom, hasLore }) {
     return enabled === true && Number(freedom) < 4 && hasLore === true;
 }
+
+export function isEnhancementContextCurrent(expected, current) {
+    if (!expected || !current) return false;
+    return expected.worldId === current.worldId
+        && expected.epoch === current.epoch
+        && expected.turnId === current.turnId;
+}

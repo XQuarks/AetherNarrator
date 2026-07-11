@@ -8,7 +8,7 @@ import { applyFontSize, applyTheme, changeFontSize, toggleTheme, updateTempLabel
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig } from "./storage.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel } from "./render.js";
-import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportStory, generateWorld, goHome, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, saveTimeConfig, showAuthorNoteModal, showGameSettings, showLoreGraph, showSaveList, showTimeConfigModal, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreSpoilerSettings, togglePinMemory } from "./game.js";
+import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, saveTimeConfig, showAuthorNoteModal, showGameSettings, showLoreGraph, showSaveList, showTimeConfigModal, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreSpoilerSettings, togglePinMemory, triggerMemoryPackImport } from "./game.js";
 
 async function init() {
     applyTheme();
@@ -172,6 +172,9 @@ const ACTIONS = {
     switchStatusTab: (el) => switchStatusTab(el.dataset.key),
     togglePinMemory: (el) => togglePinMemory(el.dataset.id),
     deleteMemory: (el) => deleteMemory(el.dataset.id),
+    exportMemoryPack: () => exportMemoryPack(),
+    triggerMemoryPackImport: () => triggerMemoryPackImport(),
+    importMemoryPack: (el) => importMemoryPack(el.files && el.files[0]),
     clearSourceFile: () => clearSourceFile(),
     // 选择按钮（修复：此前 choice-chip 仅渲染无监听，点击无效）
     chooseOption: (el) => chooseOption(Number(el.dataset.index)),

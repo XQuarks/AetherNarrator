@@ -6,6 +6,7 @@ import { S, calendarLabel, MEMORY_TYPE_LABELS } from "./store.js";
 import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema } from "./utils.js";
 import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, updateFontSizeButtons, updateTempLabel } from "./theme.js";
 import { abortCurrentRequest, chooseOption, confirmRestart, continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./game.js";
+import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
 
 export function showScreen(id) {
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -389,7 +390,7 @@ export function renderStatusPanel(tab) {
                     <div class="status-section-title">已完成事件</div>
                     <div class="status-card">
                         <div class="status-tag-list">
-                            ${s.completed_events.length ? s.completed_events.map(e => `<span class="status-tag">${escapeHtml(e)}</span>`).join("") : '<span class="empty-hint" style="padding:0">暂无</span>'}
+                            ${s.completed_events.length ? s.completed_events.map(e => `<span class="status-tag">${escapeHtml(e.title || e)}</span>`).join("") : '<span class="empty-hint" style="padding:0">暂无</span>'}
                         </div>
                     </div>
                 </div>
@@ -490,6 +491,10 @@ export function renderStatusPanel(tab) {
                 <div class="status-section">
                     <div class="status-section-title">行为记忆 · ${records.length}/100</div>
                     <div class="memory-hint">AI 记录的角色经历。★越多越重要（会被优先注入叙事上下文）。</div>
+                    <div class="memory-actions" style="margin:8px 0 12px;">
+                        <button class="mem-act" data-action="exportMemoryPack">导出记忆包</button>
+                        <button class="mem-act" data-action="triggerMemoryPackImport">导入记忆包</button>
+                    </div>
                     ${sorted.length ? sorted.map(r => `
                         <div class="memory-card ${r.pinned ? 'pinned' : ''}">
                             <div class="memory-header">
@@ -513,7 +518,7 @@ export function renderStatusPanel(tab) {
         case "timeline": {
             const tc = getTimeConfig();
             const cfg = tc.timeConfig;
-            const gs = S.gameState;
+            const gs = normalizeSimulationState(S.gameState);
 
             // E8 世界时限
             const dlHtml = (cfg && cfg.deadlines && cfg.deadlines.length) ? `
@@ -530,8 +535,8 @@ export function renderStatusPanel(tab) {
                 <div class="status-section">
                     <div class="status-section-title">🏘️ NPC 动态</div>
                     <div class="status-card">
-                        ${npc.slice(0, 10).map(([name, activity]) => `
-                            <div class="npc-row"><span class="npc-name">${escapeHtml(name)}</span><span class="npc-act">${escapeHtml(String(activity || ''))}</span></div>
+                        ${npc.filter(([, activity]) => activity.visible !== false).slice(0, 10).map(([name, activity]) => `
+                            <div class="npc-row"><span class="npc-name">${escapeHtml(name)}</span><span class="npc-act">${escapeHtml(activity.action || '')}${activity.location ? ` · ${escapeHtml(activity.location)}` : ''}${activity.goal ? `（目标：${escapeHtml(activity.goal)}）` : ''}</span></div>
                         `).join("")}
                         ${npc.length > 10 ? `<div class="empty-hint" style="padding:4px 0">…还有 ${npc.length - 10} 位 NPC</div>` : ''}
                     </div>
@@ -539,23 +544,21 @@ export function renderStatusPanel(tab) {
 
             // D1b 事件进度
             const completed = (gs && gs.completed_events) || [];
-            const activeEvent = (gs && gs.active_event) || null;
+            const activeEvents = (gs && gs.active_events) || [];
             let eventsHtml = "";
-            if (activeEvent || completed.length) {
+            if (activeEvents.length || completed.length) {
                 eventsHtml += `<div class="status-section"><div class="status-section-title">⚡ 事件</div><div class="status-card">`;
-                if (activeEvent) {
-                    eventsHtml += `<div class="row"><span class="label">🔵 进行中</span><span class="value">${escapeHtml(String(activeEvent))}</span></div>`;
+                if (activeEvents.length) {
+                    eventsHtml += activeEvents.slice(0, 5).map(event => `<div class="row"><span class="label">🔵 ${escapeHtml(event.stage || '进行中')}</span><span class="value">${escapeHtml(event.title)}${event.location ? ` · ${escapeHtml(event.location)}` : ''}</span></div>`).join("");
                 }
                 if (completed.length) {
-                    eventsHtml += `<div class="row"><span class="label">✅ 已完成 (${completed.length})</span><span class="value">${completed.slice(-5).map(e => escapeHtml(e)).join(", ")}${completed.length > 5 ? "…" : ""}</span></div>`;
+                    eventsHtml += `<div class="row"><span class="label">✅ 已完成 (${completed.length})</span><span class="value">${completed.slice(-5).map(e => escapeHtml(e.title || e)).join(", ")}${completed.length > 5 ? "…" : ""}</span></div>`;
                 }
                 eventsHtml += `</div></div>`;
             }
 
             // D1c 世界状态摘要
-            const location = (gs && gs.current_location) ? gs.current_location : "未知地点";
-            const activeGoals = (gs && gs.goals) ? gs.goals.filter(g => g.visible !== false && g.status === "active").length : 0;
-            const summaryText = `你当前在「${location}」。${npc.length ? npc.length + ' 位 NPC 正在活动，' : ''}${completed.length ? '已完成 ' + completed.length + ' 个事件' : '暂无完成事件'}。${activeGoals > 0 ? '当前有 ' + activeGoals + ' 个活跃目标。' : ''}`;
+            const summaryText = buildWorldSummary(gs);
 
             // 经历时间线
             const entries = (S.conversationHistory || [])

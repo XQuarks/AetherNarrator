@@ -75,10 +75,11 @@ export async function embeddingRetrieve(input, topK = 5) {
     const kb = getWorldLoreKB();
     if (!kb || !kb.snippets || !kb.snippets.length) return [];
     // AI 生成世界 / 老存档未预计算向量时，先尝试补算（一次性，之后命中 sn[0].embedding 即跳过）
-    if (!kb.snippets[0].embedding) {
+    if (kb.snippets.some(s => !Array.isArray(s.embedding) || !s.embedding.length)) {
         try { await ensureLoreEmbeddings(kb); } catch (e) { /* 降级为关键词 */ }
     }
-    if (!kb.snippets[0] || !kb.snippets[0].embedding) return [];
+    const embeddedSnippets = kb.snippets.filter(s => Array.isArray(s.embedding) && s.embedding.length);
+    if (!embeddedSnippets.length) return [];
     if (!S.embeddingModel) {
         try {
             S.embeddingModel = await window.transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
@@ -89,7 +90,7 @@ export async function embeddingRetrieve(input, topK = 5) {
     }
     const out = await S.embeddingModel(input, { pooling: "mean", normalize: true });
     const qVec = Array.from(out.data);
-    const scored = kb.snippets.map(s => {
+    const scored = embeddedSnippets.map(s => {
         const sim = cosineSimilarity(qVec, s.embedding);
         return { snippet: s, embScore: sim };
     }).sort((a, b) => b.embScore - a.embScore).slice(0, topK);
@@ -107,7 +108,7 @@ export async function computeEmbedding(text) {
 
 export async function ensureLoreEmbeddings(kb) {
     if (!kb || !kb.snippets || !kb.snippets.length) return;
-    if (kb.snippets[0].embedding) return; // 已有向量，跳过
+    if (kb.snippets.every(s => Array.isArray(s.embedding) && s.embedding.length)) return;
     if (typeof window.transformers === "undefined") return; // 环境不支持，降级为关键词
     for (const s of kb.snippets) {
         if (s.embedding) continue;
@@ -234,8 +235,15 @@ export async function retrieve(input) {
 
     // ★ B1: 触发门禁（混合触发）。老存档（所有 snippet 均无 activation_keys 元数据）→ 跳过，沿用原全量 Top8，零回退
     const _kb = getWorldLoreKB();
-    const hasTriggerMeta = _kb && _kb.snippets && _kb.snippets.some(s => Array.isArray(s.activation_keys) && s.activation_keys.length > 0);
+    const hasTriggerMeta = _kb && _kb.snippets && _kb.snippets.some(s =>
+        (Array.isArray(s.activation_keys) && s.activation_keys.length > 0) || !!s.trigger_mode
+    );
     if (hasTriggerMeta) {
+        // always 是真正的常驻条目，不能依赖关键词/向量候选池是否先召回。
+        for (const s of _kb.snippets) {
+            const mode = s.trigger_mode || (s.activation_keys?.length ? "keyword" : "always");
+            if (mode === "always" && !merged.has(s.id)) merged.set(s.id, { snippet: s, kw: 0.75, emb: 0 });
+        }
         for (const [key, val] of merged.entries()) {
             if (String(key).startsWith("behavior_")) continue; // 行为记录（记忆）不受门禁影响，始终按相关度召回
             const snip = val && val.snippet;
@@ -308,7 +316,17 @@ export async function retrieve(input) {
     for (const s of ranked) {
         if (String(s.id).startsWith("behavior_")) { out.push(s); continue; } // 记忆始终保留
         const cost = (s.content || "").length + (s.title || "").length;
-        if (usedChars + cost > BUDGET_CHARS && loreCount >= 3) continue; // 至少保底 3 条 lore
+        if (usedChars + cost > BUDGET_CHARS) {
+            // 第一条本身超预算时保留受限摘要；其余条目严格跳过，避免“保底三条”击穿预算。
+            if (loreCount === 0) {
+                const titleCost = (s.title || "").length;
+                const remaining = Math.max(0, BUDGET_CHARS - titleCost);
+                out.push({ ...s, content: (s.content || "").slice(0, remaining) });
+                usedChars = titleCost + remaining;
+                loreCount++;
+            }
+            continue;
+        }
         usedChars += cost; loreCount++; out.push(s);
         if (loreCount >= 12) break; // 硬上限，正常由预算先触发
     }
@@ -436,7 +454,7 @@ export function summarizeFactsFromChanges(input, narrative, changes) {
         }
     }
     if (changes && changes.completed_events) {
-        for (const e of changes.completed_events) facts.push(`玩家完成了事件：${e}`);
+        for (const e of changes.completed_events) facts.push(`玩家完成了事件：${e && typeof e === "object" ? (e.title || e.name || e.id) : e}`);
     }
     if (changes && changes.current_location) facts.push(`玩家前往/到达了 ${changes.current_location}`);
     if (changes && changes.progression && changes.progression.rank) facts.push(`玩家的境界/等级发生了变化：${changes.progression.rank}`);

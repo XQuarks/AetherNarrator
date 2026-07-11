@@ -12,7 +12,11 @@ import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebui
 import { callLLM, callWorldGenerationLLM, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
 import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
 import { LATEST_SAVE_SCHEMA_VERSION, migrateSaveRecord } from "./migrations.js";
-import { filterStateChangesByWorldview, findWorldviewViolations, shouldRunAIEnhancements } from "./worldview.js";
+import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements } from "./worldview.js";
+import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
+import { applyLoreRevisionDiff } from "./lore-revision.js";
+import { advanceWorldTime, hydrateWorldTime } from "./time-engine.js";
+import { applySimulationChanges, normalizeSimulationState } from "./simulation.js";
 
 export function abortCurrentRequest() {
     if (S.currentAbortController) {
@@ -211,13 +215,18 @@ function syncLoreEditFromDOM() {
     S._loreEdit.forEach((s, i) => {
         const g = (p) => document.getElementById(p + i);
         const title = g("le_title_"), cat = g("le_cat_"), content = g("le_content_");
-        const keys = g("le_keys_"), mode = g("le_mode_"), pri = g("le_pri_");
+        const keys = g("le_keys_"), mode = g("le_mode_"), pri = g("le_pri_"), depth = g("le_depth_"), links = g("le_links_");
         if (title) s.title = title.value;
         if (cat) s.category = cat.value;
         if (content) s.content = content.value;
         if (keys) s.activation_keys = keys.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean);
         if (mode) s.trigger_mode = mode.value;
         if (pri) s.priority = parseInt(pri.value) || 0;
+        if (depth) s.scan_depth = Math.max(1, Math.min(10, parseInt(depth.value) || 1));
+        if (links) s.links = links.value.split(/[,，、\n]+/).map(part => {
+            const [target, relation = "related"] = part.split(":").map(x => x.trim());
+            return target ? { target, relation } : null;
+        }).filter(Boolean);
     });
 }
 
@@ -225,10 +234,20 @@ function syncLoreEditFromDOM() {
 function checkLoreQuality(list) {
     const warns = [];
     const keyCount = {};
+    const ids = new Set(list.map(s => s.id).filter(Boolean));
+    const seenIds = new Set();
     list.forEach((s, i) => {
         const label = `#${i + 1} ${s.title || "(无标题)"}`;
         if (!s.title || !s.title.trim()) warns.push(`${label}：缺少标题`);
         if (!s.content || s.content.trim().length < 30) warns.push(`${label}：内容过短（<30 字），信息量可能不足`);
+        if (!s.id || seenIds.has(s.id)) warns.push(`${label}：ID 缺失或重复`);
+        if (s.id) seenIds.add(s.id);
+        if (s.trigger_mode === "regex") {
+            for (const key of s.activation_keys || []) {
+                try { new RegExp(key); } catch (_) { warns.push(`${label}：正则触发词「${key}」无效`); }
+            }
+        }
+        for (const link of s.links || []) if (!ids.has(link.target)) warns.push(`${label}：关联目标「${link.target}」不存在`);
         (s.activation_keys || []).forEach(k => {
             const kk = String(k).toLowerCase();
             if (kk) keyCount[kk] = (keyCount[kk] || 0) + 1;
@@ -248,7 +267,7 @@ function renderLoreReviewBody() {
     // B5：若有 AI 修订缓冲，顶部展示修订提示
     const revisionHint = S._loreRevisionBuffer
         ? `<div class="lore-warn" style="background:rgba(201,168,124,0.1);border-color:var(--primary)">
-            <strong>AI 修订建议已就绪</strong>（${S._loreRevisionBuffer.length} 条）
+            <strong>AI 修订建议已就绪</strong>（更新 ${S._loreRevisionBuffer.updates?.length || 0} 条，新增 ${S._loreRevisionBuffer.additions?.length || 0} 条）
             <div style="margin-top:6px;display:flex;gap:8px;">
                 <button class="btn primary" data-action="confirmLoreRevision" style="font-size:12px;padding:3px 12px;">✓ 应用修订</button>
                 <button class="btn secondary" data-action="rejectLoreRevision" style="font-size:12px;padding:3px 12px;">✗ 丢弃</button>
@@ -284,6 +303,8 @@ function renderLoreReviewBody() {
                     </select>
                 </label>
                 <label>优先级<input id="le_pri_${i}" class="lore-inp lore-pri" type="number" value="${Number(s.priority) || 0}"></label>
+                <label>扫描深度<input id="le_depth_${i}" class="lore-inp lore-pri" type="number" min="1" max="10" value="${Number(s.scan_depth) || 1}"></label>
+                <label>关联<input id="le_links_${i}" class="lore-inp" value="${escapeHtml((s.links || []).map(l => `${l.target}:${l.relation || 'related'}`).join('，'))}" placeholder="目标ID:关系"></label>
             </div>
             ${(s.links && s.links.length) ? `<div class="lore-links">${s.links.map(l => `<span class="lore-link-tag">→ ${escapeHtml(l.target)}（${escapeHtml(LINK_RELATION_LABELS[l.relation] || l.relation)}）</span>`).join(" ")}</div>` : ""}
         </div>`;
@@ -368,9 +389,9 @@ export async function startGame(opts = {}) {
 
     // 加载该世界的初始状态
     if (S.currentWorld.initial_state) {
-        S.gameState = deepClone(S.currentWorld.initial_state);
+        S.gameState = normalizeSimulationState(deepClone(S.currentWorld.initial_state));
     } else {
-        S.gameState = deepClone(defaultInitialState());
+        S.gameState = normalizeSimulationState(deepClone(defaultInitialState()));
         S.gameState.name = S.currentWorld.hero ? "主角" : "玩家";
     }
 
@@ -473,7 +494,7 @@ export function loadSave(saveId) {
     S.currentWorld = S.worlds.find(w => w.id === save.worldId);
     S.currentSession.worldId = save.worldId;
     invalidateSystemPromptCache();
-    if (save.state) S.gameState = deepClone(save.state);
+    if (save.state) S.gameState = normalizeSimulationState(deepClone(save.state));
     // ★ B7：恢复存档独立知识库（若存档无副本则从 world 出厂默认深拷贝，兼容老存档）
     S.activeLoreKB = (save.lore_kb) ? deepClone(save.lore_kb) : (S.currentWorld && S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null);
     S.activeBehaviorRecords = deepClone(save.behavior_records || []);
@@ -678,17 +699,6 @@ export function applyStateChanges(changes) {
         }
     }
 
-    if (changes.completed_events) {
-        for (const e of changes.completed_events) {
-            if (!s.completed_events.includes(e)) s.completed_events.push(e);
-        }
-    }
-
-    // 消费 AI 返回的 triggered_event（此前从未被引擎读取）：记录当前激活事件，供事件引擎推进（#5）
-    if (changes.triggered_event) {
-        s.active_event = changes.triggered_event;
-    }
-
     if (changes.goal_updates) {
         for (const u of changes.goal_updates) {
             const g = s.goals.find(x => x.goal_id === u.goal_id);
@@ -711,15 +721,8 @@ export function applyStateChanges(changes) {
         }
     }
 
-    // 每轮检查目标 deadline，过期未达成则标记 failed（失败不等于结束，开辟新故事线）（#6）
-    checkGoalDeadlines();
-
     if (changes.status_effects) {
         s.status_effects = changes.status_effects;
-    }
-
-    if (changes.npc_activity) {
-        s.npc_activity = { ...(s.npc_activity || {}), ...changes.npc_activity };
     }
 
     if (changes.is_alive === false) {
@@ -727,55 +730,24 @@ export function applyStateChanges(changes) {
         s.death_reason = changes.death_reason || "未知原因";
     }
 
-    // ★ 时间推进：仅当 AI 在 state_changes 中明确指定了 period 或 current_date 时才推进
-    // 不再自动推进——日常闲聊、观察环境等行动不应消耗时段
-    // AI 根据行动复杂度自行判断是否推进：不推进则不填 period，推进则填入目标时段
-    // P1#8：用「绝对时间序号」钳制，严禁时间倒流（文档明确禁止回退）。
-    // 注意 period 与 current_date 可能同时出现，必须统一推导目标时间后再做一次性钳制，避免重复计数。
+    // E1–E10：所有时间形态统一转换为绝对分钟，显示字段从绝对分钟反推。
     const tc = getTimeConfig();
-    if (tc.mode === "periods") {
-        const periodOrder = tc.periods;
-        const seq = d => {
-            const p = periodOrder.indexOf(d.period);
-            return d.day * 100 + (p < 0 ? 99 : p);
-        };
-        const prevSeq = seq(s.current_date);
-        let tgtDay = s.current_date.day;
-        let tgtPeriod = s.current_date.period;
-
-        if (changes.current_date && (changes.current_date.day != null || changes.current_date.period != null)) {
-            // 显式给出 current_date：直接采信（可能只给 day 或只给 period），仅做回退钳制
-            if (changes.current_date.day != null) tgtDay = changes.current_date.day;
-            if (changes.current_date.period != null) tgtPeriod = changes.current_date.period;
-        } else if (changes.period) {
-            // 仅给 period：按"向前推进"语义推导——同/早时段→次日该时段，晚时段→当日该时段
-            const newIdx = periodOrder.indexOf(changes.period);
-            const prevIdx = periodOrder.indexOf(s.current_date.period);
-            if (newIdx >= 0 && prevIdx >= 0) {
-                // ★ P1.2.8: 仅当目标时段"晚于"当前时段才跨天推进；同/早时段保持当天（短操作不推进时间）
-                tgtDay = (newIdx > prevIdx) ? s.current_date.day + 1 : s.current_date.day;
-                tgtPeriod = changes.period;
-            }
-        }
-
-        const newSeq = seq({ day: tgtDay, period: tgtPeriod });
-        if (newSeq >= prevSeq) {
-            const newClock = (changes.current_date && changes.current_date.clock) || s.current_date.clock;
-            // E10：累加行动耗时的分钟数（clock_mode=clock 时 AI 返回的 clock_minutes）
-            const prevMins = s.current_date.clock_minutes || 0;
-            const addMins = (changes.current_date && typeof changes.current_date.clock_minutes === "number") ? changes.current_date.clock_minutes : 0;
-            const totalMins = prevMins + addMins;
-            const totalH = Math.floor(totalMins / 60);
-            const totalM = totalMins % 60;
-            s.current_date = { day: tgtDay, period: tgtPeriod, clock_minutes: totalMins, clock: newClock || `${String(totalH).padStart(2, "0")}:${String(totalM).padStart(2, "0")}`, ...(newClock ? {} : {}) };
-        } else {
-            // 非法回退：拒绝，保持原时间，仅记日志（避免"时间倒流 + 跨天"的荒谬状态）
-            console.warn("AI 试图回退时间，已忽略", { day: tgtDay, period: tgtPeriod });
-        }
-    } else if (changes.current_date) {
-        // 自由时间模式（无 period 顺序）：无钳制，直接合并 current_date（含 relative_label/clock）
-        s.current_date = { ...s.current_date, ...changes.current_date };
+    const timeChange = changes.current_date
+        ? { ...changes.current_date }
+        : changes.period
+            ? { period: changes.period }
+            : null;
+    if (timeChange) {
+        const result = advanceWorldTime(s.current_date, timeChange, tc.periods || DEFAULT_PERIOD_ORDER);
+        s.current_date = result.currentDate;
+        if (result.rejected) console.warn("AI 试图回退时间，已忽略", timeChange);
+    } else {
+        s.current_date = hydrateWorldTime(s.current_date, tc.periods || DEFAULT_PERIOD_ORDER);
     }
+
+    // D1：事件与 NPC 状态在时间推进后统一更新，以新时间作为更新时间戳。
+    Object.assign(s, applySimulationChanges(s, changes, s.current_date));
+    checkGoalDeadlines();
 
     saveState();
     updateGameDayInfo();
@@ -790,15 +762,11 @@ export function checkGoalDeadlines() {
     const st = S.gameState;
     const tc = getTimeConfig();
     const periodOrder = (tc && tc.periods) || DEFAULT_PERIOD_ORDER;
-    const seq = d => {
-        const p = periodOrder.indexOf(d.period);
-        return d.day * 100 + (p < 0 ? 0 : p);
-    };
+    const currentTime = hydrateWorldTime(st.current_date, periodOrder);
     for (const g of st.goals) {
         if (g.status !== "active" || !g.deadline) continue;
-        const dlSeq = seq({ day: g.deadline.day, period: g.deadline.period });
-        const curSeq = seq(st.current_date);
-        if (curSeq > dlSeq) {
+        const deadlineTime = hydrateWorldTime({ day: g.deadline.day, period: g.deadline.period }, periodOrder);
+        if (currentTime.absolute_minutes > deadlineTime.absolute_minutes) {
             g.status = "failed";   // 严格大于：恰好抵达 deadline 时段仍可完成
             g.failed_at = { day: st.current_date.day, period: st.current_date.period };
             // #6 完善：把失败后果记入关键事实，下一轮 AI 会在叙事中体现（而非仅改状态）
@@ -971,7 +939,18 @@ export async function processTurn(input) {
                 freedom: S.currentWorld && S.currentWorld.plot_freedom,
                 hasLore: !!(S.activeLoreKB && S.activeLoreKB.snippets && S.activeLoreKB.snippets.length)
             });
+            const judgeContext = {
+                worldId: S.currentWorld && S.currentWorld.id,
+                epoch: S.currentSession.epoch,
+                turnId: S.conversationHistory.length + 1
+            };
             if (judgeEnabled) judgeWorldviewConsistency(resp.narrative, resp.state_changes, { playerInput: input }).then(result => {
+                const currentContext = {
+                    worldId: S.currentWorld && S.currentWorld.id,
+                    epoch: S.currentSession.epoch,
+                    turnId: S.conversationHistory.length
+                };
+                if (!isEnhancementContextCurrent(judgeContext, currentContext)) return;
                 if (result && result.consistent === false && result.violations && result.violations.length) {
                     const v = result.violations.slice(0, 2).join("、");
                     const msg = result.severity === "hard"
@@ -1101,19 +1080,31 @@ async function triggerLoreRevision(msgCount) {
     S.lastLoreReviewMsgCount = msgCount;
     // 防止短时间内重复触发
     if (S._loreRevisionBuffer) return;
-    callLoreRevisionLLM().then(snippets => {
-        if (snippets && snippets.length) {
-            S._loreRevisionBuffer = snippets;
+    const context = {
+        worldId: S.currentWorld && S.currentWorld.id,
+        epoch: S.currentSession.epoch,
+        turnId: S.conversationHistory.length
+    };
+    callLoreRevisionLLM().then(diff => {
+        const currentContext = {
+            worldId: S.currentWorld && S.currentWorld.id,
+            epoch: S.currentSession.epoch,
+            turnId: S.conversationHistory.length
+        };
+        if (!isEnhancementContextCurrent(context, currentContext)) return;
+        const count = diff ? (diff.updates?.length || 0) + (diff.additions?.length || 0) : 0;
+        if (diff && count) {
+            S._loreRevisionBuffer = diff;
             createOrUpdateSave();
-            showToast("知识库已可修订——AI 建议更新 " + snippets.length + " 条条目。进入知识库编辑面板查看。", "success", 5000);
+            showToast("知识库已可修订——AI 建议调整 " + count + " 条条目。进入知识库编辑面板查看。", "success", 5000);
         }
     }).catch(() => {});
 }
 
 // ★ B5：确认修订——将缓冲写入 activeLoreKB
 export async function confirmLoreRevision() {
-    if (!S._loreRevisionBuffer || !S._loreRevisionBuffer.length) return;
-    S.activeLoreKB.snippets = S._loreRevisionBuffer;
+    if (!S._loreRevisionBuffer) return;
+    S.activeLoreKB.snippets = applyLoreRevisionDiff(S.activeLoreKB.snippets, S._loreRevisionBuffer);
     S._loreRevisionBuffer = null;
     try { await ensureLoreEmbeddings(S.activeLoreKB); } catch (e) {}
     createOrUpdateSave();
@@ -1263,6 +1254,37 @@ export function deleteMemory(id) {
     showToast("记忆已删除", "success");
 }
 
+export function exportMemoryPack() {
+    const pack = createMemoryPack(S.activeBehaviorRecords, { worldName: S.currentWorld && S.currentWorld.name });
+    const blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `以太叙事-记忆包-${(S.currentWorld?.name || "世界").replace(/[\\/:*?"<>|]/g, "_")}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast(`已导出 ${pack.memories.length} 条记忆`, "success");
+}
+
+export function triggerMemoryPackImport() {
+    const input = document.getElementById("memoryPackFile");
+    if (input) { input.value = ""; input.click(); }
+}
+
+export async function importMemoryPack(file) {
+    if (!file) return;
+    try {
+        const pack = JSON.parse(await file.text());
+        const result = mergeMemoryPack(S.activeBehaviorRecords, pack);
+        S.activeBehaviorRecords = result.memories;
+        createOrUpdateSave();
+        renderStatusPanel("memory");
+        showToast(`记忆包已合并：新增 ${result.added} 条，合并 ${result.merged} 条`, "success", 4000);
+    } catch (error) {
+        showToast("记忆包导入失败：" + error.message, "error", 4000);
+    }
+}
+
 // ★ E13：时间显示设置面板
 export function showTimeConfigModal() {
     showModal("timeConfigModal");
@@ -1272,6 +1294,8 @@ export function showTimeConfigModal() {
     document.getElementById("timeConfigCalendar").value = cfg.calendar_mode || "day";
     document.getElementById("timeConfigClock").value = cfg.clock_mode || "period";
     document.getElementById("timeConfigSeason").value = cfg.season || "";
+    document.getElementById("timeConfigWeather").value = cfg.weather || "";
+    document.getElementById("timeConfigShow").checked = cfg.show !== false;
 }
 
 export async function saveTimeConfig() {
@@ -1282,6 +1306,8 @@ export async function saveTimeConfig() {
     schema.time_config.calendar_mode = document.getElementById("timeConfigCalendar").value;
     schema.time_config.clock_mode = document.getElementById("timeConfigClock").value;
     schema.time_config.season = document.getElementById("timeConfigSeason").value.trim().slice(0, 10);
+    schema.time_config.weather = document.getElementById("timeConfigWeather").value.trim().slice(0, 20);
+    schema.time_config.show = document.getElementById("timeConfigShow").checked;
     saveWorlds();
     closeModal("timeConfigModal");
     updateGameDayInfo();

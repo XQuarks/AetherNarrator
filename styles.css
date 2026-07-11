@@ -1393,10 +1393,12 @@
             .home-subtitle-en { font-size: 11px; letter-spacing: 0.2em; margin-bottom: 22px; }
             .home-subtitle { font-size: 13px; margin-bottom: 28px; }
             .game-log { padding: 10px 14px; }
-            .game-input-area { padding: 8px 12px 16px; }
+            .game-input-area { padding: 8px 12px calc(16px + env(safe-area-inset-bottom)); }
             .log-entry { padding: 12px 14px; }
             .status-content { padding: 12px; }
             .status-panel { max-width: 100%; }
+            .modal { max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+            button, .mem-act, .spoiler-toggle { min-height: 44px; }
         }
 
         /* ★ F1: 减弱动效时只关无限循环装饰动画（雾漂移/标题流光/按钮呼吸），
@@ -1405,4 +1407,3 @@
             .mist, .title-sheen, .menu-btn { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
             * { transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
         }
-    

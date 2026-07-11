@@ -70,7 +70,7 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - attribute_labels: 属性中文映射，键为 courage/perception/patience/luck/will，值为中文名
    - time_mode: "periods"（按时段推进）| "continuous"（自由时间描述，period填任意字符串）| "hidden"（不展示时间）
    - time_periods: 时间段映射，如 {"morning":"早晨", ...}（periods 模式必填，可自定义任意数量和名称）
-   - time_config: 时间系统统一配置对象（可选，强烈建议填写以增强沉浸感）：{ era_label: "纪元/年份，如「建安十三年」「星际历70498」「明朝末年」，无则留空", calendar_mode: "day"(第N天) | "gregorian"(月日+星期) | "lunar"(阴历月日) | "custom_calendar"(新历法) | "none"(不显示日期), clock_mode: "period"(时段标签) | "clock"(具体时钟) | "none", season: "春/夏/秋/冬/自定义，可空", show: true, deadlines: [] }。根据 IP 自动判定：历史/科幻填 era_label，国风/武侠填 lunar，校园/都市填 gregorian，星际/架空填 custom_calendar 或 none。
+   - time_config: 时间系统统一配置对象（可选，强烈建议填写以增强沉浸感）：{ era_label: "纪元/年份，如「建安十三年」「星际历70498」「明朝末年」，无则留空", calendar_mode: "day"(第N天) | "gregorian"(月日+星期) | "lunar"(阴历月日) | "custom_calendar"(新历法) | "none"(不显示日期), clock_mode: "period"(时段标签) | "clock"(具体时钟) | "none", season: "春/夏/秋/冬/自定义，可空", weather: "当前天气，可空", show: true, deadlines: [] }。根据 IP 自动判定：历史/科幻填 era_label，国风/武侠填 lunar，校园/都市填 gregorian，星际/架空填 custom_calendar 或 none。
 
 2. initial_state: 玩家初始状态对象。**主角的初始能力/身份/技能必须如实反映主角设定中的描述**，不要将其降级为初学者。包含：
    - name, age, background, personality（数组）
@@ -248,7 +248,8 @@ export function buildTimeModeRules() {
     if (cfg && cfg.era_label) timeExtra += `当前纪元/年份：${cfg.era_label}。`;
     if (cfg && cfg.calendar_mode && cfg.calendar_mode !== "none") timeExtra += `本世界历法为「${cfg.calendar_mode}」，叙事中可用对应的月日/季节表达时间（如阴历「三月初九」）。`;
     if (cfg && cfg.season) timeExtra += `当前季节：${cfg.season}。`;
-    if (cfg && cfg.clock_mode === "clock") timeExtra += `本世界使用具体时钟制。每次行动可将耗时分钟数填入 state_changes.current_date.clock_minutes（如 15=15 分钟），系统自动累加并换算时钟显示。典型耗时：短应答 5 分钟、勘察/聊天 15 分钟、远行 60 分钟、重大事件 120 分钟。`;
+    if (cfg && cfg.weather) timeExtra += `当前天气：${cfg.weather}。天气可随剧情变化，但不得无故改变季节。`;
+    if (cfg && cfg.clock_mode === "clock") timeExtra += `本世界使用具体时钟制。每次行动可将耗时分钟数填入 state_changes.current_date.elapsed_minutes（如 15=15 分钟），系统自动累加并换算日期、时段与时钟。典型耗时：短应答 5 分钟、勘察/聊天 15 分钟、远行 60 分钟、重大事件 120 分钟。`;
     return `本世界时段顺序：${periodList} → 下一天${tc.labels[tc.periods[0]] || tc.periods[0]}。
 
 时段含义：${periodDesc}。
@@ -444,11 +445,16 @@ export function getPendingEventHint() {
     if (!kb || !kb.snippets || !S.gameState) return null;
     const st = S.gameState;
     const events = kb.snippets.filter(s => s.category === "事件");
-    const done = st.completed_events || [];
+    const done = (st.completed_events || []).map(event => event && typeof event === "object" ? event.title : event);
 
     // 1) AI 显式激活的事件
-    if (st.active_event) {
-        const active = events.find(s => s.title === st.active_event);
+    const activeTitle = st.active_events && st.active_events.length
+        ? st.active_events[0].title
+        : st.active_event && typeof st.active_event === "object"
+            ? st.active_event.title
+            : st.active_event;
+    if (activeTitle) {
+        const active = events.find(s => s.title === activeTitle);
         if (active && !done.includes(active.title)) {
             const summary = (active.content || "").replace(/触发条件[：:][\s\S]*$/s, "").slice(0, 240);
             return `事件「${active.title}」现已激活，请在叙事中自然推进其发展：\n${summary}`;
@@ -647,15 +653,8 @@ export function rebuildSummaryFromHistory(history) {
     const summaries = [];
     for (const entry of history) {
         if (entry.isWarning) continue;
-        const narrative = (entry.narrative || "").trim();
-        if (!narrative) continue;
-        const sentences = narrative.split(/[。！？…]/).filter(s => s.trim().length > 5);
-        if (!sentences.length) continue;
-        const first = sentences[0].trim();
-        const second = sentences[1] ? sentences[1].trim() : "";
-        let result = first;
-        if (second && (first + second).length < 120) result += second;
-        if (result) summaries.push(result.slice(0, 150));
+        const result = summarizeTurn({ narrative: entry.narrative || "", state_changes: entry.state_changes || {} });
+        if (result) summaries.push(result);
     }
     return summaries.slice(-20);
 }

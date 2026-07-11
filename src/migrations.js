@@ -44,8 +44,15 @@ export function migrateSaveRecord(save, world = null) {
     out.last_lore_review_msg_count = Number.isFinite(out.last_lore_review_msg_count)
         ? Math.max(0, Math.floor(out.last_lore_review_msg_count))
         : 0;
-    out.pending_lore_revision = Array.isArray(out.pending_lore_revision)
-        ? clone(out.pending_lore_revision)
-        : null;
+    if (Array.isArray(out.pending_lore_revision)) {
+        out.pending_lore_revision = { updates: clone(out.pending_lore_revision), additions: [] };
+    } else if (out.pending_lore_revision && typeof out.pending_lore_revision === "object") {
+        out.pending_lore_revision = {
+            updates: clone(Array.isArray(out.pending_lore_revision.updates) ? out.pending_lore_revision.updates : []),
+            additions: clone(Array.isArray(out.pending_lore_revision.additions) ? out.pending_lore_revision.additions : [])
+        };
+    } else {
+        out.pending_lore_revision = null;
+    }
     return out;
 }
