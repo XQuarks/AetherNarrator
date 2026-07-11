@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { acquireTurn, releaseTurn } from "../src/turn-lifecycle.js";
+import { acquireTurn, isSessionContextCurrent, releaseTurn } from "../src/turn-lifecycle.js";
 import { parseStoredArray, parseStoredObject } from "../src/migrations.js";
 import { collectDueDeadlines } from "../src/time-engine.js";
 import { createRestEvent } from "../src/simulation.js";
@@ -12,6 +12,13 @@ test("同一时刻只能获取一个主回合锁", () => {
     assert.equal(acquireTurn(runtime), false);
     releaseTurn(runtime);
     assert.equal(acquireTurn(runtime), true);
+});
+
+test("导航后的旧请求异常不属于当前会话", () => {
+    const expected = { epoch: 2, worldId: "w1" };
+    assert.equal(isSessionContextCurrent(expected, { epoch: 2, worldId: "w1" }), true);
+    assert.equal(isSessionContextCurrent(expected, { epoch: 3, worldId: "w1" }), false);
+    assert.equal(isSessionContextCurrent(expected, { epoch: 2, worldId: "w2" }), false);
 });
 
 test("损坏的配置对象回退且不抛异常", () => {

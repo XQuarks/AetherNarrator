@@ -7,3 +7,9 @@ export function acquireTurn(runtime) {
 export function releaseTurn(runtime) {
     if (runtime) runtime.isGenerating = false;
 }
+
+export function isSessionContextCurrent(expected, current) {
+    return !!expected && !!current
+        && expected.epoch === current.epoch
+        && expected.worldId === current.worldId;
+}

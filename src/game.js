@@ -17,7 +17,7 @@ import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
 import { applySimulationChanges, createRestEvent, normalizeSimulationState } from "./simulation.js";
-import { acquireTurn, releaseTurn } from "./turn-lifecycle.js";
+import { acquireTurn, isSessionContextCurrent, releaseTurn } from "./turn-lifecycle.js";
 
 export function abortCurrentRequest() {
     if (S.currentAbortController) {
@@ -320,6 +320,8 @@ function renderLoreReviewBody() {
 export function openLoreReview(mode = "save") {
     if (!S.currentWorld) { showToast("请先选择一个世界", "warn"); return; }
     S._loreEditingWorldDefault = mode === "world";
+    const title = document.getElementById("loreReviewModalTitle");
+    if (title) title.textContent = mode === "world" ? "编辑新周目默认知识库" : "当前存档知识库";
     if (!S.activeLoreKB) S.activeLoreKB = { ip: "", snippets: [] };
     if (!Array.isArray(S.activeLoreKB.snippets)) S.activeLoreKB.snippets = [];
     S._loreEdit = deepClone(S.activeLoreKB.snippets); // 深拷贝到缓冲，取消不影响原数据
@@ -905,6 +907,7 @@ export async function processTurn(input) {
 
     if (!acquireTurn(S)) { showToast("上一回合仍在生成，请稍候", "warn"); return; }
     const myEpoch = S.currentSession.epoch;
+    const myWorldId = S.currentWorld && S.currentWorld.id;
     try {
     showLoading("正在思考...");
     // ★ 前端防注入检测
@@ -1073,6 +1076,11 @@ export async function processTurn(input) {
         }
     } catch (e) {
         hideLoading();
+        // 导航/切世界会递增 epoch 并中止请求；旧请求异常必须静默丢弃，禁止写入新会话。
+        if (!isSessionContextCurrent(
+            { epoch: myEpoch, worldId: myWorldId },
+            { epoch: S.currentSession.epoch, worldId: S.currentWorld && S.currentWorld.id }
+        )) return;
         // ★ 日志分离：即使 parse/API 失败也记录到 debugLog.turns
         const model = document.getElementById("modelName")?.value || "unknown";
         const temp = getTemperature();
