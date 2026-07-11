@@ -689,3 +689,72 @@ export async function judgeWorldviewConsistency(narrative, stateChangesObj, opts
         return null; // 裁判失败绝不阻断回合
     }
 }
+
+// ★ B5：定期回写知识库——每 20 轮对话调 AI 审查/修订知识库，结果存入缓冲供玩家确认
+export async function callLoreRevisionLLM() {
+    const kb = getWorldLoreKB();
+    if (!kb || !kb.snippets || !kb.snippets.length) return null;
+    const baseUrl = document.getElementById("baseUrl") && document.getElementById("baseUrl").value.trim();
+    const apiKey = document.getElementById("apiKey") && document.getElementById("apiKey").value.trim();
+    const model = document.getElementById("modelName") && document.getElementById("modelName").value.trim() || "deepseek-v4-flash";
+    const mock = document.getElementById("mockMode") && document.getElementById("mockMode").checked;
+    if (!baseUrl || !apiKey) { if (!mock) return null; }
+    const corsProxy = document.getElementById("corsProxy") && document.getElementById("corsProxy").value.trim() || "";
+    const apiUrl = buildApiUrl(baseUrl, corsProxy);
+
+    const behaviorRecords = (S.currentWorld && S.currentWorld.behavior_records) ? S.currentWorld.behavior_records.slice(-20) : [];
+    const recentFacts = behaviorRecords.map(r => r.text).filter(Boolean).join("；");
+    const recentChat = (S.conversationHistory || []).slice(-10).map(e => (e.player ? "玩家：" + e.player : "") + "\n" + (e.narrative || "").slice(0, 200)).join("\n\n");
+
+    const snippetsText = kb.snippets.map(s => `[${s.id}:${s.category}:${s.title}] ${s.content}`).join("\n");
+
+    const prompt = `你正在为一个文字 RPG 游戏维护知识库。请基于当前知识库和最近的游戏动态，给出修订后的知识库条目列表。
+
+当前知识库（每条格式：[id:类别:标题] 内容）：
+${snippetsText}
+
+最近行为记录（玩家经历的关键事实）：
+${recentFacts || "无"}
+
+最近对话摘要：
+${recentChat || "无"}
+
+请输出一个 JSON 对象，只包含一个字段：
+{
+  "snippets": [
+    { "id": "保留原 id 或新建", "category": "规则/地点/人物/事件/物品/势力/冲突", "title": "...", "content": "...", "keywords": ["..."], "activation_keys": ["..."], "trigger_mode": "keyword|always", "priority": 0 },
+    ...
+  ]
+}
+
+修订规则：
+- 保留不需要改的条目（id/内容不变）
+- 更新需要修订的条目（如角色关系变化、新地点发现、新能力获得）
+- 可新增重要条目（如新角色、新事件）——id 用 "nl" + 序号
+- 不要删除已有条目（除非确实过时/错误）
+- 只输出 JSON，不要额外解释。`;
+
+    try {
+        const controller = new AbortController();
+        const t0 = Date.now();
+        const resp = await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+            body: JSON.stringify({
+                model, messages: [{ role: "user", content: prompt }],
+                temperature: 0.3, max_tokens: 3000, stream: false
+            }),
+            signal: controller.signal
+        });
+        if (!resp.ok) throw new Error("知识库修订请求失败：" + resp.status);
+        const data = await resp.json();
+        const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+        const parsed = tryRepairJSON(content);
+        if (parsed && Array.isArray(parsed.snippets)) {
+            return parsed.snippets;
+        }
+    } catch (e) {
+        console.warn("B5 知识库修订调用失败：", e && e.message);
+    }
+    return null;
+}

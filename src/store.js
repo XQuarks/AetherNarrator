@@ -7,6 +7,7 @@ export const S = {
   gameState: null,
   loreKB: null,
   loreEmbeddings: null,
+  activeLoreKB: null,   // ★ B7：当前存档的独立知识库副本（开局时从 world.lore_kb 深拷贝，编辑仅改此副本）
   conversationHistory: [],
   chatHistory: [],
   chatSummary: [],
@@ -42,6 +43,9 @@ export const S = {
   loadingInterval: null,
   _loreEdit: null,   // ★ B3：知识库编辑面板的临时草稿缓冲（取消编辑不影响原数据）
   _restartWorldId: null, // ★ 修复：重新开始确认弹窗暂存目标世界 id（原生 confirm 在沙箱被吞，改用自定义弹窗）
+  _loreRevisionBuffer: null, // ★ B5：AI 修订后待审阅的知识库条目缓冲
+  lastLoreReviewMsgCount: 0,  // ★ B5：上次回写时的对话条数，用于触发阈值判断
+  loreSpoilerHidden: true,     // ★ B8：知识库防剧透——默认隐藏正文，玩家手动解除
 };
 
 export const MAX_CHAT_MESSAGES = 40;
@@ -62,9 +66,84 @@ export const STORAGE_KEYS = {
 
 export const DEFAULT_PERIOD_ORDER = ["morning", "forenoon", "afternoon", "evening", "night"];
 
+export const MEMORY_TYPES = ["event", "relationship", "item", "discovery", "other"];
+export const MEMORY_TYPE_LABELS = { event: "事件", relationship: "关系", item: "物品", discovery: "发现", other: "其他" };
+
+export const LINK_RELATIONS = ["causal", "related", "explains", "contains"];
+export const LINK_RELATION_LABELS = { causal: "因果", related: "相关", explains: "解释", contains: "包含" };
+
 export const DEFAULT_PERIOD_LABELS = {
     morning: "早晨", forenoon: "上午", afternoon: "下午", evening: "傍晚", night: "夜晚"
 };
+
+// ============================================================
+// 时间系统统一配置（E 工作流：纪元 / 历法 / 时钟 / 季节）
+// 设计：世界生成时 AI 一次性按 IP 产出 schema.time_config，运行时纯本地渲染，零额外 token。
+// ============================================================
+export const DEFAULT_TIME_CONFIG = {
+    era_label: "",            // 纪元/年份，如「建安十三年」「星际历70498」「明朝末年」，可为空
+    calendar_mode: "day",     // day(第N天) | gregorian(月日+星期) | lunar(阴历月日) | custom_calendar(新历法) | none(不显示日期)
+    clock_mode: "period",     // period(时段标签) | clock(具体时钟) | none(不显示时刻)
+    season: "",               // 春/夏/秋/冬/自定义，可为空，用于驱动节日/氛围（E11）
+    show: true,               // 是否展示时间（false 等同 hidden）
+    deadlines: []             // 世界级截止 [{id,title,day,period}]（E8）
+};
+
+const CALENDAR_MONTH_LEN = 30; // 历法月长，用于把"第 N 天"推导为月/日
+
+// 归一化 time_config，丢弃非法字段，保证后续渲染安全（无 schema 时回退默认）
+export function normalizeTimeConfig(raw) {
+    const cfg = { ...DEFAULT_TIME_CONFIG, deadlines: [] };
+    if (raw && typeof raw === "object") {
+        if (typeof raw.era_label === "string") cfg.era_label = raw.era_label.slice(0, 40);
+        const calModes = ["day", "gregorian", "lunar", "custom_calendar", "none"];
+        if (calModes.includes(raw.calendar_mode)) cfg.calendar_mode = raw.calendar_mode;
+        const clkModes = ["period", "clock", "none"];
+        if (clkModes.includes(raw.clock_mode)) cfg.clock_mode = raw.clock_mode;
+        if (typeof raw.season === "string" && raw.season.trim()) cfg.season = raw.season.slice(0, 10);
+        if (typeof raw.show === "boolean") cfg.show = raw.show;
+        if (Array.isArray(raw.deadlines)) {
+            cfg.deadlines = raw.deadlines.slice(0, 12).map(d => ({
+                id: typeof d.id === "string" ? d.id.slice(0, 40) : "",
+                title: typeof d.title === "string" ? d.title.slice(0, 60) : "",
+                day: typeof d.day === "number" ? d.day : 0,
+                period: typeof d.period === "string" ? d.period : ""
+            })).filter(d => d.title);
+        }
+    }
+    return cfg;
+}
+
+// 把"第 N 天"推导为月/日标签（E3 历法）；monthLen 可配置（默认每月 30 天）
+export function calendarLabel(day, mode, monthLen = CALENDAR_MONTH_LEN) {
+    const d = Math.max(1, day | 0);
+    if (mode === "gregorian") {
+        const month = Math.ceil(d / monthLen);
+        const date = ((d - 1) % monthLen) + 1;
+        const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+        const wd = weekdays[(d - 1) % 7];
+        return `第${month}月${date}日 · 周${wd}`;
+    }
+    if (mode === "lunar") {
+        const month = Math.ceil(d / monthLen);
+        const date = ((d - 1) % monthLen) + 1;
+        const num = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+        let dayStr;
+        if (date <= 10) dayStr = "初" + num[date - 1];
+        else if (date <= 20) dayStr = "十" + num[date - 11];
+        else if (date <= 30) dayStr = "廿" + num[date - 21];
+        else dayStr = "卅";
+        const monthCn = ["正", "二", "三", "四", "五", "六", "七", "八", "九", "十", "冬", "腊"];
+        const mCn = monthCn[(month - 1) % 12] || (month + "月");
+        return `${mCn}月${dayStr}`;
+    }
+    if (mode === "custom_calendar") {
+        const month = Math.ceil(d / monthLen);
+        const date = ((d - 1) % monthLen) + 1;
+        return `新月${month}·${date}日`;
+    }
+    return `第${d}天`;
+}
 
 export const MAX_SOURCE_CHARS = 8000;
 

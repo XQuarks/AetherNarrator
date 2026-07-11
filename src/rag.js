@@ -2,14 +2,17 @@
 // AetherNarrator · rag.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
+import { MEMORY_TYPES } from "./store.js";
 
 import { cosineSimilarity, isFuzzyFact, normFact } from "./utils.js";
 import { saveWorlds } from "./storage.js";
+import { getPeriodLabel } from "./theme.js";
 import { buildTurnUserMessage, isLoreFullInSystem } from "./prompt.js";
 import { showToast } from "./render.js";
 
 export function getWorldLoreKB() {
-    return (S.currentWorld && S.currentWorld.lore_kb) || S.loreKB;
+    // ★ B7：优先使用当前存档的独立知识库副本（不污染 world 出厂默认）
+    return S.activeLoreKB || (S.currentWorld && S.currentWorld.lore_kb) || S.loreKB;
 }
 
 export function keywordRetrieve(input, topK = 5) {
@@ -192,7 +195,7 @@ export async function retrieve(input) {
     // 那段知识在 buildTurnUserMessage 里不会进入 user 消息，纯属浪费（手机端尤卡）。
     // 仅保留行为记录召回（仍是按相关度），因为它独立于 lore 注入、本就服务于"关键事实"区块。
     if (isLoreFullInSystem()) {
-        const behavior = retrieveBehaviorRecords(input, 3);
+        const behavior = await retrieveBehaviorRecords(input, 3);
         return behavior.map(b => ({
             id: "behavior_" + b.id, category: "行为记录", title: "关键事实",
             content: b.text, kw: 1.5, emb: 0
@@ -255,6 +258,36 @@ export async function retrieve(input) {
                 if (!merged.has(s.id)) merged.set(s.id, { snippet: s, kw: 0.5, emb: 0 }); // 连带触发给较低基础分
             }
         }
+
+        // ★ B9②：图谱链接跟随——已触发片段若有 links，沿语义关系拉入关联条目（深度 ≤ 2，与 B4 递归去重）
+        if (_kb && _kb.snippets) {
+            const idMap = new Map(_kb.snippets.map(s => [s.id, s]));
+            const linkedIds = new Set();
+            const frontier = new Set();
+            for (const [key] of merged.entries()) {
+                if (String(key).startsWith("behavior_")) continue;
+                frontier.add(String(key));
+            }
+            for (let depth = 0; depth < 2 && frontier.size; depth++) {
+                const next = new Set();
+                for (const id of frontier) {
+                    const snip = idMap.get(id);
+                    if (!snip || !snip.links || !snip.links.length) continue;
+                    for (const l of snip.links) {
+                        if (!linkedIds.has(l.target) && !merged.has(l.target) && idMap.has(l.target)) {
+                            linkedIds.add(l.target);
+                            next.add(l.target);
+                        }
+                    }
+                }
+                frontier.clear();
+                for (const id of next) frontier.add(id);
+            }
+            for (const id of linkedIds) {
+                const snip = idMap.get(id);
+                if (snip) merged.set(id, { snippet: snip, kw: 0.3, emb: 0 }); // 图谱链接给最低基础分，避免喧宾夺主
+            }
+        }
     }
 
     // 老存档（无触发元数据）：完全沿用原逻辑，零回退
@@ -283,16 +316,42 @@ export async function retrieve(input) {
     return out;
 }
 
-export function retrieveBehaviorRecords(input, topK = 3) {
+export async function retrieveBehaviorRecords(input, topK = 3) {
     if (!S.currentWorld || !S.currentWorld.behavior_records) return [];
+    const records = S.currentWorld.behavior_records.filter(b => b.pinned !== false);
+    if (!records.length) return [];
+
+    // ★ C4：向量语义检索优先（"黛玉病了"→"黛玉咳血"），关键词兜底
     const terms = segmentChinese(input);
-    if (!terms.length) return [];
-    const scored = S.currentWorld.behavior_records.map(b => {
+    let useVector = false;
+    let qVec = null;
+    try {
+        if (typeof window.transformers !== "undefined" && terms.length > 0) {
+            qVec = await computeEmbedding(input);
+            useVector = true;
+            // 后台补算未计算的记忆 embedding
+            ensureBehaviorEmbeddings();
+        }
+    } catch (e) { /* 向量不可用，降级关键词 */ }
+
+    const scored = records.map(b => {
         let score = 0;
-        const text = b.text.toLowerCase();
-        for (const t of terms) if (text.includes(t)) score += 1;
+        if (useVector && b.embedding && qVec) {
+            score = cosineSimilarity(qVec, b.embedding) * 5; // 余弦相似度放大到与关键词可比
+        }
+        // 关键词兜底：与向量分取 max（两者互补，向量覆盖语义、关键词覆盖精确匹配）
+        let kwScore = 0;
+        if (terms.length) {
+            const text = (b.text || "").toLowerCase();
+            for (const t of terms) { if (text.includes(t)) kwScore += 1; }
+        }
+        score = Math.max(score, kwScore);
+        const imp = (typeof b.importance === "number" && b.importance >= 1 && b.importance <= 5) ? b.importance : 3;
+        score += imp * 0.5;
+        if (b.pinned) score += 2;
         return { ...b, score };
     }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
+
     return scored;
 }
 
@@ -300,19 +359,49 @@ export function addBehaviorRecords(facts) {
     if (!S.currentWorld || !facts || !facts.length) return;
     if (!S.currentWorld.behavior_records) S.currentWorld.behavior_records = [];
     const list = S.currentWorld.behavior_records;
-    for (const text of facts) {
-        if (!text) continue;
-        if (isFuzzyFact(text)) continue;                       // 过滤空话，不入记忆
+    const gs = S.gameState;
+    const timeLabel = gs && gs.current_date
+        ? `第${gs.current_date.day}天 · ${getPeriodLabel(gs.current_date.period)}`
+        : "";
+    const locLabel = (gs && gs.current_location) ? gs.current_location : "";
+    for (const raw of facts) {
+        if (!raw) continue;
+        const fact = typeof raw === "string" ? { text: raw } : raw;
+        const text = fact.text || "";
+        if (!text || isFuzzyFact(text)) continue;
         const n = normFact(text);
-        if (list.some(b => normFact(b.text) === n)) continue;  // 近似去重，避免重复灌满
+        if (list.some(b => normFact(b.text) === n)) continue;
+        const imp = (typeof fact.importance === "number" && fact.importance >= 1 && fact.importance <= 5)
+            ? fact.importance : 3;
+        const type = (typeof fact.type === "string" && MEMORY_TYPES.includes(fact.type)) ? fact.type : "other";
         list.push({
             id: "b" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Date.now() + Math.random().toString(36).slice(2, 6)),
             text,
+            importance: imp,
+            pinned: !!fact.pinned,
+            type,
+            time: fact.time || timeLabel,
+            location: fact.location || locLabel,
+            npcs: Array.isArray(fact.npcs) ? fact.npcs.slice(0, 8) : [],
+            embedding: null,  // C4：向量暂时留空，由 ensureBehaviorEmbeddings 后台异步补算；关键词检索在此期间兜底
             createdAt: new Date().toISOString()
         });
     }
-    // 限制数量，避免无限增长
     if (list.length > 100) S.currentWorld.behavior_records = list.slice(-100);
+    saveWorlds();
+}
+
+// ★ C4：后台异步补算所有行为记忆的向量 embedding（"黛玉病了"→"黛玉咳血" 语义匹配）
+export async function ensureBehaviorEmbeddings() {
+    if (typeof window.transformers === "undefined") return;
+    const records = S.currentWorld && S.currentWorld.behavior_records;
+    if (!records || !records.length) return;
+    for (const r of records) {
+        if (r.embedding) continue;
+        try {
+            r.embedding = await computeEmbedding(r.text);
+        } catch (e) { /* 单条失败不阻塞其余 */ }
+    }
     saveWorlds();
 }
 

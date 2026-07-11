@@ -139,6 +139,8 @@
                 <svg class="theme-icon-moon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             </button>
             <button data-action="showAuthorNoteModal" title="设定持续剧情约束（作者注）">导演</button>
+            <button data-action="showTimeConfigModal" title="调整时间显示（纪元/历法/季节）">⏰</button>
+            <button data-action="restToNextDay" title="休息到次日清晨">休息</button>
             <button data-action="goHome">返回主界面</button>
             <button data-action="exportStory" title="导出剧情文本">导出</button>
         </div>
@@ -467,6 +469,72 @@
     </div>
 </div>
 
+<!-- ================= 时间设置弹窗（E13） ================= -->
+<div class="modal-overlay" id="timeConfigModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="timeConfigModalTitle">
+        <div class="modal-header">
+            <h2 id="timeConfigModalTitle">时间显示设置</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="timeConfigModal">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>纪元 / 年份</label>
+                <input type="text" id="timeConfigEra" placeholder="如：建安十三年、星际历70498（留空则不显示）" maxlength="40">
+                <div class="hint">留空则不显示纪元，仅显示日期和时刻。</div>
+            </div>
+            <div class="form-group">
+                <label>历法模式</label>
+                <select id="timeConfigCalendar">
+                    <option value="day">天数计数（第N天）</option>
+                    <option value="gregorian">公历（月日 + 星期）</option>
+                    <option value="lunar">阴历（正月、初二…）</option>
+                    <option value="custom_calendar">新历法（新月N·N日）</option>
+                    <option value="none">无日期</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>时钟模式</label>
+                <select id="timeConfigClock">
+                    <option value="period">时段标签（晨起/午后…）</option>
+                    <option value="clock">具体时钟（06:00 起）</option>
+                    <option value="none">不显示时刻</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>季节</label>
+                <input type="text" id="timeConfigSeason" placeholder="如：春、仲夏、深秋（留空则不显示）" maxlength="10">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="timeConfigModal">取消</button>
+            <button class="btn primary" data-action="saveTimeConfig">确认</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 知识库图谱弹窗（B9②） ================= -->
+<div class="modal-overlay" id="loreGraphModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="loreGraphModalTitle">
+        <div class="modal-header">
+            <h2 id="loreGraphModalTitle">知识库关联图谱</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="loreGraphModal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(255,100,100,0.15);color:#ff6464;">因果</span>
+                <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(100,150,255,0.15);color:#6496ff;">相关</span>
+                <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(100,200,100,0.15);color:#64c864;">解释</span>
+                <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(200,180,100,0.15);color:#c8b464;">包含</span>
+            </div>
+            <canvas id="loreGraphCanvas" width="680" height="420" style="width:100%;height:auto;border-radius:8px;background:var(--card-bg);"></canvas>
+            <div class="hint" style="margin-top:4px;text-align:center;">节点可拖动。Click 查看详情。</div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn primary" data-action="closeModal" data-modal="loreGraphModal">关闭</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= Toast ================= -->
 <div class="toast" id="toast"></div>
 
@@ -474,17 +542,19 @@
     <script>
     (function () {
       const root = document.documentElement;
-      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       function initMotes(canvas) {
         if (!canvas) return null;
         const ctx = canvas.getContext('2d');
-        let W, H, motes = [];
+        let W, H, motes = [], dpr = 1;
         function resize() {
-          W = canvas.width = window.innerWidth;
-          H = canvas.height = window.innerHeight;
-          const n = Math.min(46, Math.floor(W * H / 26000));
+          dpr = window.devicePixelRatio || 1;
+          W = canvas.width = window.innerWidth * dpr;
+          H = canvas.height = window.innerHeight * dpr;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          const n = Math.min(46, Math.floor(W * H / (26000 * dpr * dpr)));
           motes = Array.from({ length: n }, () => ({
-            x: Math.random() * W, y: Math.random() * H,
+            x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight,
             r: Math.random() * 1.6 + 0.5,
             vy: -(Math.random() * 0.25 + 0.06),
             vx: (Math.random() - 0.5) * 0.16,
@@ -496,19 +566,29 @@
         function moteColor() {
           return getComputedStyle(root).getPropertyValue('--mote').trim() || 'rgba(216,188,154,0.5)';
         }
-        function tick() {
-          ctx.clearRect(0, 0, W, H);
+        function drawFrame() {
+          ctx.clearRect(0, 0, W / dpr, H / dpr);
           const base = moteColor();
           for (const m of motes) {
-            m.y += m.vy; m.x += m.vx; m.a += m.tw;
-            if (m.y < -6) { m.y = H + 6; m.x = Math.random() * W; }
-            if (m.x < -6) m.x = W + 6; if (m.x > W + 6) m.x = -6;
             const alpha = 0.35 + Math.sin(m.a) * 0.3;
             ctx.beginPath();
             ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
             ctx.fillStyle = base.replace(/[\d.]+\)$/g, (Math.max(0.05, alpha)).toFixed(2) + ')');
             ctx.fill();
           }
+        }
+        if (reducedMotion) {
+          // 减弱动效时只画一帧静态星空（有星星但不飘不闪），不启动动画循环
+          drawFrame();
+          return resize;
+        }
+        function tick() {
+          for (const m of motes) {
+            m.y += m.vy; m.x += m.vx; m.a += m.tw;
+            if (m.y < -6) { m.y = window.innerHeight + 6; m.x = Math.random() * window.innerWidth; }
+            if (m.x < -6) m.x = window.innerWidth + 6; if (m.x > window.innerWidth + 6) m.x = -6;
+          }
+          drawFrame();
           requestAnimationFrame(tick);
         }
         tick();

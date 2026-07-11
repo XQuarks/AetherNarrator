@@ -78,6 +78,7 @@ export function createHongLouMengWorld() {
                 courage: "胆识", perception: "灵慧", patience: "涵养", luck: "机缘", will: "心性"
             },
             time_periods: { morning: "晨起", forenoon: "午前", afternoon: "午后", evening: "黄昏", night: "入夜" },
+            time_config: { era_label: "大清乾隆年间", calendar_mode: "lunar", clock_mode: "period", season: "仲春", show: true, deadlines: [] },
             game_over_conditions: ["is_alive === false"]
         },
         initial_state: {
@@ -197,6 +198,7 @@ export function createMagicAcademyWorld() {
             skill_label: "魔法/课程",
             attribute_labels: { courage: "勇气", perception: "洞察", patience: "专注", luck: "幸运", will: "意志" },
             time_periods: { morning: "早课", forenoon: "上午课", afternoon: "午后", evening: "黄昏", night: "星夜" },
+            time_config: { era_label: "", calendar_mode: "gregorian", clock_mode: "period", season: "初秋", show: true, deadlines: [] },
             game_over_conditions: ["is_alive === false"]
         },
         initial_state: {

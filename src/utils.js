@@ -2,7 +2,7 @@
 // AetherNarrator · utils.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_LABELS, MAX_SOURCE_CHARS } from "./store.js";
+import { DEFAULT_PERIOD_LABELS, LINK_RELATIONS, MAX_SOURCE_CHARS, normalizeTimeConfig } from "./store.js";
 import { applyStateChanges } from "./game.js";
 
 export function deepClone(obj) {
@@ -44,6 +44,7 @@ export function defaultWorldSchema(styleHint) {
                 courage: "勇气", perception: "观察", patience: "耐心", luck: "运气", will: "意志"
             },
             time_periods: DEFAULT_PERIOD_LABELS,
+            time_config: normalizeTimeConfig(null),
             game_over_conditions: ["is_alive === false"]
         };
     }
@@ -103,9 +104,27 @@ export function sanitizeWorldConfig(raw) {
                 scan_depth: (typeof s.scan_depth === "number" && s.scan_depth > 0) ? Math.min(Math.floor(s.scan_depth), 10) : 1,
                 // ★ B4：priority（重要度，预算裁剪时优先保留）+ recursive（是否允许被连带触发）
                 priority: (typeof s.priority === "number") ? Math.max(-10, Math.min(Math.floor(s.priority), 10)) : 0,
-                recursive: s.recursive === false ? false : undefined
+                recursive: s.recursive === false ? false : undefined,
+                // ★ B9：关联链接（Operit 式图谱第一步：metadata-only）
+                links: Array.isArray(s.links) ? s.links.slice(0, 8).map(l => ({
+                    target: typeof l.target === "string" ? l.target.slice(0, 50) : "",
+                    relation: (typeof l.relation === "string" && LINK_RELATIONS.includes(l.relation)) ? l.relation : "related"
+                })).filter(l => l.target && l.target !== s.id) : []
             }))
         };
+    }
+    // ★ B9：校验 links 目标 ID 存在性（二次过滤——删除指向不存在 snippet 的链接）
+    if (out.lore_kb && out.lore_kb.snippets) {
+        const validIds = new Set(out.lore_kb.snippets.map(s => s.id));
+        for (const s of out.lore_kb.snippets) {
+            if (Array.isArray(s.links)) {
+                s.links = s.links.filter(l => validIds.has(l.target));
+            }
+        }
+    }
+    // schema.time_config 归一化（无则回退默认，杜绝非法字段）
+    if (out.schema && typeof out.schema === "object") {
+        out.schema.time_config = normalizeTimeConfig(out.schema.time_config);
     }
     // 递归剔除原型链危险键（防御性）
     const stripDangerousKeys = (obj) => {

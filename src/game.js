@@ -2,15 +2,15 @@
 // AetherNarrator · game.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_ORDER, STORAGE_KEYS, getBannedConcepts } from "./store.js";
-import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
-import { getPeriodLabel, getTemperature, getTimeConfig } from "./theme.js";
+import { DEFAULT_PERIOD_ORDER, DEFAULT_TIME_CONFIG, LINK_RELATION_LABELS, STORAGE_KEYS, getBannedConcepts } from "./store.js";
+import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
+import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
 import { saveSaves, saveState, saveWorlds } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, getWorldLoreKB, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
-import { callLLM, callWorldGenerationLLM, judgeWorldviewConsistency } from "./llm.js";
-import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveList, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
+import { callLLM, callWorldGenerationLLM, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
+import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
 
 export function abortCurrentRequest() {
     if (S.currentAbortController) {
@@ -242,10 +242,26 @@ function renderLoreReviewBody() {
     const body = document.getElementById("loreReviewBody");
     if (!body) return;
     const list = S._loreEdit || [];
+
+    // B5：若有 AI 修订缓冲，顶部展示修订提示
+    const revisionHint = S._loreRevisionBuffer
+        ? `<div class="lore-warn" style="background:rgba(201,168,124,0.1);border-color:var(--primary)">
+            <strong>AI 修订建议已就绪</strong>（${S._loreRevisionBuffer.length} 条）
+            <div style="margin-top:6px;display:flex;gap:8px;">
+                <button class="btn primary" data-action="confirmLoreRevision" style="font-size:12px;padding:3px 12px;">✓ 应用修订</button>
+                <button class="btn secondary" data-action="rejectLoreRevision" style="font-size:12px;padding:3px 12px;">✗ 丢弃</button>
+            </div>
+           </div>`
+        : "";
     const warns = checkLoreQuality(list);
     const warnHtml = warns.length
         ? `<div class="lore-warn"><strong>⚠ 质量提示（${warns.length}）</strong><ul>${warns.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>`
         : `<div class="lore-ok">✓ 未发现明显质量问题</div>`;
+
+    // ★ B8：防剧透遮罩开关
+    const spoilerBtn = `<div class="spoiler-toggle" data-action="toggleLoreSpoiler">${S.loreSpoilerHidden ? "🔒 内容已隐藏（点击查看）" : "🔓 已显示全部"}</div>`;
+    const spoilerClass = S.loreSpoilerHidden ? " lore-spoiler" : "";
+
     const rows = list.map((s, i) => {
         const mode = s.trigger_mode || (s.activation_keys && s.activation_keys.length ? "keyword" : "always");
         return `
@@ -255,8 +271,8 @@ function renderLoreReviewBody() {
                 <input id="le_cat_${i}" class="lore-inp lore-cat" value="${escapeHtml(s.category || "")}" placeholder="类别">
                 <button class="btn-del" data-action="deleteLoreEntry" data-idx="${i}" title="删除此条">删除</button>
             </div>
-            <textarea id="le_content_${i}" class="lore-inp lore-content" placeholder="内容（建议 ≥30 字）">${escapeHtml(s.content || "")}</textarea>
-            <div class="lore-row-meta">
+            <textarea id="le_content_${i}" class="lore-inp lore-content${spoilerClass}" placeholder="内容（建议 ≥30 字）">${escapeHtml(s.content || "")}</textarea>
+            <div class="lore-row-meta${spoilerClass.split(" ")[0]}">
                 <label>触发词<input id="le_keys_${i}" class="lore-inp" value="${escapeHtml((s.activation_keys || []).join("，"))}" placeholder="逗号分隔，如：分院帽，帽子"></label>
                 <label>模式
                     <select id="le_mode_${i}" class="lore-inp lore-sel">
@@ -267,16 +283,17 @@ function renderLoreReviewBody() {
                 </label>
                 <label>优先级<input id="le_pri_${i}" class="lore-inp lore-pri" type="number" value="${Number(s.priority) || 0}"></label>
             </div>
+            ${(s.links && s.links.length) ? `<div class="lore-links">${s.links.map(l => `<span class="lore-link-tag">→ ${escapeHtml(l.target)}（${escapeHtml(LINK_RELATION_LABELS[l.relation] || l.relation)}）</span>`).join(" ")}</div>` : ""}
         </div>`;
     }).join("");
-    body.innerHTML = warnHtml + (rows || `<p style="color:var(--text-secondary);">暂无条目，点下方"添加条目"新建。</p>`);
+    body.innerHTML = spoilerBtn + revisionHint + warnHtml + `<div style="margin-bottom:10px"><button class="btn secondary" data-action="showLoreGraph" style="font-size:12px;padding:4px 12px;">🔗 查看关联图</button></div>` + (rows || `<p style="color:var(--text-secondary);">暂无条目，点下方"添加条目"新建。</p>`);
 }
 
 export function openLoreReview() {
     if (!S.currentWorld) { showToast("请先选择一个世界", "warn"); return; }
-    if (!S.currentWorld.lore_kb) S.currentWorld.lore_kb = { ip: "", snippets: [] };
-    if (!Array.isArray(S.currentWorld.lore_kb.snippets)) S.currentWorld.lore_kb.snippets = [];
-    S._loreEdit = deepClone(S.currentWorld.lore_kb.snippets); // 深拷贝到缓冲，取消不影响原数据
+    if (!S.activeLoreKB) S.activeLoreKB = { ip: "", snippets: [] };
+    if (!Array.isArray(S.activeLoreKB.snippets)) S.activeLoreKB.snippets = [];
+    S._loreEdit = deepClone(S.activeLoreKB.snippets); // 深拷贝到缓冲，取消不影响原数据
     renderLoreReviewBody();
     showModal("loreReviewModal");
 }
@@ -325,8 +342,8 @@ export async function saveLoreReview() {
         if (!Array.isArray(s.keywords) || !s.keywords.length) s.keywords = s.activation_keys.slice();
         delete s.embedding; // 内容可能已改，清空向量以便按需重算
     });
-    S.currentWorld.lore_kb.snippets = list;
-    try { await ensureLoreEmbeddings(S.currentWorld.lore_kb); }
+    S.activeLoreKB.snippets = list;
+    try { await ensureLoreEmbeddings(S.activeLoreKB); }
     catch (e) { console.warn("知识库编辑后向量重算失败，降级关键词：", e.message); }
     saveWorlds();
     S._loreEdit = null;
@@ -354,6 +371,9 @@ export async function startGame(opts = {}) {
         S.gameState = deepClone(defaultInitialState());
         S.gameState.name = S.currentWorld.hero ? "主角" : "玩家";
     }
+
+    // ★ B7：从世界出厂默认深拷贝知识库为当前存档副本（后续编辑只改副本）
+    S.activeLoreKB = S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null;
 
     // ★ P0/P1: 重置缓存 + 聊天历史 + 摘要
     invalidateSystemPromptCache();
@@ -420,6 +440,28 @@ export function doRestartConfirmed() {
     startGame({ resetBehavior: true });
 }
 
+// ★ E12：玩家主动推进时间——休息到次日清晨（向前推进，合法，不触发时间倒流钳制）
+export function restToNextDay() {
+    if (!S.gameState) return;
+    const tc = getTimeConfig();
+    const firstPeriod = tc.periods[0];
+    if (!firstPeriod) return;
+    const nextDay = S.gameState.current_date.day + 1;
+    applyStateChanges({ current_date: { day: nextDay, period: firstPeriod } });
+    S.conversationHistory.push({
+        player: "（休息到次日清晨）",
+        narrative: "你合上眼，再睁开时，天已破晓，新的一天开始了。",
+        retrieved: [],
+        period: firstPeriod,
+        day: nextDay,
+        key_facts: []
+    });
+    renderLog();
+    saveState();
+    createOrUpdateSave();
+    showToast("已休息到次日清晨", "success");
+}
+
 export function loadSave(saveId) {
     abortCurrentRequest(); // ★ P0: 失效在途请求
     const save = S.saves.find(s => s.id === saveId);
@@ -429,6 +471,8 @@ export function loadSave(saveId) {
     S.currentSession.worldId = save.worldId;
     invalidateSystemPromptCache();
     if (save.state) S.gameState = deepClone(save.state);
+    // ★ B7：恢复存档独立知识库（若存档无副本则从 world 出厂默认深拷贝，兼容老存档）
+    S.activeLoreKB = (save.lore_kb) ? deepClone(save.lore_kb) : (S.currentWorld && S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null);
     if (save.history) S.conversationHistory = deepClone(save.history);
     S.chatHistory = save.chatHistory ? deepClone(save.chatHistory) : rebuildChatFromHistory(save.history);
     S.chatSummary = (save.chatSummary && save.chatSummary.length) ? deepClone(save.chatSummary) : rebuildSummaryFromHistory(save.history);
@@ -484,7 +528,7 @@ export function deleteWorld(worldId) {
 export function createOrUpdateSave() {
     if (!S.currentWorld || !S.gameState) return;
     const existing = S.saves.find(s => s.worldId === S.currentWorld.id);
-    const progress = `第 ${S.gameState.current_date.day} 天 · ${getPeriodLabel(S.gameState.current_date.period)}`;
+    const progress = formatWorldTime(S.gameState);
     const now = new Date().toLocaleString("zh-CN", { hour12: false });
     const cleanHistory = S.conversationHistory.filter(e => !e.isWarning);
     const cleanChat = deepClone(S.chatHistory);
@@ -498,12 +542,14 @@ export function createOrUpdateSave() {
         existing.history = JSON.parse(cleanHistoryStr);
         existing.chatHistory = cleanChat;
         existing.chatSummary = S.chatSummary;
+        existing.lore_kb = S.activeLoreKB;  // B7：存档独立知识库副本
     } else {
         S.saves.unshift({
             id: "s" + Date.now(), worldId: S.currentWorld.id, worldName: S.currentWorld.name,
             progress, updatedAt: now,
             state: JSON.parse(stateStr), history: JSON.parse(cleanHistoryStr), chatHistory: cleanChat,
-            chatSummary: [...S.chatSummary]
+            chatSummary: [...S.chatSummary],
+            lore_kb: S.activeLoreKB  // B7：从 world 出厂默认深拷贝的独立副本
         });
     }
     saveSaves();
@@ -711,13 +757,20 @@ export function applyStateChanges(changes) {
 
         const newSeq = seq({ day: tgtDay, period: tgtPeriod });
         if (newSeq >= prevSeq) {
-            s.current_date = { day: tgtDay, period: tgtPeriod };
+            const newClock = (changes.current_date && changes.current_date.clock) || s.current_date.clock;
+            // E10：累加行动耗时的分钟数（clock_mode=clock 时 AI 返回的 clock_minutes）
+            const prevMins = s.current_date.clock_minutes || 0;
+            const addMins = (changes.current_date && typeof changes.current_date.clock_minutes === "number") ? changes.current_date.clock_minutes : 0;
+            const totalMins = prevMins + addMins;
+            const totalH = Math.floor(totalMins / 60);
+            const totalM = totalMins % 60;
+            s.current_date = { day: tgtDay, period: tgtPeriod, clock_minutes: totalMins, clock: newClock || `${String(totalH).padStart(2, "0")}:${String(totalM).padStart(2, "0")}`, ...(newClock ? {} : {}) };
         } else {
             // 非法回退：拒绝，保持原时间，仅记日志（避免"时间倒流 + 跨天"的荒谬状态）
             console.warn("AI 试图回退时间，已忽略", { day: tgtDay, period: tgtPeriod });
         }
     } else if (changes.current_date) {
-        // 自由时间模式（无 period 顺序）：无钳制，直接合并 current_date
+        // 自由时间模式（无 period 顺序）：无钳制，直接合并 current_date（含 relative_label/clock）
         s.current_date = { ...s.current_date, ...changes.current_date };
     }
 
@@ -961,6 +1014,14 @@ export async function processTurn(input) {
 
         createOrUpdateSave();
 
+        // ★ B5：每 20 轮对话后台触发知识库修订（非阻塞，不阻断游戏）
+        if (!isWarning) {
+            const msgCount = S.conversationHistory.filter(e => !e.isWarning).length;
+            if (msgCount >= S.lastLoreReviewMsgCount + 20 && S.activeLoreKB) {
+                triggerLoreRevision(msgCount);
+            }
+        }
+
         renderLog();
 
         if (!isWarning) {
@@ -1027,6 +1088,121 @@ export async function processTurn(input) {
     }
 }
 
+// ★ B5：后台触发知识库修订（非阻塞）
+async function triggerLoreRevision(msgCount) {
+    S.lastLoreReviewMsgCount = msgCount;
+    // 防止短时间内重复触发
+    if (S._loreRevisionBuffer) return;
+    callLoreRevisionLLM().then(snippets => {
+        if (snippets && snippets.length) {
+            S._loreRevisionBuffer = snippets;
+            showToast("知识库已可修订——AI 建议更新 " + snippets.length + " 条条目。进入知识库编辑面板查看。", "success", 5000);
+        }
+    }).catch(() => {});
+}
+
+// ★ B5：确认修订——将缓冲写入 activeLoreKB
+export async function confirmLoreRevision() {
+    if (!S._loreRevisionBuffer || !S._loreRevisionBuffer.length) return;
+    S.activeLoreKB.snippets = S._loreRevisionBuffer;
+    S._loreRevisionBuffer = null;
+    try { await ensureLoreEmbeddings(S.activeLoreKB); } catch (e) {}
+    saveWorlds();
+    closeModal("loreReviewModal");
+    invalidateSystemPromptCache();
+    showToast("知识库已更新！", "success");
+}
+
+// ★ B5：拒绝修订——丢弃缓冲
+export function rejectLoreRevision() {
+    S._loreRevisionBuffer = null;
+    showToast("已丢弃本次 AI 修订建议", "success");
+}
+
+// ★ B8：防剧透遮罩开关
+export function toggleLoreSpoiler() {
+    S.loreSpoilerHidden = !S.loreSpoilerHidden;
+    renderLoreReviewBody();
+}
+
+// ★ B9②：知识库关联图谱可视化（力导向布局 canvas）
+export function showLoreGraph() {
+    const kb = getWorldLoreKB();
+    const snippets = (kb && kb.snippets) || [];
+    const linked = snippets.filter(s => s.links && s.links.length);
+    if (!linked.length) { showToast("暂无关联链接", "warn"); return; }
+    showModal("loreGraphModal");
+    setTimeout(() => renderLoreGraph(snippets), 100);
+}
+
+function renderLoreGraph(snippets) {
+    const canvas = document.getElementById("loreGraphCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const W = 680, H = 420;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const nodeSet = new Set();
+    const rawEdges = [];
+    for (const s of snippets) {
+        if (!s.links || !s.links.length) continue;
+        nodeSet.add(s.id);
+        for (const l of s.links) { nodeSet.add(l.target); rawEdges.push({ from: s.id, to: l.target, relation: l.relation }); }
+    }
+    const id2idx = {};
+    const nodes = [...nodeSet].map((id, i) => {
+        id2idx[id] = i;
+        const snip = snippets.find(s => s.id === id) || {};
+        return { id, label: ((snip.category || "") + ":" + (snip.title || id)).slice(0, 12), x: W / 2 + (Math.random() - 0.5) * 200, y: H / 2 + (Math.random() - 0.5) * 150, vx: 0, vy: 0 };
+    });
+
+    if (nodes.length < 2) { showToast("需要≥2个关联节点", "warn"); closeModal("loreGraphModal"); return; }
+    const REL = { causal: "#ff6464", related: "#6496ff", explains: "#64c864", contains: "#c8b464" };
+    const simEdges = rawEdges.map(e => ({ ai: id2idx[e.from], bi: id2idx[e.to], r: e.relation })).filter(e => e.ai !== undefined && e.bi !== undefined);
+
+    // 200 帧力导向
+    for (let f = 0; f < 200; f++) {
+        const a = Math.max(0.01, 0.5 * (1 - f / 200));
+        for (const n of nodes) { n.vx += (W / 2 - n.x) * 0.0008; n.vy += (H / 2 - n.y) * 0.0008; }
+        for (const e of simEdges) {
+            const u = nodes[e.ai], v = nodes[e.bi];
+            const dx = v.x - u.x, dy = v.y - u.y, d = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            const f = (d - 80) * 0.02; u.vx += dx / d * f; u.vy += dy / d * f; v.vx -= dx / d * f; v.vy -= dy / d * f;
+        }
+        for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+            const dx = nodes[j].x - nodes[i].x, dy = nodes[j].y - nodes[i].y, d = Math.sqrt(dx * dx + dy * dy);
+            if (d < 60 && d > 0) { const f = (60 - d) * 0.05; nodes[i].vx -= dx / d * f; nodes[i].vy -= dy / d * f; nodes[j].vx += dx / d * f; nodes[j].vy += dy / d * f; }
+        }
+        for (const n of nodes) { n.vx *= 0.85; n.vy *= 0.85; n.x += n.vx; n.y += n.vy; n.x = Math.max(30, Math.min(W - 30, n.x)); n.y = Math.max(16, Math.min(H - 16, n.y)); }
+    }
+    ctx.clearRect(0, 0, W, H);
+    for (const e of simEdges) {
+        const u = nodes[e.ai], v = nodes[e.bi];
+        ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(v.x, v.y);
+        ctx.strokeStyle = REL[e.r] || "#888"; ctx.lineWidth = 1; ctx.stroke();
+    }
+    for (const n of nodes) {
+        ctx.beginPath(); ctx.arc(n.x, n.y, 20, 0, Math.PI * 2);
+        ctx.fillStyle = "#222"; ctx.fill(); ctx.strokeStyle = "#c9a87c"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = "#ddd"; ctx.font = "9px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(n.label, n.x, n.y);
+    }
+    let drag = null;
+    canvas.onmousedown = e => {
+        const r = canvas.getBoundingClientRect();
+        const mx = (e.clientX - r.left) * (W / r.width), my = (e.clientY - r.top) * (H / r.height);
+        drag = nodes.find(n => Math.hypot(n.x - mx, n.y - my) < 22);
+    };
+    canvas.onmousemove = e => {
+        if (!drag) return;
+        const r = canvas.getBoundingClientRect();
+        drag.x = (e.clientX - r.left) * (W / r.width); drag.y = (e.clientY - r.top) * (H / r.height);
+        renderLoreGraph(snippets);
+    };
+    canvas.onmouseup = () => { drag = null; };
+}
+
 export function backToHomeAfterGameOver() {
     document.getElementById("gameOverOverlay").classList.remove("show");
     goHome();
@@ -1037,4 +1213,45 @@ export function reviewDeathScene() {
     checkDeathBanner();
     updateInputState();
     renderLog(true);
+}
+
+// ★ C1/C3: 记忆操作（供记忆面板使用）
+export function togglePinMemory(id) {
+    if (!S.currentWorld || !S.currentWorld.behavior_records) return;
+    const r = S.currentWorld.behavior_records.find(b => b.id === id);
+    if (r) { r.pinned = !r.pinned; saveWorlds(); renderStatusPanel(S.currentStatusTab); }
+}
+
+export function deleteMemory(id) {
+    if (!S.currentWorld || !S.currentWorld.behavior_records) return;
+    S.currentWorld.behavior_records = S.currentWorld.behavior_records.filter(b => b.id !== id);
+    saveWorlds();
+    renderStatusPanel(S.currentStatusTab);
+    showToast("记忆已删除", "success");
+}
+
+// ★ E13：时间显示设置面板
+export function showTimeConfigModal() {
+    showModal("timeConfigModal");
+    const schema = getWorldSchema(S.currentWorld);
+    const cfg = (schema && schema.time_config) || DEFAULT_TIME_CONFIG; // fallback
+    document.getElementById("timeConfigEra").value = cfg.era_label || "";
+    document.getElementById("timeConfigCalendar").value = cfg.calendar_mode || "day";
+    document.getElementById("timeConfigClock").value = cfg.clock_mode || "period";
+    document.getElementById("timeConfigSeason").value = cfg.season || "";
+}
+
+export async function saveTimeConfig() {
+    const schema = getWorldSchema(S.currentWorld);
+    if (!schema) return;
+    if (!schema.time_config) schema.time_config = {};
+    schema.time_config.era_label = document.getElementById("timeConfigEra").value.trim().slice(0, 40);
+    schema.time_config.calendar_mode = document.getElementById("timeConfigCalendar").value;
+    schema.time_config.clock_mode = document.getElementById("timeConfigClock").value;
+    schema.time_config.season = document.getElementById("timeConfigSeason").value.trim().slice(0, 10);
+    saveWorlds();
+    closeModal("timeConfigModal");
+    updateGameDayInfo();
+    if (S.currentStatusTab === "timeline") renderStatusPanel("timeline");
+    showToast("时间设置已更新", "success");
 }

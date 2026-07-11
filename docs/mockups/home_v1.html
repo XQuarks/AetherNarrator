@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>界外叙事 · 首页视觉稿 v1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg: #1E1B16;
+    --bg-gradient: radial-gradient(ellipse at 50% -10%, #2E281F 0%, #26221B 38%, #1A1712 100%);
+    --card: rgba(217, 207, 192, 0.05);
+    --card-hover: rgba(217, 207, 192, 0.09);
+    --card-border: rgba(217, 207, 192, 0.12);
+    --card-border-hover: rgba(217, 207, 192, 0.22);
+    --text: #D9CFC0;
+    --text-secondary: rgba(217, 207, 192, 0.62);
+    --text-muted: rgba(217, 207, 192, 0.42);
+    --text-tertiary: rgba(217, 207, 192, 0.30);
+    --primary: #C9A87C;
+    --primary-light: #D8BC9A;
+    --radius-m: 8px;
+    --radius-l: 12px;
+    --mist-a: rgba(201, 168, 124, 0.10);
+    --mist-b: rgba(201, 168, 124, 0.05);
+    --mote: rgba(216, 188, 154, 0.55);
+    --glow: rgba(201, 168, 124, 0.35);
+}
+[data-theme="light"] {
+    --bg: #F3EFE4;
+    --bg-gradient: radial-gradient(ellipse at 50% -10%, #FBF8F1 0%, #F6F2E9 40%, #EFEADD 100%);
+    --card: #FEFCF9;
+    --card-hover: #F8F4EA;
+    --card-border: #E2D9C8;
+    --card-border-hover: #C8BDA5;
+    --text: #383226;
+    --text-secondary: #8C8272;
+    --text-muted: #B0A895;
+    --text-tertiary: #C4BCAA;
+    --primary: #9E7D4E;
+    --primary-light: #B8955E;
+    --mist-a: rgba(158, 125, 78, 0.08);
+    --mist-b: rgba(158, 125, 78, 0.04);
+    --mote: rgba(158, 125, 78, 0.40);
+    --glow: rgba(158, 125, 78, 0.28);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+    height: 100%;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+}
+body {
+    background: var(--bg-gradient);
+    background-color: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    transition: background-color 0.6s ease, color 0.6s ease;
+}
+#motes {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+}
+.mist {
+    position: fixed;
+    inset: -20% -20% -20% -20%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(38% 45% at 22% 30%, var(--mist-a) 0%, transparent 70%),
+        radial-gradient(42% 50% at 80% 24%, var(--mist-b) 0%, transparent 72%),
+        radial-gradient(50% 55% at 60% 88%, var(--mist-a) 0%, transparent 75%);
+    animation: mistDrift 26s ease-in-out infinite alternate;
+}
+@keyframes mistDrift {
+    0%   { transform: translate3d(0,0,0) scale(1); }
+    50%  { transform: translate3d(2.5%, -2%, 0) scale(1.06); }
+    100% { transform: translate3d(-2%, 1.5%, 0) scale(1.03); }
+}
+.vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% 42%, transparent 52%, rgba(0,0,0,0.28) 100%);
+}
+[data-theme="light"] .vignette {
+    background: radial-gradient(ellipse at 50% 42%, transparent 58%, rgba(120,108,84,0.10) 100%);
+}
+.home-content {
+    position: relative;
+    z-index: 2;
+    max-width: 430px;
+    width: 100%;
+    padding: 44px 30px;
+    text-align: center;
+}
+.theme-toggle-btn {
+    position: fixed;
+    top: 18px; right: 18px;
+    z-index: 5;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    border: 1px solid var(--card-border);
+    background: var(--card);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.25s;
+    backdrop-filter: blur(4px);
+}
+.theme-toggle-btn:hover { border-color: var(--primary); color: var(--primary); transform: rotate(18deg); }
+.theme-icon-moon { display: none; }
+[data-theme="light"] .theme-icon-sun { display: none; }
+[data-theme="light"] .theme-icon-moon { display: block; }
+
+.rise { opacity: 0; transform: translateY(14px); animation: rise 0.9s cubic-bezier(.2,.7,.2,1) forwards; }
+@keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+.home-est {
+    font-size: 11px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 18px;
+    animation-delay: .05s;
+}
+.home-title {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 52px;
+    font-weight: 700;
+    letter-spacing: 14px;
+    text-indent: 14px;
+    color: var(--text);
+    margin-bottom: 6px;
+    position: relative;
+    animation-delay: .12s;
+}
+.home-title .glyph {
+    background: linear-gradient(180deg, var(--primary-light) 0%, var(--primary) 60%, #A98456 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.title-sheen {
+    position: absolute; inset: 0;
+    background: linear-gradient(105deg, transparent 40%, rgba(255,245,225,0.55) 50%, transparent 60%);
+    background-size: 250% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+    pointer-events: none;
+    animation: sheen 6.5s ease-in-out 1.2s infinite;
+}
+@keyframes sheen {
+    0%, 62% { background-position: 180% 0; }
+    100% { background-position: -60% 0; }
+}
+.home-subtitle-en {
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--text-muted);
+    margin-bottom: 22px;
+    animation-delay: .18s;
+    white-space: nowrap;
+}
+.divider {
+    display: flex; align-items: center; justify-content: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    animation-delay: .24s;
+}
+.divider .line {
+    height: 1px; width: 74px;
+    background: linear-gradient(90deg, transparent, var(--card-border-hover));
+}
+.divider .line.r { background: linear-gradient(270deg, transparent, var(--card-border-hover)); }
+.divider .rune {
+    width: 9px; height: 9px;
+    transform: rotate(45deg);
+    border: 1px solid var(--primary);
+    position: relative;
+}
+.divider .rune::after {
+    content: ""; position: absolute; inset: 2px;
+    background: var(--primary); opacity: .55;
+}
+.home-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+    margin-bottom: 34px;
+    animation-delay: .3s;
+}
+.menu-grid { display: flex; flex-direction: column; gap: 12px; }
+.menu-btn {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-m);
+    padding: 15px 18px;
+    cursor: pointer;
+    text-align: left;
+    transition: transform .2s, background .2s, border-color .2s, box-shadow .3s;
+    display: flex; align-items: center; gap: 14px;
+    width: 100%;
+    color: var(--text);
+    position: relative;
+    overflow: hidden;
+}
+.menu-btn .ic {
+    flex: 0 0 auto;
+    width: 34px; height: 34px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(201,168,124,0.10);
+    color: var(--primary);
+    transition: all .25s;
+}
+.menu-btn .txt { flex: 1 1 auto; min-width: 0; }
+.menu-btn .label { font-size: 15px; font-weight: 500; display: block; margin-bottom: 2px; }
+.menu-btn .desc { font-size: 12px; color: var(--text-muted); display: block; line-height: 1.4; }
+.menu-btn .chev { color: var(--text-tertiary); transition: transform .25s, color .25s; }
+.menu-btn:hover {
+    background: var(--card-hover);
+    border-color: var(--card-border-hover);
+    transform: translateY(-2px);
+}
+.menu-btn:hover .ic { background: rgba(201,168,124,0.18); transform: scale(1.06); }
+.menu-btn:hover .chev { transform: translateX(3px); color: var(--primary); }
+.menu-btn:active { transform: translateY(0); }
+
+.menu-btn.primary-btn {
+    background: linear-gradient(180deg, rgba(201,168,124,0.16), rgba(201,168,124,0.07));
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0 var(--glow);
+    /* 入场 rise + 持续呼吸 breathe 合并，避免 breathe 覆盖 rise 导致按钮卡在 opacity:0 不可见 */
+    animation: rise 0.9s cubic-bezier(.2,.7,.2,1) .36s forwards, breathe 4.2s ease-in-out 1.3s infinite;
+}
+.menu-btn.primary-btn .ic { background: rgba(201,168,124,0.22); }
+.menu-btn.primary-btn .label { color: var(--primary-light); font-weight: 600; }
+[data-theme="light"] .menu-btn.primary-btn .label { color: var(--primary); }
+.menu-btn.primary-btn .chev { color: var(--primary); }
+/* 不再设 animation:none，否则会回退到 .rise 的 opacity:0 而在悬停时消失 */
+.menu-btn.primary-btn:hover { border-color: var(--primary-light); }
+@keyframes breathe {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(201,168,124,0.0); }
+    50% { box-shadow: 0 4px 20px var(--glow); }
+}
+.menu-btn.d1 { animation-delay: .36s; }
+.menu-btn.d2 { animation-delay: .44s; }
+.menu-btn.d3 { animation-delay: .52s; }
+.menu-btn.d4 { animation-delay: .60s; }
+
+.home-disclaimer {
+    margin-top: 30px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    line-height: 1.6;
+    animation-delay: .7s;
+}
+.home-foot {
+    margin-top: 12px;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    animation-delay: .78s;
+}
+.toast {
+    position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(20px);
+    background: var(--card); border: 1px solid var(--card-border-hover);
+    color: var(--text); padding: 10px 18px; border-radius: 999px;
+    font-size: 13px; z-index: 20; opacity: 0; transition: all .3s;
+    backdrop-filter: blur(6px); pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+@media (max-width: 480px) {
+    .home-title { font-size: 42px; letter-spacing: 10px; text-indent: 10px; }
+    .home-content { padding: 36px 22px; }
+    .home-subtitle-en { letter-spacing: 2px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .rise, .mist, .title-sheen, .menu-btn.primary-btn { animation: none; }
+    .rise { opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="motes"></canvas>
+<div class="mist"></div>
+<div class="vignette"></div>
+
+<button class="theme-toggle-btn" id="themeToggle" title="切换白天/夜间模式">
+    <svg class="theme-icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    <svg class="theme-icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+
+<div class="home-content">
+    <p class="home-est rise">Est. 2026</p>
+    <h1 class="home-title rise"><span class="glyph">界外叙事</span><span class="title-sheen">界外叙事</span></h1>
+    <p class="home-subtitle-en rise">Romancing on the Outer</p>
+    <div class="divider rise"><span class="line"></span><span class="rune"></span><span class="line r"></span></div>
+    <p class="home-subtitle rise">自定义世界 · AI 生成 · 自由冒险</p>
+
+    <div class="menu-grid">
+        <button class="menu-btn primary-btn rise d1" data-toast="进入世界 · 选择或创建你的世界">
+            <span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+            <span class="txt"><span class="label">进入世界</span><span class="desc">选择已创建的世界开始游玩，或创建新世界</span></span>
+            <span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+        </button>
+        <button class="menu-btn rise d2" data-toast="读取存档 · 管理各世界的进度">
+            <span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></span>
+            <span class="txt"><span class="label">读取存档</span><span class="desc">管理不同世界的游玩进度</span></span>
+            <span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+        </button>
+        <button class="menu-btn rise d3" data-toast="API 配置 · 填写 AI 接口密钥">
+            <span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+            <span class="txt"><span class="label">API 配置</span><span class="desc">填写 AI 接口密钥</span></span>
+            <span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+        </button>
+        <button class="menu-btn rise d4" data-toast="选项 · 字体大小 · 显示设置">
+            <span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+            <span class="txt"><span class="label">选项</span><span class="desc">字体大小 · 显示设置</span></span>
+            <span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+        </button>
+    </div>
+
+    <div class="home-disclaimer rise">内容由 AI 生成，仅供参考。请认真辨别信息，勿将虚构内容视为事实。</div>
+    <div class="home-foot rise">纯前端 · 零后端 · 数据仅存于本地浏览器</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const root = document.documentElement;
+root.setAttribute('data-theme', 'dark');
+document.getElementById('themeToggle').addEventListener('click', () => {
+    root.setAttribute('data-theme', root.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+});
+const toast = document.getElementById('toast');
+let toastTimer = null;
+document.querySelectorAll('.menu-btn').forEach(b => {
+    b.addEventListener('click', () => {
+        toast.textContent = '视觉稿演示 — ' + b.dataset.toast;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 1900);
+    });
+});
+
+const canvas = document.getElementById('motes');
+const ctx = canvas.getContext('2d');
+let W, H, motes = [];
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    const n = Math.min(46, Math.floor(W * H / 26000));
+    motes = Array.from({length: n}, () => ({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.6 + 0.5,
+        vy: -(Math.random() * 0.25 + 0.06),
+        vx: (Math.random() - 0.5) * 0.16,
+        a: Math.random() * 0.5 + 0.2,
+        tw: Math.random() * 0.02 + 0.005
+    }));
+}
+resize();
+window.addEventListener('resize', resize);
+function moteColor() {
+    return getComputedStyle(root).getPropertyValue('--mote').trim() || 'rgba(216,188,154,0.5)';
+}
+function tick() {
+    ctx.clearRect(0, 0, W, H);
+    const base = moteColor();
+    for (const m of motes) {
+        m.y += m.vy; m.x += m.vx; m.a += m.tw;
+        if (m.y < -6) { m.y = H + 6; m.x = Math.random() * W; }
+        if (m.x < -6) m.x = W + 6; if (m.x > W + 6) m.x = -6;
+        const alpha = 0.35 + Math.sin(m.a) * 0.3;
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+        ctx.fillStyle = base.replace(/[\d.]+\)$/g, (Math.max(0.05, alpha)).toFixed(2) + ')');
+        ctx.fill();
+    }
+    requestAnimationFrame(tick);
+}
+tick();
+</script>
+</body>
+</html>

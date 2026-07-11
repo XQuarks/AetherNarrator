@@ -2,7 +2,7 @@
 // AetherNarrator · theme.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_LABELS, DEFAULT_PERIOD_ORDER } from "./store.js";
+import { DEFAULT_PERIOD_LABELS, DEFAULT_PERIOD_ORDER, normalizeTimeConfig, calendarLabel } from "./store.js";
 import { getWorldSchema } from "./utils.js";
 import { showToast } from "./render.js";
 import { applyStateChanges } from "./game.js";
@@ -10,13 +10,14 @@ import { applyStateChanges } from "./game.js";
 export function getTimeConfig() {
     const schema = getWorldSchema(S.currentWorld);
     const mode = (S.gameState && S.gameState.time_mode) || (schema && schema.time_mode) || "periods";
+    const timeConfig = schema && schema.time_config ? normalizeTimeConfig(schema.time_config) : normalizeTimeConfig(null);
     if (schema && schema.time_periods && !schema.periods) {
         const keys = Object.keys(schema.time_periods);
-        return { mode, periods: keys, labels: schema.time_periods };
+        return { mode, periods: keys, labels: schema.time_periods, timeConfig };
     }
     const periods = (schema && schema.periods) || DEFAULT_PERIOD_ORDER;
     const labels = (schema && schema.period_labels) || DEFAULT_PERIOD_LABELS;
-    return { mode, periods, labels };
+    return { mode, periods, labels, timeConfig };
 }
 
 export function getPeriodLabel(periodKey) {
@@ -37,6 +38,53 @@ export function getNextPeriod(period) {
     if (idx < 0) return tc.periods[0];
     // 如果是最后一个时段，回到第一个（跨天由 applyStateChanges 处理）
     return tc.periods[(idx + 1) % tc.periods.length];
+}
+
+// 时段→默认时钟时间（E4 兜底：morning→06:00，每时段+3h）
+export function periodClockFallback(period) {
+    const tc = getTimeConfig();
+    const idx = tc.periods.indexOf(period);
+    const startHour = 6 + Math.max(0, idx) * 3;
+    const h = ((startHour % 24) + 24) % 24;
+    return String(h).padStart(2, "0") + ":00";
+}
+
+// 组合显示当前时间（E6）：纪元 · 季节 · 日期 · 时刻
+export function formatWorldTime(state) {
+    if (!state || !state.current_date) return "";
+    const tc = getTimeConfig();
+    const cfg = tc.timeConfig;
+    if (!cfg || cfg.show === false) {
+        if (tc.mode === "hidden") return state.current_location || "";
+        if (tc.mode === "continuous") return state.current_date.relative_label || state.current_date.period || "";
+        return `第 ${state.current_date.day} 天 · ${getPeriodLabel(state.current_date.period)}`;
+    }
+    const parts = [];
+    if (cfg.era_label) parts.push(cfg.era_label);
+    if (cfg.season) parts.push(cfg.season);
+    if (cfg.calendar_mode && cfg.calendar_mode !== "none") {
+        parts.push(calendarLabel(state.current_date.day, cfg.calendar_mode));
+    } else if (cfg.calendar_mode !== "none") {
+        parts.push(`第${state.current_date.day}天`);
+    }
+    if (cfg.clock_mode === "clock") {
+        parts.push(state.current_date.clock || periodClockFallback(state.current_date.period));
+    } else if (cfg.clock_mode !== "none") {
+        parts.push(getPeriodLabel(state.current_date.period));
+    }
+    return parts.join(" · ");
+}
+
+// 简短时间标签（用于日志/经历条目）：日期 · 时刻
+export function formatTimeShort(day, period, clock) {
+    const tc = getTimeConfig();
+    const cfg = tc.timeConfig;
+    const cal = (cfg && cfg.calendar_mode && cfg.calendar_mode !== "none") ? calendarLabel(day, cfg.calendar_mode) : `第${day}天`;
+    let clk;
+    if (cfg && cfg.clock_mode === "clock") clk = clock || periodClockFallback(period);
+    else if (cfg && cfg.clock_mode === "none") clk = "";
+    else clk = getPeriodLabel(period);
+    return [cal, clk].filter(Boolean).join(" · ");
 }
 
 export function toggleTheme() {

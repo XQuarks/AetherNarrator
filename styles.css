@@ -1354,6 +1354,38 @@
         [data-theme="light"] .theme-icon-moon { display: block; }
         [data-theme="light"] .theme-icon-sun { display: none; }
 
+        .timeline-list { display: flex; flex-direction: column; gap: 10px; }
+        .timeline-item { display: flex; flex-direction: column; gap: 2px; padding-left: 12px; border-left: 2px solid var(--card-border); }
+        .timeline-time { font-size: 11px; color: var(--text-secondary); }
+        .timeline-text { font-size: 13px; line-height: 1.5; color: var(--text); }
+
+        .memory-hint { font-size: 11px; color: var(--text-secondary); margin: -4px 0 10px; }
+        .memory-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+        .memory-card.pinned { border-color: var(--primary-light); background: var(--card-hover); }
+        .memory-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
+        .memory-type { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(201,168,124,0.15); color: var(--primary); }
+        .memory-stars { font-size: 11px; color: var(--primary); }
+        .memory-time { font-size: 10px; color: var(--text-secondary); margin-left: auto; }
+        .memory-body { font-size: 13px; line-height: 1.6; color: var(--text); margin-bottom: 4px; }
+        .memory-meta { font-size: 11px; color: var(--text-secondary); margin: 2px 0; }
+        .memory-actions { display: flex; gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--card-border); }
+        .mem-act { font-size: 11px; padding: 3px 10px; border: 1px solid var(--card-border); border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+        .mem-act:hover { border-color: var(--primary); color: var(--text); }
+        .mem-act.danger { color: var(--danger); border-color: transparent; }
+        .mem-act.danger:hover { border-color: var(--danger); }
+
+        .npc-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 13px; }
+        .npc-name { font-weight: 500; color: var(--primary); min-width: 60px; }
+        .npc-act { color: var(--text-secondary); font-style: normal; }
+        .world-summary { font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+
+        .lore-links { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+        .lore-link-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: rgba(201,168,124,0.12); color: var(--primary); }
+
+        .spoiler-toggle { font-size: 12px; padding: 6px 10px; margin-bottom: 10px; border-radius: 6px; cursor: pointer; text-align: center; border: 1px dashed var(--card-border); color: var(--text-secondary); }
+        .spoiler-toggle:hover { border-color: var(--primary); color: var(--primary); }
+        .lore-spoiler { filter: blur(6px); user-select: none; pointer-events: none; }
+
         /* ================= 移动端适配 ================= */
         @media (max-width: 480px) {
             .home-title { font-size: 42px; letter-spacing: 10px; text-indent: 10px; }
@@ -1367,13 +1399,10 @@
             .status-panel { max-width: 100%; }
         }
 
-        /* ★ P3.2.17: 尊重 prefers-reduced-motion，关闭非必要动画 */
+        /* ★ F1: 减弱动效时只关无限循环装饰动画（雾漂移/标题流光/按钮呼吸），
+           保留一次性入场动画（.rise 等）以确保页面内容正常显示。 */
         @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after {
-                animation-duration: 0.001ms !important;
-                animation-iteration-count: 1 !important;
-                transition-duration: 0.001ms !important;
-                scroll-behavior: auto !important;
-            }
+            .mist, .title-sheen, .menu-btn { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
+            * { transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
         }
     

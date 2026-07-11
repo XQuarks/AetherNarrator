@@ -1,10 +1,10 @@
 // ============================================================
 // AetherNarrator · render.js（由 app.js 模块化拆分自动生成）
 // ============================================================
-import { S } from "./store.js";
+import { S, calendarLabel, MEMORY_TYPE_LABELS } from "./store.js";
 
 import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema } from "./utils.js";
-import { getPeriodLabel, getTimeConfig, updateFontSizeButtons, updateTempLabel } from "./theme.js";
+import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, updateFontSizeButtons, updateTempLabel } from "./theme.js";
 import { abortCurrentRequest, chooseOption, confirmRestart, continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./game.js";
 
 export function showScreen(id) {
@@ -300,6 +300,8 @@ export function renderStatusTabs() {
         tabs.push({ key: "skills", label: schema.skill_label || "技能" });
     }
     tabs.push({ key: "goals", label: "目标" });
+    tabs.push({ key: "memory", label: "记忆" });
+    tabs.push({ key: "timeline", label: "时间线" });
 
     document.getElementById("statusTabs").innerHTML = tabs.map(t => `
         <button class="status-tab ${S.currentStatusTab === t.key ? "active" : ""}" data-action="switchStatusTab" data-key="${t.key}">${t.label}</button>
@@ -348,7 +350,7 @@ export function renderStatusPanel(tab) {
                         <div class="row"><span class="label">姓名</span><span class="value">${escapeHtml(s.name)}</span></div>
                         <div class="row"><span class="label">年龄</span><span class="value">${s.age}</span></div>
                         <div class="row"><span class="label">当前地点</span><span class="value">${escapeHtml(s.current_location)}</span></div>
-                        <div class="row"><span class="label">时间</span><span class="value">第 ${s.current_date.day} 天 · ${escapeHtml(getPeriodLabel(s.current_date.period))}</span></div>
+                        <div class="row"><span class="label">时间</span><span class="value">${escapeHtml(formatWorldTime(s))}</span></div>
                     </div>
                 </div>
                 <div class="status-section">
@@ -400,7 +402,7 @@ export function renderStatusPanel(tab) {
                     <div class="status-section-title">当前状态</div>
                     <div class="status-card">
                         <div class="row"><span class="label">地点</span><span class="value">${escapeHtml(s.current_location)}</span></div>
-                        <div class="row"><span class="label">时间</span><span class="value">第 ${s.current_date.day} 天 · ${escapeHtml(getPeriodLabel(s.current_date.period))}</span></div>
+                        <div class="row"><span class="label">时间</span><span class="value">${escapeHtml(formatWorldTime(s))}</span></div>
                         <div class="row"><span class="label">${escapeHtml(schema.progression_label || "等级")}</span><span class="value">${escapeHtml(s.progression.rank)}</span></div>
                     </div>
                 </div>
@@ -476,21 +478,113 @@ export function renderStatusPanel(tab) {
             `;
             break;
         }
+
+        case "memory": {
+            const records = (S.currentWorld && S.currentWorld.behavior_records) || [];
+            const sorted = [...records].sort((a, b) => {
+                if (a.pinned && !b.pinned) return -1;
+                if (!a.pinned && b.pinned) return 1;
+                return (b.importance || 3) - (a.importance || 3);
+            });
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">行为记忆 · ${records.length}/100</div>
+                    <div class="memory-hint">AI 记录的角色经历。★越多越重要（会被优先注入叙事上下文）。</div>
+                    ${sorted.length ? sorted.map(r => `
+                        <div class="memory-card ${r.pinned ? 'pinned' : ''}">
+                            <div class="memory-header">
+                                <span class="memory-type type-${r.type || 'other'}">${escapeHtml(MEMORY_TYPE_LABELS[r.type] || (r.type || '其他'))}</span>
+                                <span class="memory-stars">${'★'.repeat(r.importance || 3)}${'☆'.repeat(5 - (r.importance || 3))}</span>
+                                <span class="memory-time">${escapeHtml(r.time || '')}</span>
+                            </div>
+                            <div class="memory-body">${escapeHtml(r.text || '')}</div>
+                            ${r.location ? `<div class="memory-meta">📍 ${escapeHtml(r.location)}</div>` : ''}
+                            ${(r.npcs || []).length ? `<div class="memory-meta">👤 ${(r.npcs || []).slice(0, 5).map(n => escapeHtml(n)).join(', ')}${(r.npcs || []).length > 5 ? '…' : ''}</div>` : ''}
+                            <div class="memory-actions">
+                                <button class="mem-act" data-action="togglePinMemory" data-id="${r.id}">${r.pinned ? '📌 取消置顶' : '📌 置顶'}</button>
+                                <button class="mem-act danger" data-action="deleteMemory" data-id="${r.id}">🗑 删除</button>
+                            </div>
+                        </div>
+                    `).join("") : '<div class="empty-hint">暂无行为记忆。开始游玩后，AI 会把重要事件记录在这里。</div>'}
+                </div>`;
+            break;
+        }
+
+        case "timeline": {
+            const tc = getTimeConfig();
+            const cfg = tc.timeConfig;
+            const gs = S.gameState;
+
+            // E8 世界时限
+            const dlHtml = (cfg && cfg.deadlines && cfg.deadlines.length) ? `
+                <div class="status-section">
+                    <div class="status-section-title">世界时限</div>
+                    <div class="status-card">
+                        ${cfg.deadlines.map(d => `<div class="row"><span class="label">${escapeHtml(d.title)}</span><span class="value">${escapeHtml(calendarLabel(d.day, cfg.calendar_mode))} ${escapeHtml(getPeriodLabel(d.period))}</span></div>`).join("")}
+                    </div>
+                </div>` : "";
+
+            // D1a NPC 动态
+            const npc = (gs && gs.npc_activity && Object.keys(gs.npc_activity).length) ? Object.entries(gs.npc_activity) : [];
+            const npcHtml = npc.length ? `
+                <div class="status-section">
+                    <div class="status-section-title">🏘️ NPC 动态</div>
+                    <div class="status-card">
+                        ${npc.slice(0, 10).map(([name, activity]) => `
+                            <div class="npc-row"><span class="npc-name">${escapeHtml(name)}</span><span class="npc-act">${escapeHtml(String(activity || ''))}</span></div>
+                        `).join("")}
+                        ${npc.length > 10 ? `<div class="empty-hint" style="padding:4px 0">…还有 ${npc.length - 10} 位 NPC</div>` : ''}
+                    </div>
+                </div>` : "";
+
+            // D1b 事件进度
+            const completed = (gs && gs.completed_events) || [];
+            const activeEvent = (gs && gs.active_event) || null;
+            let eventsHtml = "";
+            if (activeEvent || completed.length) {
+                eventsHtml += `<div class="status-section"><div class="status-section-title">⚡ 事件</div><div class="status-card">`;
+                if (activeEvent) {
+                    eventsHtml += `<div class="row"><span class="label">🔵 进行中</span><span class="value">${escapeHtml(String(activeEvent))}</span></div>`;
+                }
+                if (completed.length) {
+                    eventsHtml += `<div class="row"><span class="label">✅ 已完成 (${completed.length})</span><span class="value">${completed.slice(-5).map(e => escapeHtml(e)).join(", ")}${completed.length > 5 ? "…" : ""}</span></div>`;
+                }
+                eventsHtml += `</div></div>`;
+            }
+
+            // D1c 世界状态摘要
+            const location = (gs && gs.current_location) ? gs.current_location : "未知地点";
+            const activeGoals = (gs && gs.goals) ? gs.goals.filter(g => g.visible !== false && g.status === "active").length : 0;
+            const summaryText = `你当前在「${location}」。${npc.length ? npc.length + ' 位 NPC 正在活动，' : ''}${completed.length ? '已完成 ' + completed.length + ' 个事件' : '暂无完成事件'}。${activeGoals > 0 ? '当前有 ' + activeGoals + ' 个活跃目标。' : ''}`;
+
+            // 经历时间线
+            const entries = (S.conversationHistory || [])
+                .map((e, i) => ({ ...e, _i: i }))
+                .filter(e => e.narrative && !e.isWarning)
+                .sort((a, b) => (a.day - b.day) || (tc.periods.indexOf(a.period) - tc.periods.indexOf(b.period)));
+            const tlHtml = entries.length ? entries.map(e => `
+                <div class="timeline-item">
+                    <div class="timeline-time">${escapeHtml(formatTimeShort(e.day, e.period, e.clock))}</div>
+                    <div class="timeline-text">${escapeHtml((e.narrative || "").slice(0, 80))}${(e.narrative || "").length > 80 ? "…" : ""}</div>
+                </div>`).join("") : '<div class="empty-hint">暂无经历记录</div>';
+
+            container.innerHTML = dlHtml + npcHtml + eventsHtml + `
+                <div class="status-section">
+                    <div class="status-section-title">🌍 世界状态</div>
+                    <div class="status-card world-summary">${escapeHtml(summaryText)}</div>
+                </div>
+                <div class="status-section">
+                    <div class="status-section-title">📜 我的经历</div>
+                    <div class="status-card timeline-list">${tlHtml}</div>
+                </div>`;
+            break;
+        }
     }
 }
 
 export function updateGameDayInfo() {
     if (!S.gameState) return;
-    const tc = getTimeConfig();
-    if (tc.mode === "hidden") {
-        document.getElementById("gameDayInfo").textContent = S.gameState.current_location || "";
-        return;
-    }
-    if (tc.mode === "continuous") {
-        document.getElementById("gameDayInfo").textContent = S.gameState.current_date.period || "";
-        return;
-    }
-    document.getElementById("gameDayInfo").textContent = `第 ${S.gameState.current_date.day} 天 · ${getPeriodLabel(S.gameState.current_date.period)}`;
+    document.getElementById("gameDayInfo").textContent = formatWorldTime(S.gameState);
 }
 
 export function highlightItems(text) {
@@ -521,7 +615,7 @@ export function renderLog(reset) {
         const html = `
         <div class="log-entry${warningClass}">
             <div class="meta">
-                <span>${metaLabel} · 第${entry.day}天 ${getPeriodLabel(entry.period)}</span>
+                <span>${metaLabel} · ${escapeHtml(formatTimeShort(entry.day, entry.period, entry.clock))}</span>
             </div>
             ${entry.player ? `<div class="player-text">${escapeHtml(entry.player)}</div>` : ""}
             <div class="narrative">${entry.isWarning ? escapeHtml(entry.narrative) : highlightItems(entry.narrative)}</div>

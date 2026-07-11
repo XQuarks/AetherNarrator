@@ -4,7 +4,7 @@
 import { S } from "./store.js";
 import { CHAT_ANCHOR_MSGS, CHAT_RECENT_MSGS, LORE_FULL_THRESHOLD, MAX_CHAT_MESSAGES, SYSTEM_ROLES, DEFAULT_BANNED_CONCEPTS, getBannedConcepts } from "./store.js";
 import { dedupeStrings, getWorldSchema } from "./utils.js";
-import { getTimeConfig } from "./theme.js";
+import { getTimeConfig, formatWorldTime } from "./theme.js";
 import { getWorldLoreKB } from "./rag.js";
 
 export function buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix) {
@@ -70,6 +70,7 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - attribute_labels: 属性中文映射，键为 courage/perception/patience/luck/will，值为中文名
    - time_mode: "periods"（按时段推进）| "continuous"（自由时间描述，period填任意字符串）| "hidden"（不展示时间）
    - time_periods: 时间段映射，如 {"morning":"早晨", ...}（periods 模式必填，可自定义任意数量和名称）
+   - time_config: 时间系统统一配置对象（可选，强烈建议填写以增强沉浸感）：{ era_label: "纪元/年份，如「建安十三年」「星际历70498」「明朝末年」，无则留空", calendar_mode: "day"(第N天) | "gregorian"(月日+星期) | "lunar"(阴历月日) | "custom_calendar"(新历法) | "none"(不显示日期), clock_mode: "period"(时段标签) | "clock"(具体时钟) | "none", season: "春/夏/秋/冬/自定义，可空", show: true, deadlines: [] }。根据 IP 自动判定：历史/科幻填 era_label，国风/武侠填 lunar，校园/都市填 gregorian，星际/架空填 custom_calendar 或 none。
 
 2. initial_state: 玩家初始状态对象。**主角的初始能力/身份/技能必须如实反映主角设定中的描述**，不要将其降级为初学者。包含：
    - name, age, background, personality（数组）
@@ -92,7 +93,9 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
 3. lore_kb: 知识库对象，包含：
    - ip: 世界名
    - snippets: 数组，每条包含 {id, category（必须覆盖以下类型：规则/地点/人物/事件/物品/势力/冲突）, title, content, keywords（数组）, trigger（仅"事件"类需要，见下）, activation_keys（数组，运行时触发词）, trigger_mode（"keyword"|"regex"|"always"）, scan_depth（数字）, priority（数字，可选，重要度，见下）}
-   - 触发控制字段说明（用于"按需注入"，替代每轮全量注入以节省 token）：activation_keys 为玩家输入/最近对话中出现任一即触发本条注入的词语（请尽量含同义词/别称，如"分院帽"可同时写"分院帽","分院","帽子"）；trigger_mode 默认 "keyword"（子串匹配 activation_keys），可选 "regex"（把 activation_keys 当正则匹配）、"always"（本条永远注入，适合世界观规则等常驻知识）；scan_depth 为扫描"当前输入 + 最近 N-1 轮对话"的轮数，默认 1（只看当前输入），范围 1-5。建议：规则/世界观类用 "always"；人物/地点/物品/事件类用 "keyword" 并给足 activation_keys。priority 为可选的重要度（整数，范围 -10~10，默认 0），当同轮触发条数超出 token 预算时，引擎优先保留 priority 高的条目——世界观核心/主线人物可给 2~5，边缘补充设定可给 0 或负数。
+   - 触发控制字段说明（用于"按需注入"……）。priority 为可选的重要度（整数，范围 -10~10，默认 0），当同轮触发条数超出 token 预算时，引擎优先保留 priority 高的条目——世界观核心/主线人物可给 2~5，边缘补充设定可给 0 或负数。
+
+   每条 snippet 还可包含可选字段 links（关联链接，Operit 式图谱）：[{target: "另一条 snippet 的 id", relation: "causal"(因果)/"related"(相关)/"explains"(解释)/"contains"(包含)}]。例如黛玉葬花→前世之缘可标 causal（前世因果导致今生葬花），人物卡→其住所地点可标 contains。links 为可选，可以不填。
 
    各 category 要求：
    - 冲突（至少 2 条）：世界的核心矛盾与张力，谁和谁对立，为什么，玩家可能被卷入哪一方。示例：金玉良缘vs木石前盟、家族利益vs个人情感、正邪之争。
@@ -228,10 +231,24 @@ export function buildTimeModeRules() {
         return "本世界不展示时间。叙事中不提及具体时间，不更新 period 字段，只推进剧情。";
     }
     if (tc.mode === "continuous") {
-        return `本世界使用连续时间制。叙事中自由描述时间感（如"又过了三个小时""天快黑了"），period 字段可填任意描述性字符串。不用"早晨/上午"等固定标签，也不用 day 计数。`;
+        return `本世界使用连续时间制。叙事中自由描述时间感（如"又过了三个小时""天快黑了"），period 字段可填任意描述性字符串。不用"早晨/上午"等固定标签，也不用 day 计数。
+
+## 相对时间锚点（E5）
+你可以在 state_changes.current_date 中返回 relative_label 字段，作为当前时间点的叙事锚点。例如：
+- "你来到这里的第三年"
+- "赤壁之战前夜"
+- "雪停之后的第三天清晨"
+
+锚点一旦设定，后续叙事应以此为参照推进时间（如"锚点之后又过了两个月"），**不得**在未跨越重大时间节点时擅自重置或倒退锚点。锚点变更时 AI 应在叙事中自然交代时间跨度。`;
     }
     const periodList = tc.periods.map(p => tc.labels[p] || p).join(" → ");
     const periodDesc = tc.periods.map((p, i) => `${tc.labels[p] || p}（\`${p}\`）`).join("、");
+    const cfg = tc.timeConfig;
+    let timeExtra = "";
+    if (cfg && cfg.era_label) timeExtra += `当前纪元/年份：${cfg.era_label}。`;
+    if (cfg && cfg.calendar_mode && cfg.calendar_mode !== "none") timeExtra += `本世界历法为「${cfg.calendar_mode}」，叙事中可用对应的月日/季节表达时间（如阴历「三月初九」）。`;
+    if (cfg && cfg.season) timeExtra += `当前季节：${cfg.season}。`;
+    if (cfg && cfg.clock_mode === "clock") timeExtra += `本世界使用具体时钟制。每次行动可将耗时分钟数填入 state_changes.current_date.clock_minutes（如 15=15 分钟），系统自动累加并换算时钟显示。典型耗时：短应答 5 分钟、勘察/聊天 15 分钟、远行 60 分钟、重大事件 120 分钟。`;
     return `本世界时段顺序：${periodList} → 下一天${tc.labels[tc.periods[0]] || tc.periods[0]}。
 
 时段含义：${periodDesc}。
@@ -265,7 +282,10 @@ export function buildTimeModeRules() {
 - 只在该行动明显会消耗较长时间时才推进。宁可保守（不推进）也不激进（乱推进）。
 - 如果拿不准该不该推进 → 不推进。让玩家感受到每一天都充实而不过快。
 
-日期追踪：叙事中用"次日清晨""又过了一日"或"第N天"等自然表达，AI 根据剧情自行判断哪种更贴合当前叙事氛围。每个世界可有多于或少于5个时段，时段名称由世界设定决定。`;
+## NPC 随时段刷新（E9）
+每次推进 period 后，必须在 state_changes.npc_activity 中更新 NPC 的当前活动描述，反映新时段下 NPC 在做什么（如早晨贾母在花厅喝茶→午前贾母在佛堂念佛→午后贾母小憩）。未推进时段时无需更新。非关键 NPC 简要描述即可。
+
+日期追踪：叙事中用"次日清晨""又过了一日"或"第N天"等自然表达，AI 根据剧情自行判断哪种更贴合当前叙事氛围。每个世界可有多于或少于5个时段，时段名称由世界设定决定。\n\n${timeExtra}`;
 }
 
 export function buildHeroContext() {
@@ -368,6 +388,7 @@ export function buildCompactGameState() {
         background: S.gameState.background || (S.currentWorld && S.currentWorld.hero ? S.currentWorld.hero : "未指定"),
         current_location: S.gameState.current_location,
         current_date: S.gameState.current_date,
+        time_label: formatWorldTime(S.gameState),
         attributes: S.gameState.attributes,
         progression: S.gameState.progression,
         relationships: S.gameState.relationships,
@@ -543,7 +564,15 @@ export function buildAuthorNote() {
 export function getRecentKeyFacts(count) {
     if (!S.currentWorld || !S.currentWorld.behavior_records) return [];
     const records = S.currentWorld.behavior_records;
-    return records.slice(-count).map(r => r.text);
+    // C3：按重要性+pinned 排序——高重要度的事实优先注入，pinned 置顶
+    const sorted = [...records].sort((a, b) => {
+        const ap = a.pinned ? 10 : 0;
+        const bp = b.pinned ? 10 : 0;
+        const ai = (typeof a.importance === "number" ? a.importance : 3);
+        const bi = (typeof b.importance === "number" ? b.importance : 3);
+        return (bp + bi) - (ap + ai);
+    });
+    return sorted.slice(0, count).map(r => r.text);
 }
 
 export function pushChatTurn(userContent, parsed) {
@@ -570,17 +599,23 @@ export function pushChatTurn(userContent, parsed) {
 export function summarizeTurn(parsed) {
     const narrative = (parsed.narrative || "").trim();
     if (!narrative) return null;
-    // 取叙事文本的前 2 个句子（按中文句号/感叹号/问号/省略号分割）
     const sentences = narrative.split(/[。！？…]/).filter(s => s.trim().length > 5);
     if (!sentences.length) return narrative.slice(0, 80);
-    // 取第 1-2 句，拼接成摘要
-    const first = sentences[0].trim();
-    const second = sentences[1] ? sentences[1].trim() : "";
-    let result = first;
-    if (second && (first + second).length < 120) result += second;
+    // ★ C2 递归摘要优化：取最后 2 句（关键转折/结果通常在叙事尾部），而非前 2 句（通常是场景铺垫）
+    const last2 = sentences.slice(-2).map(s => s.trim()).filter(Boolean);
+    let result = last2.join("。");
+    // 附加关键状态变更标签（地点/关系），让摘要包含"发生了什么变化"的锚点
+    const extra = [];
     if (parsed.state_changes && parsed.state_changes.current_location) {
-        result += "（地点变更为" + parsed.state_changes.current_location + "）";
+        extra.push("地点→" + parsed.state_changes.current_location);
     }
+    if (parsed.state_changes && parsed.state_changes.relationships) {
+        const rels = Object.entries(parsed.state_changes.relationships)
+            .filter(([, v]) => v && String(v).trim())
+            .slice(0, 2);
+        if (rels.length) extra.push(rels.map(([k]) => k).join("、"));
+    }
+    if (extra.length) result += "（" + extra.join("；") + "）";
     return result.slice(0, 150);
 }
 
