@@ -134,15 +134,12 @@
         </div>
         <div class="header-actions">
             <button data-action="showStatusPanel">角色</button>
-            <button data-action="toggleTheme" id="gameThemeToggle" title="切换白天/夜间模式" style="display:flex;align-items:center;gap:3px;">
+            <button data-action="toggleTheme" id="gameThemeToggle" title="切换白天/夜间模式">
                 <svg class="theme-icon-sun" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                 <svg class="theme-icon-moon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             </button>
-            <button data-action="showAuthorNoteModal" title="设定持续剧情约束（作者注）">导演</button>
-            <button data-action="showTimeConfigModal" title="调整时间显示（纪元/历法/季节）">⏰</button>
-            <button data-action="restToNextDay" title="休息到次日清晨">休息</button>
             <button data-action="goHome">返回主界面</button>
-            <button data-action="exportStory" title="导出剧情文本">导出</button>
+            <button data-action="showGameSettings" style="font-size:18px;line-height:1;padding:4px 8px;">⚙</button>
         </div>
     </div>
     <div class="death-banner hidden" id="deathBanner">
@@ -469,68 +466,21 @@
     </div>
 </div>
 
-<!-- ================= 时间设置弹窗（E13） ================= -->
-<div class="modal-overlay" id="timeConfigModal">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="timeConfigModalTitle">
+<!-- ================= 游戏设置弹窗 ================= -->
+<div class="modal-overlay" id="gameSettingsModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="gameSettingsTitle">
         <div class="modal-header">
-            <h2 id="timeConfigModalTitle">时间显示设置</h2>
-            <button class="modal-close" data-action="closeModal" data-modal="timeConfigModal">×</button>
+            <h2 id="gameSettingsTitle">游戏设置</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="gameSettingsModal">×</button>
         </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>纪元 / 年份</label>
-                <input type="text" id="timeConfigEra" placeholder="如：建安十三年、星际历70498（留空则不显示）" maxlength="40">
-                <div class="hint">留空则不显示纪元，仅显示日期和时刻。</div>
-            </div>
-            <div class="form-group">
-                <label>历法模式</label>
-                <select id="timeConfigCalendar">
-                    <option value="day">天数计数（第N天）</option>
-                    <option value="gregorian">公历（月日 + 星期）</option>
-                    <option value="lunar">阴历（正月、初二…）</option>
-                    <option value="custom_calendar">新历法（新月N·N日）</option>
-                    <option value="none">无日期</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>时钟模式</label>
-                <select id="timeConfigClock">
-                    <option value="period">时段标签（晨起/午后…）</option>
-                    <option value="clock">具体时钟（06:00 起）</option>
-                    <option value="none">不显示时刻</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>季节</label>
-                <input type="text" id="timeConfigSeason" placeholder="如：春、仲夏、深秋（留空则不显示）" maxlength="10">
-            </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;">
+            <button class="btn" data-action="showAuthorNoteModal" style="text-align:left;">✍️ 导演提示（作者注）</button>
+            <button class="btn" data-action="toggleTheme" style="text-align:left;">🌓 切换日间 / 夜间模式</button>
+            <button class="btn" data-action="toggleLoreSpoilerSettings" style="text-align:left;">🔒 / 🔓 知识库防剧透</button>
+            <button class="btn" data-action="exportStory" style="text-align:left;">📄 导出剧情文本</button>
         </div>
         <div class="modal-footer">
-            <button class="btn secondary" data-action="closeModal" data-modal="timeConfigModal">取消</button>
-            <button class="btn primary" data-action="saveTimeConfig">确认</button>
-        </div>
-    </div>
-</div>
-
-<!-- ================= 知识库图谱弹窗（B9②） ================= -->
-<div class="modal-overlay" id="loreGraphModal">
-    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="loreGraphModalTitle">
-        <div class="modal-header">
-            <h2 id="loreGraphModalTitle">知识库关联图谱</h2>
-            <button class="modal-close" data-action="closeModal" data-modal="loreGraphModal">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-                <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(255,100,100,0.15);color:#ff6464;">因果</span>
-                <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(100,150,255,0.15);color:#6496ff;">相关</span>
-                <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(100,200,100,0.15);color:#64c864;">解释</span>
-                <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(200,180,100,0.15);color:#c8b464;">包含</span>
-            </div>
-            <canvas id="loreGraphCanvas" width="680" height="420" style="width:100%;height:auto;border-radius:8px;background:var(--card-bg);"></canvas>
-            <div class="hint" style="margin-top:4px;text-align:center;">节点可拖动。Click 查看详情。</div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn primary" data-action="closeModal" data-modal="loreGraphModal">关闭</button>
+            <button class="btn primary" data-action="closeModal" data-modal="gameSettingsModal">关闭</button>
         </div>
     </div>
 </div>
