@@ -8,13 +8,12 @@ import { applyFontSize, applyTheme, changeFontSize, toggleTheme, updateTempLabel
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig } from "./storage.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel } from "./render.js";
-import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportStory, generateWorld, goHome, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, saveTimeConfig, showAuthorNoteModal, showLoreGraph, showSaveList, showTimeConfigModal, showWorldList, startGame, submitInput, toggleLoreSpoiler, togglePinMemory } from "./game.js";
+import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportStory, generateWorld, goHome, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, saveTimeConfig, showAuthorNoteModal, showGameSettings, showLoreGraph, showSaveList, showTimeConfigModal, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreSpoilerSettings, togglePinMemory } from "./game.js";
 
 async function init() {
     applyTheme();
     applyFontSize();
     loadConfig();
-    loadSaves();
 
     // 逐个加载数据文件，各自独立降级，一个失败不影响其他
     try {
@@ -48,6 +47,8 @@ async function init() {
 
     // loreKB 已就绪，现在创建 demo 世界
     loadWorlds();
+    // 存档迁移依赖世界模板（用于旧知识库/行为记忆的兼容复制），必须后加载。
+    loadSaves();
 
     const savedHistory = localStorage.getItem(STORAGE_KEYS.history);
     if (savedHistory) {
@@ -126,6 +127,7 @@ document.addEventListener("input", dispatchEvent);
 const ACTIONS = {
     // 通用 UI
     toggleTheme: () => toggleTheme(),
+    showGameSettings: () => showGameSettings(),
     showApiModal: () => showApiModal(),
     showWorldList: () => showWorldList(),
     showSaveList: () => showSaveList(),
@@ -187,6 +189,8 @@ const ACTIONS = {
     confirmLoreRevision: () => confirmLoreRevision(),
     rejectLoreRevision: () => rejectLoreRevision(),
     toggleLoreSpoiler: () => toggleLoreSpoiler(),
+    toggleLoreSpoilerSettings: () => toggleLoreSpoilerSettings(),
+    toggleAIEnhanced: () => toggleAIEnhanced(),
     showLoreGraph: () => showLoreGraph(),
 };
 

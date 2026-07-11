@@ -2,7 +2,7 @@
 // AetherNarrator · game.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_ORDER, DEFAULT_TIME_CONFIG, LINK_RELATION_LABELS, STORAGE_KEYS, getBannedConcepts } from "./store.js";
+import { DEFAULT_PERIOD_ORDER, DEFAULT_TIME_CONFIG, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
 import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
 import { saveSaves, saveState, saveWorlds } from "./storage.js";
@@ -11,6 +11,8 @@ import { addBehaviorRecords, ensureLoreEmbeddings, getWorldLoreKB, retrieve, sum
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
 import { callLLM, callWorldGenerationLLM, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
 import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
+import { LATEST_SAVE_SCHEMA_VERSION, migrateSaveRecord } from "./migrations.js";
+import { filterStateChangesByWorldview, findWorldviewViolations, shouldRunAIEnhancements } from "./worldview.js";
 
 export function abortCurrentRequest() {
     if (S.currentAbortController) {
@@ -345,7 +347,7 @@ export async function saveLoreReview() {
     S.activeLoreKB.snippets = list;
     try { await ensureLoreEmbeddings(S.activeLoreKB); }
     catch (e) { console.warn("知识库编辑后向量重算失败，降级关键词：", e.message); }
-    saveWorlds();
+    createOrUpdateSave();
     S._loreEdit = null;
     closeModal("loreReviewModal");
     showToast(`知识库已保存（${list.length} 条）`, "success");
@@ -358,11 +360,11 @@ export async function startGame(opts = {}) {
     stopTypewriter();
     S.currentSession.worldId = S.currentWorld.id;
 
-    // ★ P0: 新周目清空行为记忆，避免跨周目污染（继续游戏走 loadSave，不清空）
-    if (opts.resetBehavior !== false) {
-        S.currentWorld.behavior_records = [];
-        saveWorlds();
-    }
+    // 新周目使用独立运行态；世界模板永不承载游玩过程中产生的记忆。
+    S.activeBehaviorRecords = [];
+    S.aiEnhanced = !!S.currentWorld.ai_enhanced_default;
+    S.lastLoreReviewMsgCount = 0;
+    S._loreRevisionBuffer = null;
 
     // 加载该世界的初始状态
     if (S.currentWorld.initial_state) {
@@ -464,7 +466,8 @@ export function restToNextDay() {
 
 export function loadSave(saveId) {
     abortCurrentRequest(); // ★ P0: 失效在途请求
-    const save = S.saves.find(s => s.id === saveId);
+    const stored = S.saves.find(s => s.id === saveId);
+    const save = stored ? migrateSaveRecord(stored, S.worlds.find(w => w.id === stored.worldId)) : null;
     if (!save) return;
     stopTypewriter();
     S.currentWorld = S.worlds.find(w => w.id === save.worldId);
@@ -473,6 +476,10 @@ export function loadSave(saveId) {
     if (save.state) S.gameState = deepClone(save.state);
     // ★ B7：恢复存档独立知识库（若存档无副本则从 world 出厂默认深拷贝，兼容老存档）
     S.activeLoreKB = (save.lore_kb) ? deepClone(save.lore_kb) : (S.currentWorld && S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null);
+    S.activeBehaviorRecords = deepClone(save.behavior_records || []);
+    S.aiEnhanced = save.ai_enhanced === true;
+    S.lastLoreReviewMsgCount = save.last_lore_review_msg_count || 0;
+    S._loreRevisionBuffer = deepClone(save.pending_lore_revision || null);
     if (save.history) S.conversationHistory = deepClone(save.history);
     S.chatHistory = save.chatHistory ? deepClone(save.chatHistory) : rebuildChatFromHistory(save.history);
     S.chatSummary = (save.chatSummary && save.chatSummary.length) ? deepClone(save.chatSummary) : rebuildSummaryFromHistory(save.history);
@@ -542,14 +549,24 @@ export function createOrUpdateSave() {
         existing.history = JSON.parse(cleanHistoryStr);
         existing.chatHistory = cleanChat;
         existing.chatSummary = S.chatSummary;
-        existing.lore_kb = S.activeLoreKB;  // B7：存档独立知识库副本
+        existing.schema_version = LATEST_SAVE_SCHEMA_VERSION;
+        existing.lore_kb = deepClone(S.activeLoreKB);
+        existing.behavior_records = deepClone(S.activeBehaviorRecords);
+        existing.ai_enhanced = S.aiEnhanced === true;
+        existing.last_lore_review_msg_count = S.lastLoreReviewMsgCount;
+        existing.pending_lore_revision = deepClone(S._loreRevisionBuffer);
     } else {
         S.saves.unshift({
             id: "s" + Date.now(), worldId: S.currentWorld.id, worldName: S.currentWorld.name,
             progress, updatedAt: now,
             state: JSON.parse(stateStr), history: JSON.parse(cleanHistoryStr), chatHistory: cleanChat,
             chatSummary: [...S.chatSummary],
-            lore_kb: S.activeLoreKB  // B7：从 world 出厂默认深拷贝的独立副本
+            schema_version: LATEST_SAVE_SCHEMA_VERSION,
+            lore_kb: deepClone(S.activeLoreKB),
+            behavior_records: deepClone(S.activeBehaviorRecords),
+            ai_enhanced: S.aiEnhanced === true,
+            last_lore_review_msg_count: S.lastLoreReviewMsgCount,
+            pending_lore_revision: deepClone(S._loreRevisionBuffer)
         });
     }
     saveSaves();
@@ -565,26 +582,12 @@ export function applyStateChanges(changes) {
     const s = S.gameState;
     validateStateShape(changes);   // #7 完善：异常状态类型告警
 
-    // ★ A4 state_changes 世界观校验（自由度 ≤3）：扫描文本叶子与键名，命中则就地删除并警告（不阻断回合）
-    const bannedA4 = getBannedConcepts();
-    if (bannedA4.length) {
-        const removed = [];
-        const stripBanned = (obj) => {
-            if (!obj || typeof obj !== "object") return;
-            for (const key of Object.keys(obj)) {
-                const v = obj[key];
-                if (bannedA4.some(c => key.includes(c))) { removed.push(key); delete obj[key]; continue; }
-                if (typeof v === "string") {
-                    if (bannedA4.some(c => v.includes(c))) { removed.push(key); delete obj[key]; }
-                } else if (v && typeof v === "object") {
-                    stripBanned(v);
-                }
-            }
-        };
-        stripBanned(changes);
-        if (removed.length) {
-            showToast("⚠️ 已忽略与世界观不符的状态变更：" + removed.join("、"), "warn", 4000);
-        }
+    // A4：先在副本上按结构化规则过滤，调用方响应对象保持不变。
+    const guard = filterStateChangesByWorldview(changes, getBannedConceptRules(), getActiveConditionTags());
+    changes = guard.changes;
+    if (guard.violations.length) {
+        const labels = [...new Set(guard.violations.map(v => v.matched))].slice(0, 4);
+        showToast("⚠️ 已忽略与世界观不符的状态变更：" + labels.join("、"), "warn", 4000);
     }
 
     // ★ A6 解锁标签运算（在 banned 扫描之后、应用之前）：
@@ -953,9 +956,9 @@ export async function processTurn(input) {
             applyStateChanges(resp.state_changes);
 
             // ★ A2 生成后世界观合规守卫（柔和提醒，不阻断回合）
-            const banned = getBannedConcepts();
-            if (banned.length && resp.narrative) {
-                const hit = banned.find(c => resp.narrative.includes(c));
+            const localViolations = findWorldviewViolations(resp.narrative, getBannedConceptRules(), getActiveConditionTags());
+            if (localViolations.length) {
+                const hit = localViolations[0].matched;
                 if (hit) {
                     showToast("⚠️ 叙事似乎偏离了世界观（出现「" + hit + "」），若非有意为之可重述或忽略。", "warn", 4000);
                 }
@@ -963,7 +966,12 @@ export async function processTurn(input) {
 
             // ★ A7 AI 灵活世界观裁判（语义判断是否超出世界观，非阻断，仅提示）
             // 异步进行，不阻塞回合渲染；裁判只看世界设定+叙事，不被玩家输入带偏
-            judgeWorldviewConsistency(resp.narrative, resp.state_changes, { playerInput: input }).then(result => {
+            const judgeEnabled = shouldRunAIEnhancements({
+                enabled: S.aiEnhanced,
+                freedom: S.currentWorld && S.currentWorld.plot_freedom,
+                hasLore: !!(S.activeLoreKB && S.activeLoreKB.snippets && S.activeLoreKB.snippets.length)
+            });
+            if (judgeEnabled) judgeWorldviewConsistency(resp.narrative, resp.state_changes, { playerInput: input }).then(result => {
                 if (result && result.consistent === false && result.violations && result.violations.length) {
                     const v = result.violations.slice(0, 2).join("、");
                     const msg = result.severity === "hard"
@@ -1017,7 +1025,7 @@ export async function processTurn(input) {
         // ★ B5：每 20 轮对话后台触发知识库修订（非阻塞，不阻断游戏）
         if (!isWarning) {
             const msgCount = S.conversationHistory.filter(e => !e.isWarning).length;
-            if (msgCount >= S.lastLoreReviewMsgCount + 20 && S.activeLoreKB) {
+            if (S.aiEnhanced && msgCount >= S.lastLoreReviewMsgCount + 20 && S.activeLoreKB) {
                 triggerLoreRevision(msgCount);
             }
         }
@@ -1096,6 +1104,7 @@ async function triggerLoreRevision(msgCount) {
     callLoreRevisionLLM().then(snippets => {
         if (snippets && snippets.length) {
             S._loreRevisionBuffer = snippets;
+            createOrUpdateSave();
             showToast("知识库已可修订——AI 建议更新 " + snippets.length + " 条条目。进入知识库编辑面板查看。", "success", 5000);
         }
     }).catch(() => {});
@@ -1107,7 +1116,7 @@ export async function confirmLoreRevision() {
     S.activeLoreKB.snippets = S._loreRevisionBuffer;
     S._loreRevisionBuffer = null;
     try { await ensureLoreEmbeddings(S.activeLoreKB); } catch (e) {}
-    saveWorlds();
+    createOrUpdateSave();
     closeModal("loreReviewModal");
     invalidateSystemPromptCache();
     showToast("知识库已更新！", "success");
@@ -1116,6 +1125,7 @@ export async function confirmLoreRevision() {
 // ★ B5：拒绝修订——丢弃缓冲
 export function rejectLoreRevision() {
     S._loreRevisionBuffer = null;
+    createOrUpdateSave();
     showToast("已丢弃本次 AI 修订建议", "success");
 }
 
@@ -1217,15 +1227,38 @@ export function reviewDeathScene() {
 
 // ★ C1/C3: 记忆操作（供记忆面板使用）
 export function togglePinMemory(id) {
-    if (!S.currentWorld || !S.currentWorld.behavior_records) return;
-    const r = S.currentWorld.behavior_records.find(b => b.id === id);
-    if (r) { r.pinned = !r.pinned; saveWorlds(); renderStatusPanel(S.currentStatusTab); }
+    const r = S.activeBehaviorRecords.find(b => b.id === id);
+    if (r) { r.pinned = !r.pinned; createOrUpdateSave(); renderStatusPanel(S.currentStatusTab); }
+}
+
+export function toggleLoreSpoilerSettings() {
+    S.loreSpoilerHidden = !S.loreSpoilerHidden;
+    closeModal("gameSettingsModal");
+    showToast(S.loreSpoilerHidden ? "知识库已隐藏" : "知识库已显示", "success");
+}
+
+function updateAIEnhancedButton() {
+    const button = document.getElementById("aiEnhancedToggle");
+    if (button) button.textContent = S.aiEnhanced
+        ? "🧠 AI 增强检查：已开启"
+        : "🧠 AI 增强检查：已关闭";
+}
+
+export function showGameSettings() {
+    updateAIEnhancedButton();
+    showModal("gameSettingsModal");
+}
+
+export function toggleAIEnhanced() {
+    S.aiEnhanced = !S.aiEnhanced;
+    updateAIEnhancedButton();
+    createOrUpdateSave();
+    showToast(S.aiEnhanced ? "AI 增强检查已开启（会产生额外 API 调用）" : "AI 增强检查已关闭", "success", 3500);
 }
 
 export function deleteMemory(id) {
-    if (!S.currentWorld || !S.currentWorld.behavior_records) return;
-    S.currentWorld.behavior_records = S.currentWorld.behavior_records.filter(b => b.id !== id);
-    saveWorlds();
+    S.activeBehaviorRecords = S.activeBehaviorRecords.filter(b => b.id !== id);
+    createOrUpdateSave();
     renderStatusPanel(S.currentStatusTab);
     showToast("记忆已删除", "success");
 }

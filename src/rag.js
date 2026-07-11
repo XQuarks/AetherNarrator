@@ -5,7 +5,6 @@ import { S } from "./store.js";
 import { MEMORY_TYPES } from "./store.js";
 
 import { cosineSimilarity, isFuzzyFact, normFact } from "./utils.js";
-import { saveWorlds } from "./storage.js";
 import { getPeriodLabel } from "./theme.js";
 import { buildTurnUserMessage, isLoreFullInSystem } from "./prompt.js";
 import { showToast } from "./render.js";
@@ -228,7 +227,7 @@ export async function retrieve(input) {
     }
 
     // 加入玩家行为记录
-    const behavior = retrieveBehaviorRecords(input, 3);
+    const behavior = await retrieveBehaviorRecords(input, 3);
     for (const b of behavior) {
         merged.set("behavior_" + b.id, { snippet: { id: "behavior_" + b.id, category: "行为记录", title: "关键事实", content: b.text }, kw: 1.5, emb: 0 });
     }
@@ -317,8 +316,7 @@ export async function retrieve(input) {
 }
 
 export async function retrieveBehaviorRecords(input, topK = 3) {
-    if (!S.currentWorld || !S.currentWorld.behavior_records) return [];
-    const records = S.currentWorld.behavior_records.filter(b => b.pinned !== false);
+    const records = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords : [];
     if (!records.length) return [];
 
     // ★ C4：向量语义检索优先（"黛玉病了"→"黛玉咳血"），关键词兜底
@@ -357,8 +355,8 @@ export async function retrieveBehaviorRecords(input, topK = 3) {
 
 export function addBehaviorRecords(facts) {
     if (!S.currentWorld || !facts || !facts.length) return;
-    if (!S.currentWorld.behavior_records) S.currentWorld.behavior_records = [];
-    const list = S.currentWorld.behavior_records;
+    if (!Array.isArray(S.activeBehaviorRecords)) S.activeBehaviorRecords = [];
+    const list = S.activeBehaviorRecords;
     const gs = S.gameState;
     const timeLabel = gs && gs.current_date
         ? `第${gs.current_date.day}天 · ${getPeriodLabel(gs.current_date.period)}`
@@ -387,14 +385,13 @@ export function addBehaviorRecords(facts) {
             createdAt: new Date().toISOString()
         });
     }
-    if (list.length > 100) S.currentWorld.behavior_records = list.slice(-100);
-    saveWorlds();
+    if (list.length > 100) S.activeBehaviorRecords = list.slice(-100);
 }
 
 // ★ C4：后台异步补算所有行为记忆的向量 embedding（"黛玉病了"→"黛玉咳血" 语义匹配）
 export async function ensureBehaviorEmbeddings() {
     if (typeof window.transformers === "undefined") return;
-    const records = S.currentWorld && S.currentWorld.behavior_records;
+    const records = S.activeBehaviorRecords;
     if (!records || !records.length) return;
     for (const r of records) {
         if (r.embedding) continue;
@@ -402,7 +399,6 @@ export async function ensureBehaviorEmbeddings() {
             r.embedding = await computeEmbedding(r.text);
         } catch (e) { /* 单条失败不阻塞其余 */ }
     }
-    saveWorlds();
 }
 
 export function summarizeFactsFromChanges(input, narrative, changes) {

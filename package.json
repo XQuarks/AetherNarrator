@@ -1,1 +1,16 @@
-{ "type": "module" }
+{
+  "name": "aethernarrator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check:syntax": "node tools/syntax_check.cjs",
+    "check:modules": "node tools/verify-modules.cjs",
+    "check:load": "node tools/load-check.mjs",
+    "verify": "npm run check:syntax && npm run check:modules && npm run check:load && npm test"
+  },
+  "devDependencies": {
+    "acorn": "^8.17.0",
+    "acorn-walk": "^8.3.5"
+  }
+}

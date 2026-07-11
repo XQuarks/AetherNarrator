@@ -480,7 +480,7 @@ export function renderStatusPanel(tab) {
         }
 
         case "memory": {
-            const records = (S.currentWorld && S.currentWorld.behavior_records) || [];
+            const records = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords : [];
             const sorted = [...records].sort((a, b) => {
                 if (a.pinned && !b.pinned) return -1;
                 if (!a.pinned && b.pinned) return 1;

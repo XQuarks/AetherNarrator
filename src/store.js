@@ -8,6 +8,8 @@ export const S = {
   loreKB: null,
   loreEmbeddings: null,
   activeLoreKB: null,   // ★ B7：当前存档的独立知识库副本（开局时从 world.lore_kb 深拷贝，编辑仅改此副本）
+  activeBehaviorRecords: [], // 当前存档的独立行为记忆；世界对象只作旧数据迁移来源
+  aiEnhanced: false,    // 当前存档的额外 AI 检查总开关
   conversationHistory: [],
   chatHistory: [],
   chatSummary: [],
@@ -258,4 +260,14 @@ export function getBannedConcepts() {
         if (!unlocked) banned.push(concept);
     }
     return banned;
+}
+
+// 返回当前世界的原始结构化规则；过滤与解释由 worldview.js 统一完成。
+export function getBannedConceptRules() {
+    const w = S.currentWorld;
+    const freedom = (w && typeof w.plot_freedom === "number") ? w.plot_freedom : 3;
+    if (freedom >= 4) return [];
+    return (w && Array.isArray(w.bannedConcepts) && w.bannedConcepts.length)
+        ? w.bannedConcepts
+        : DEFAULT_BANNED_CONCEPTS;
 }

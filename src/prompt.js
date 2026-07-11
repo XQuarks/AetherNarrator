@@ -562,8 +562,7 @@ export function buildAuthorNote() {
 }
 
 export function getRecentKeyFacts(count) {
-    if (!S.currentWorld || !S.currentWorld.behavior_records) return [];
-    const records = S.currentWorld.behavior_records;
+    const records = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords : [];
     // C3：按重要性+pinned 排序——高重要度的事实优先注入，pinned 置顶
     const sorted = [...records].sort((a, b) => {
         const ap = a.pinned ? 10 : 0;

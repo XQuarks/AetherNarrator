@@ -563,8 +563,9 @@ function getWorldLoreForJudge() {
     const parts = [];
     if (w.world_description) parts.push("【世界背景】\n" + w.world_description);
     if (w.hero) parts.push("【主角设定】\n" + w.hero);
-    if (w.lore_kb && Array.isArray(w.lore_kb.snippets)) {
-        const snips = w.lore_kb.snippets;
+    const activeLore = getWorldLoreKB();
+    if (activeLore && Array.isArray(activeLore.snippets)) {
+        const snips = activeLore.snippets;
         // 优先取与「世界观边界」最相关的类别，确保裁判有充分依据
         const priority = ["规则", "人物", "地点", "阵营", "物品", "事件", "时间线"];
         const picked = [];
@@ -702,7 +703,7 @@ export async function callLoreRevisionLLM() {
     const corsProxy = document.getElementById("corsProxy") && document.getElementById("corsProxy").value.trim() || "";
     const apiUrl = buildApiUrl(baseUrl, corsProxy);
 
-    const behaviorRecords = (S.currentWorld && S.currentWorld.behavior_records) ? S.currentWorld.behavior_records.slice(-20) : [];
+    const behaviorRecords = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords.slice(-20) : [];
     const recentFacts = behaviorRecords.map(r => r.text).filter(Boolean).join("；");
     const recentChat = (S.conversationHistory || []).slice(-10).map(e => (e.player ? "玩家：" + e.player : "") + "\n" + (e.narrative || "").slice(0, 200)).join("\n\n");
 

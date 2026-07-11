@@ -5,6 +5,7 @@ import { S } from "./store.js";
 import { STORAGE_KEYS } from "./store.js";
 import { deepClone, defaultWorldSchema } from "./utils.js";
 import { closeModal, showToast } from "./render.js";
+import { migrateSaveRecord, migrateWorldRecord } from "./migrations.js";
 
 export function loadConfig() {
     const cfg = JSON.parse(localStorage.getItem(STORAGE_KEYS.config) || "{}");
@@ -18,10 +19,10 @@ export function loadConfig() {
 
 export function loadWorlds() {
     const data = localStorage.getItem(STORAGE_KEYS.worlds);
-    S.worlds = data ? JSON.parse(data) : [
+    S.worlds = (data ? JSON.parse(data) : [
         createMagicAcademyWorld(),
         createHongLouMengWorld()
-    ];
+    ]).map(migrateWorldRecord);
     // 迁移：旧世界的清理与新的 demo 注入
     let changed = false;
     // 删除旧的蒸汽与魔法 demo
@@ -306,7 +307,12 @@ export function createMagicAcademyWorld() {
 
 export function loadSaves() {
     const data = localStorage.getItem(STORAGE_KEYS.saves);
-    S.saves = data ? JSON.parse(data) : [];
+    const raw = data ? JSON.parse(data) : [];
+    S.saves = raw.map(save => migrateSaveRecord(
+        save,
+        S.worlds.find(world => world.id === save.worldId) || null
+    ));
+    if (data && JSON.stringify(raw) !== JSON.stringify(S.saves)) saveSaves();
 }
 
 export function saveWorlds() {
