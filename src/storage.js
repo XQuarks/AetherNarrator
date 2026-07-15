@@ -6,9 +6,10 @@ import { STORAGE_KEYS } from "./store.js";
 import { deepClone, defaultWorldSchema } from "./utils.js";
 import { closeModal, showToast } from "./render.js";
 import { migrateSaveRecord, migrateWorldRecord, parseStoredArray, parseStoredObject } from "./migrations.js";
+import { idbGet, idbSet, idbDel } from "./idb.js";
 
-export function loadConfig() {
-    const parsed = parseStoredObject(localStorage.getItem(STORAGE_KEYS.config), {});
+export async function loadConfig() {
+    const parsed = parseStoredObject(await idbGet(STORAGE_KEYS.config), {});
     if (!parsed.ok) console.warn("API 配置损坏，已使用默认配置；原 localStorage 未覆盖", parsed.error);
     const cfg = parsed.value;
     document.getElementById("baseUrl").value = cfg.baseUrl || "https://api.deepseek.com";
@@ -19,8 +20,8 @@ export function loadConfig() {
     document.getElementById("noStreamMode").checked = cfg.noStreamMode === true;
 }
 
-export function loadWorlds() {
-    const data = localStorage.getItem(STORAGE_KEYS.worlds);
+export async function loadWorlds() {
+    const data = await idbGet(STORAGE_KEYS.worlds);
     const defaults = [
         createMagicAcademyWorld(),
         createHongLouMengWorld()
@@ -44,7 +45,7 @@ export function loadWorlds() {
         S.worlds.push(createMagicAcademyWorld());
         changed = true;
     }
-    if (changed) saveWorlds();
+    if (changed) saveWorlds().catch(() => {});
 }
 
 export function createDemoWorld(name, type, desc, tags) {
@@ -310,8 +311,8 @@ export function createMagicAcademyWorld() {
     };
 }
 
-export function loadSaves() {
-    const data = localStorage.getItem(STORAGE_KEYS.saves);
+export async function loadSaves() {
+    const data = await idbGet(STORAGE_KEYS.saves);
     const parsed = parseStoredArray(data, []);
     if (!parsed.ok) console.warn("存档数据损坏，已进入空列表兼容模式；原 localStorage 未覆盖", parsed.error);
     const raw = parsed.value;
@@ -319,33 +320,30 @@ export function loadSaves() {
         save,
         S.worlds.find(world => world.id === save.worldId) || null
     ));
-    if (parsed.ok && data && JSON.stringify(raw) !== JSON.stringify(S.saves)) saveSaves();
+    if (parsed.ok && data && JSON.stringify(raw) !== JSON.stringify(S.saves)) saveSaves().catch(() => {});
 }
 
-export function saveWorlds() {
-    localStorage.setItem(STORAGE_KEYS.worlds, JSON.stringify(S.worlds));
+export async function saveWorlds() {
+    await idbSet(STORAGE_KEYS.worlds, JSON.stringify(S.worlds));
 }
 
-export function saveSaves() {
-    localStorage.setItem(STORAGE_KEYS.saves, JSON.stringify(S.saves));
+export async function saveSaves() {
+    await idbSet(STORAGE_KEYS.saves, JSON.stringify(S.saves));
 }
 
-export function saveState(serialized) {
+export async function saveState(serialized) {
     // 如果调用方已预序列化，直接使用，避免重复 JSON.stringify
     const stateStr = serialized ? serialized.state : JSON.stringify(S.gameState);
     const historyStr = serialized ? serialized.history : JSON.stringify(S.conversationHistory);
     const chatStr = serialized ? serialized.chatHistory : JSON.stringify(S.chatHistory);
-    try {
-        localStorage.setItem(STORAGE_KEYS.state, stateStr);
-        localStorage.setItem(STORAGE_KEYS.history, historyStr);
-        localStorage.setItem(STORAGE_KEYS.chatHistory, chatStr);
-        localStorage.setItem(STORAGE_KEYS.chatSummary, JSON.stringify(S.chatSummary));
-    } catch (e) {
-        console.warn("localStorage 写入失败，可能空间不足", e);
-    }
+    // 索引数据库写入为异步；idbSet 内部已吞错，调用方可不等待（fire-and-forget）
+    await idbSet(STORAGE_KEYS.state, stateStr);
+    await idbSet(STORAGE_KEYS.history, historyStr);
+    await idbSet(STORAGE_KEYS.chatHistory, chatStr);
+    await idbSet(STORAGE_KEYS.chatSummary, JSON.stringify(S.chatSummary));
 }
 
-export function saveConfig() {
+export async function saveConfig() {
     const cfg = {
         baseUrl: document.getElementById("baseUrl").value.trim(),
         corsProxy: document.getElementById("corsProxy").value.trim(),
@@ -354,11 +352,18 @@ export function saveConfig() {
         mockMode: document.getElementById("mockMode").checked,
         noStreamMode: document.getElementById("noStreamMode").checked
     };
-    localStorage.setItem(STORAGE_KEYS.config, JSON.stringify(cfg));
+    await idbSet(STORAGE_KEYS.config, JSON.stringify(cfg));
 }
 
-export function saveApiConfig() {
-    saveConfig();
+export async function saveApiConfig() {
+    await saveConfig();
     closeModal("apiModal");
     showToast("API 配置已保存", "success");
+}
+
+// 删除世界时，清除该世界对应的当前运行态（主状态/历史/聊天）；fire-and-forget
+export function clearCurrentRunState() {
+    idbDel(STORAGE_KEYS.state).catch(() => {});
+    idbDel(STORAGE_KEYS.history).catch(() => {});
+    idbDel(STORAGE_KEYS.chatHistory).catch(() => {});
 }

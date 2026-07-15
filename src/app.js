@@ -6,6 +6,7 @@ import { STORAGE_KEYS } from "./store.js";
 import { deepClone, migrateGameState } from "./utils.js";
 import { applyFontSize, applyTheme, changeFontSize, toggleTheme, updateTempLabel } from "./theme.js";
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig } from "./storage.js";
+import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel } from "./render.js";
 import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, saveTimeConfig, showAuthorNoteModal, showGameSettings, showLoreGraph, showSaveList, showTimeConfigModal, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreSpoilerSettings, togglePinMemory, triggerMemoryPackImport } from "./game.js";
@@ -13,7 +14,7 @@ import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevisio
 async function init() {
     applyTheme();
     applyFontSize();
-    loadConfig();
+    await loadConfig();
 
     // 逐个加载数据文件，各自独立降级，一个失败不影响其他
     try {
@@ -37,7 +38,7 @@ async function init() {
         const res = await fetch("./data/initial_state.json");
         if (!res.ok) throw new Error("HTTP " + res.status);
         const state = await res.json();
-        const saved = localStorage.getItem(STORAGE_KEYS.state);
+        const saved = await idbGet(STORAGE_KEYS.state);
         if (saved) {
             try { S.gameState = JSON.parse(saved); migrateGameState(S.gameState); } catch (e) { S.gameState = deepClone(state); }
         } else {
@@ -46,19 +47,19 @@ async function init() {
     } catch (e) { console.warn("initial_state.json 加载失败:", e.message); S.gameState = null; }
 
     // loreKB 已就绪，现在创建 demo 世界
-    loadWorlds();
+    await loadWorlds();
     // 存档迁移依赖世界模板（用于旧知识库/行为记忆的兼容复制），必须后加载。
-    loadSaves();
+    await loadSaves();
 
-    const savedHistory = localStorage.getItem(STORAGE_KEYS.history);
+    const savedHistory = await idbGet(STORAGE_KEYS.history);
     if (savedHistory) {
         try { S.conversationHistory = JSON.parse(savedHistory); } catch (e) { S.conversationHistory = []; }
     }
-    const savedChat = localStorage.getItem(STORAGE_KEYS.chatHistory);
+    const savedChat = await idbGet(STORAGE_KEYS.chatHistory);
     if (savedChat) {
         try { S.chatHistory = JSON.parse(savedChat); } catch (e) { S.chatHistory = []; }
     }
-    const savedSummary = localStorage.getItem(STORAGE_KEYS.chatSummary);
+    const savedSummary = await idbGet(STORAGE_KEYS.chatSummary);
     if (savedSummary) {
         try { S.chatSummary = JSON.parse(savedSummary); } catch (e) { S.chatSummary = []; }
     }

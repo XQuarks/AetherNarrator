@@ -5,7 +5,7 @@ import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, DEFAULT_TIME_CONFIG, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
 import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
-import { saveSaves, saveState, saveWorlds } from "./storage.js";
+import { saveSaves, saveState, saveWorlds, clearCurrentRunState } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, getWorldLoreKB, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
@@ -569,9 +569,7 @@ export function deleteWorld(worldId) {
         S.conversationHistory = [];
         S.chatHistory = [];
         invalidateSystemPromptCache();
-        localStorage.removeItem(STORAGE_KEYS.state);
-        localStorage.removeItem(STORAGE_KEYS.history);
-        localStorage.removeItem(STORAGE_KEYS.chatHistory);
+        clearCurrentRunState();
     }
     // 从世界列表中移除
     S.worlds = S.worlds.filter(w => w.id !== worldId);
