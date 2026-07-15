@@ -56,8 +56,80 @@ export function showSettingsModal() {
     updateTempLabel();
 }
 
+let cwStep = 1;
+const CW_TOTAL = 4;
+
 export function showCreateWorldModal() {
+    resetCreateWorldForm();
+    cwStep = 1;
+    renderCwStep();
     showModal("createWorldModal");
+}
+
+// 打开创建弹窗时完整重置表单（含步骤回到第 1 步、各选项回到默认）
+function resetCreateWorldForm() {
+    const clearIds = ["worldName", "ipName", "worldDesc", "heroDesc", "customStyle", "customPrefix", "worldPrefix"];
+    clearIds.forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+    const wt = document.getElementById("worldType");
+    if (wt) wt.value = "ip";
+    onWorldTypeChange("ip"); // 默认 IP 类型，会自动给世界观描述预填「原作世界观」
+    // 文风参考默认：参考原版
+    document.querySelectorAll("#styleRefGroup .radio-option").forEach((o, i) => o.classList.toggle("selected", i === 0));
+    document.querySelectorAll("#styleRefGroup input[type=radio]").forEach((r, i) => r.checked = i === 0);
+    const csf = document.getElementById("customStyleField"); if (csf) csf.classList.remove("show");
+    // 两个特殊要求默认：不添加
+    ["customPrefixGroup", "worldPrefixGroup"].forEach(gid => {
+        document.querySelectorAll("#" + gid + " .radio-option").forEach((o, i) => o.classList.toggle("selected", i === 0));
+        document.querySelectorAll("#" + gid + " input[type=radio]").forEach((r, i) => r.checked = i === 0);
+    });
+    const cpf = document.getElementById("customPrefixField"); if (cpf) cpf.classList.remove("show");
+    const wpf = document.getElementById("worldPrefixField"); if (wpf) wpf.classList.remove("show");
+    // 剧情自由度默认：3
+    const pf = document.getElementById("plotFreedom"); if (pf) pf.value = "3";
+    updatePlotFreedomLabel("3");
+    // 收起高级折叠
+    const adv = document.querySelector("#createWorldModal details.advanced-details");
+    if (adv) adv.open = false;
+}
+
+// 向导「下一步」：先校验当前步必填项，通过才前进
+export function cwNext() {
+    if (cwStep === 1) {
+        if (!document.getElementById("worldName").value.trim()) { showToast("请先填写世界名称", "error"); return; }
+    } else if (cwStep === 2) {
+        if (document.getElementById("worldType").value === "ip" && !document.getElementById("ipName").value.trim()) {
+            showToast("基于已有 IP 时请填写作品名称", "error"); return;
+        }
+    } else if (cwStep === 3) {
+        if (!document.getElementById("worldDesc").value.trim()) { showToast("请填写世界观描述", "error"); return; }
+    }
+    if (cwStep < CW_TOTAL) { cwStep++; renderCwStep(); }
+}
+
+// 向导「上一步」
+export function cwPrev() {
+    if (cwStep > 1) { cwStep--; renderCwStep(); }
+}
+
+// 切换步骤显示 + 更新步骤指示 + 底部按钮 + 焦点
+function renderCwStep() {
+    document.querySelectorAll("#createWorldModal .cw-step").forEach(s => {
+        s.classList.toggle("active", Number(s.dataset.step) === cwStep);
+    });
+    document.querySelectorAll("#createWorldModal .cw-step-dot").forEach(d => {
+        const n = Number(d.dataset.step);
+        d.classList.toggle("active", n === cwStep);
+        d.classList.toggle("done", n < cwStep);
+    });
+    const prev = document.getElementById("cwPrevBtn");
+    const next = document.getElementById("cwNextBtn");
+    const gen = document.getElementById("generateWorldBtn");
+    if (prev) prev.style.visibility = cwStep > 1 ? "visible" : "hidden";
+    if (next) next.style.display = cwStep === CW_TOTAL ? "none" : "";
+    if (gen) gen.style.display = cwStep === CW_TOTAL ? "" : "none";
+    const cur = document.querySelector('#createWorldModal .cw-step[data-step="' + cwStep + '"]');
+    const f = cur && cur.querySelector("input, select, textarea");
+    if (f) setTimeout(() => f.focus(), 50);
 }
 
 export function onWorldTypeChange(value) {

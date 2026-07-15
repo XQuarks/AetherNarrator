@@ -206,16 +206,6 @@
                 <div class="hint">选择后自动填入对应 Base URL 与默认模型，可再手动修改</div>
             </div>
             <div class="form-group">
-                <label>AI 接口 Base URL</label>
-                <input type="text" id="baseUrl" placeholder="https://api.deepseek.com" value="https://api.deepseek.com">
-                <div class="hint">例如：DeepSeek 填 https://api.deepseek.com</div>
-            </div>
-            <div class="form-group">
-                <label>CORS 代理 URL（可选）</label>
-                <input type="text" id="corsProxy" placeholder="不填则直接调用 API">
-                <div class="hint">浏览器无法直接调用第三方 API（CORS 跨域限制）。解决方案：<br>① 使用 CORS 代理服务，将代理 URL 填入此处（如 https://your-proxy.workers.dev/proxy）<br>② 本地搭建 Cloudflare Workers / Nginx 反向代理<br>③ 开发测试时可安装浏览器 CORS 插件（不推荐长期使用）</div>
-            </div>
-            <div class="form-group">
                 <label>API Key</label>
                 <input type="password" id="apiKey" placeholder="sk-...">
                 <div class="hint">密钥仅保存在你的浏览器本地，不会上传</div>
@@ -224,18 +214,32 @@
                 <label>模型名称</label>
                 <input type="text" id="modelName" placeholder="deepseek-v4-flash" value="deepseek-v4-flash">
             </div>
-            <div class="form-group">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                    <input type="checkbox" id="mockMode" style="width:auto;">
-                    <span>模拟模式（不调用真实 API，仅供体验）</span>
-                </label>
-            </div>
-            <div class="form-group">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                    <input type="checkbox" id="noStreamMode" style="width:auto;">
-                    <span>禁用流式输出（CORS 代理不支持时开启）</span>
-                </label>
-            </div>
+
+            <details class="advanced-details">
+                <summary>高级选项</summary>
+                <div class="form-group">
+                    <label>AI 接口 Base URL</label>
+                    <input type="text" id="baseUrl" placeholder="https://api.deepseek.com" value="https://api.deepseek.com">
+                    <div class="hint">例如：DeepSeek 填 https://api.deepseek.com</div>
+                </div>
+                <div class="form-group">
+                    <label>CORS 代理 URL（可选）</label>
+                    <input type="text" id="corsProxy" placeholder="不填则直接调用 API">
+                    <div class="hint">浏览器无法直接调用第三方 API（CORS 跨域限制）。解决方案：<br>① 使用 CORS 代理服务，将代理 URL 填入此处（如 https://your-proxy.workers.dev/proxy）<br>② 本地搭建 Cloudflare Workers / Nginx 反向代理<br>③ 开发测试时可安装浏览器 CORS 插件（不推荐长期使用）</div>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="mockMode" style="width:auto;">
+                        <span>模拟模式（不调用真实 API，仅供体验）</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="noStreamMode" style="width:auto;">
+                        <span>禁用流式输出（CORS 代理不支持时开启）</span>
+                    </label>
+                </div>
+            </details>
         </div>
         <div class="modal-footer">
             <button class="btn secondary" data-action="closeModal" data-modal="apiModal">返回</button>
@@ -251,153 +255,171 @@
             <h2 id="createWorldModalTitle">创建新世界</h2>
             <button class="modal-close" data-action="closeModal" data-modal="createWorldModal">×</button>
         </div>
+        <div class="cw-steps">
+            <span class="cw-step-dot active" data-step="1">1</span>
+            <span class="cw-step-line"></span>
+            <span class="cw-step-dot" data-step="2">2</span>
+            <span class="cw-step-line"></span>
+            <span class="cw-step-dot" data-step="3">3</span>
+            <span class="cw-step-line"></span>
+            <span class="cw-step-dot" data-step="4">4</span>
+        </div>
         <div class="modal-body">
-            <div class="form-group">
-                <label>世界名称</label>
-                <input type="text" id="worldName" placeholder="例如：剑来、哈利波特、原创仙侠">
-            </div>
-            <div class="form-group">
-                <label>世界类型</label>
-                <select id="worldType" data-action="onWorldTypeChange" data-event="change">
-                    <option value="ip">基于已有 IP / 小说</option>
-                    <option value="original">原创世界观</option>
-                </select>
-            </div>
-            <!-- 已有IP：作品名称 + 上传提示 -->
-            <div class="conditional-field show" id="ipNameField">
+            <!-- 步骤 1：名称 -->
+            <div class="cw-step active" data-step="1">
+                <p class="cw-step-title">给你的世界起个名字</p>
+                <p class="cw-step-hint">比如《剑来》《哈利波特》，或原创名如《浮世之界》。</p>
                 <div class="form-group">
-                    <label>作品名称</label>
-                    <input type="text" id="ipName" placeholder="例如：剑来、哈利波特、三体、红楼梦...">
-                    <div class="hint">AI 将根据作品名称从训练数据中检索相关设定、人物、力量体系来生成世界观。</div>
-                </div>
-                <div class="upload-tip-box">
-                    <div class="upload-tip-title">建议上传源文件以获得更精准的生成效果</div>
-                    <div class="upload-tip-desc">仅凭作品名称，AI 依赖自身训练数据，可能存在遗漏或偏差。上传原著 TXT/DOCX 文件后，AI 能从原文中精确提取世界观设定、人物关系和叙事风格。</div>
+                    <label>世界名称</label>
+                    <input type="text" id="worldName" placeholder="例如：剑来、哈利波特、原创仙侠">
                 </div>
             </div>
-            <div class="form-group">
-                <label>世界观描述</label>
-                <textarea id="worldDesc" placeholder="可以直接填写原作的世界观概述，也可以在此基础上修改...&#10;例如：在原著的世界观基础上，增加了一个隐秘的地下组织..."></textarea>
-                <div class="hint" id="worldDescHint">你可以直接使用原作的世界观描述，也可以在此基础上进行修改和扩展——例如调整力量体系、加入新势力、改变时间线等。描述越详细，AI 生成的剧情越贴合你的构想。</div>
-            </div>
-            <div class="form-group">
-                <label>主角设定（可选）</label>
-                <textarea id="heroDesc" placeholder="例如：一名来自小镇的少年，性格谨慎，渴望变强..."></textarea>
-            </div>
-
-            <!-- 上传源文件 -->
-            <div class="form-group">
-                <label>上传世界观/小说源文件（可选）</label>
-                <div class="file-upload-area" id="fileUploadArea">
-                    <span id="fileUploadText">点击上传 TXT / DOCX / EPUB 文件</span>
+            <!-- 步骤 2：类型 / IP -->
+            <div class="cw-step" data-step="2">
+                <p class="cw-step-title">这是什么类型的世界？</p>
+                <div class="form-group">
+                    <label>世界类型</label>
+                    <select id="worldType" data-action="onWorldTypeChange" data-event="change">
+                        <option value="ip">基于已有 IP / 小说</option>
+                        <option value="original">原创世界观</option>
+                    </select>
                 </div>
-                <input type="file" id="sourceFile" accept=".txt,.docx,.epub" data-action="handleFileSelect" data-event="change">
-                <div class="upload-hint">支持 .txt、.docx 和 .epub 格式，源文件内容将作为世界观生成的参考材料</div>
-            </div>
-
-            <!-- 文风参考 -->
-            <div class="form-group">
-                <label>文风参考</label>
-                <div class="radio-group" id="styleRefGroup">
-                    <label class="radio-option selected" >
-                        <input type="radio" name="styleRef" value="original" checked data-action="selectStyleRef" data-event="change">
-                        <div class="radio-indicator"></div>
-                        <div>
-                            <div class="radio-label">参考原版文风</div>
-                            <div class="radio-desc">AI 将模仿源文件或描述中的写作风格</div>
-                        </div>
-                    </label>
-                    <label class="radio-option" >
-                        <input type="radio" name="styleRef" value="custom" data-action="selectStyleRef" data-event="change">
-                        <div class="radio-indicator"></div>
-                        <div>
-                            <div class="radio-label">自定义文风</div>
-                            <div class="radio-desc">手动输入你想要的叙事风格</div>
-                        </div>
-                    </label>
-                    <label class="radio-option" >
-                        <input type="radio" name="styleRef" value="none" data-action="selectStyleRef" data-event="change">
-                        <div class="radio-indicator"></div>
-                        <div>
-                            <div class="radio-label">不参考文风</div>
-                            <div class="radio-desc">AI 将使用通用叙事风格</div>
-                        </div>
-                    </label>
-                </div>
-                <div class="conditional-field" id="customStyleField">
-                    <textarea id="customStyle" placeholder="描述你想要的文风，例如：冷峻克制、江湖气息浓厚、对话简练不拖沓..." style="min-height:80px;"></textarea>
-                </div>
-            </div>
-
-            <!-- 剧情自由度 -->
-            <div class="form-group">
-                <label>剧情自由度</label>
-                <div class="range-slider-wrapper">
-                    <input type="range" id="plotFreedom" min="1" max="5" value="3" data-action="updatePlotFreedomLabel" data-event="input">
-                    <div class="range-current" id="plotFreedomLabel">适中发散 — 在原著世界观内适度创新</div>
-                    <div class="range-labels">
-                        <span>严格遵循原著</span>
-                        <span>完全自由创作</span>
+                <div class="conditional-field show" id="ipNameField">
+                    <div class="form-group">
+                        <label>作品名称</label>
+                        <input type="text" id="ipName" placeholder="例如：剑来、哈利波特、三体、红楼梦...">
+                        <div class="hint">AI 将根据作品名称从训练数据中检索相关设定、人物、力量体系来生成世界观。</div>
+                    </div>
+                    <div class="upload-tip-box">
+                        <div class="upload-tip-title">建议上传源文件以获得更精准的生成效果</div>
+                        <div class="upload-tip-desc">仅凭作品名称，AI 依赖自身训练数据，可能存在遗漏或偏差。上传原著 TXT/DOCX 文件后，AI 能从原文中精确提取世界观设定、人物关系和叙事风格。</div>
                     </div>
                 </div>
             </div>
-
-            <!-- 特殊要求（世界观生成） -->
-            <div class="form-group">
-                <label>特殊要求（世界观生成，可选）</label>
-                <div class="radio-group" id="worldPrefixGroup">
-                    <label class="radio-option selected" >
-                        <input type="radio" name="worldPrefixEnable" value="off" checked data-action="toggleWorldPrefix" data-event="change">
-                        <div class="radio-indicator"></div>
-                        <div>
-                            <div class="radio-label">不添加</div>
-                            <div class="radio-desc">不附加额外指令</div>
-                        </div>
-                    </label>
-                    <label class="radio-option" >
-                        <input type="radio" name="worldPrefixEnable" value="on" data-action="toggleWorldPrefix" data-event="change">
-                        <div class="radio-indicator"></div>
-                        <div>
-                            <div class="radio-label">添加特殊要求</div>
-                            <div class="radio-desc">输入的内容将作为 AI Prompt 前缀用于生成知识库等世界观内容</div>
-                        </div>
-                    </label>
-                </div>
-                <div class="conditional-field" id="worldPrefixField">
-                    <textarea id="worldPrefix" placeholder="输入你想附加到世界观生成 AI Prompt 前面的特殊要求..." style="min-height:80px;"></textarea>
+            <!-- 步骤 3：世界观描述 -->
+            <div class="cw-step" data-step="3">
+                <p class="cw-step-title">这个世界长什么样？</p>
+                <p class="cw-step-hint" id="worldDescHint">你可以直接使用原作的世界观描述，也可以在此基础上进行修改和扩展——例如调整力量体系、加入新势力、改变时间线等。描述越详细，AI 生成的剧情越贴合你的构想。</p>
+                <div class="form-group">
+                    <label>世界观描述</label>
+                    <textarea id="worldDesc" placeholder="可以直接填写原作的世界观概述，也可以在此基础上修改...&#10;例如：在原著的世界观基础上，增加了一个隐秘的地下组织..."></textarea>
                 </div>
             </div>
-
-            <!-- 特殊要求（对话） -->
-            <div class="form-group">
-                <label>特殊要求（对话，可选）</label>
-                <div class="radio-group" id="customPrefixGroup">
-                    <label class="radio-option selected" >
-                        <input type="radio" name="customPrefixEnable" value="off" checked data-action="toggleCustomPrefix" data-event="change">
-                        <div class="radio-indicator"></div>
-                        <div>
-                            <div class="radio-label">不添加</div>
-                            <div class="radio-desc">不附加额外指令</div>
-                        </div>
-                    </label>
-                    <label class="radio-option" >
-                        <input type="radio" name="customPrefixEnable" value="on" data-action="toggleCustomPrefix" data-event="change">
-                        <div class="radio-indicator"></div>
-                        <div>
-                            <div class="radio-label">添加特殊要求</div>
-                            <div class="radio-desc">输入的内容将作为 AI Prompt 前缀注入每次对话</div>
-                        </div>
-                    </label>
+            <!-- 步骤 4：微调（可选） -->
+            <div class="cw-step" data-step="4">
+                <p class="cw-step-title">生成前的微调（都能留空）</p>
+                <div class="form-group">
+                    <label>主角设定（可选）</label>
+                    <textarea id="heroDesc" placeholder="例如：一名来自小镇的少年，性格谨慎，渴望变强..."></textarea>
                 </div>
-                <div class="conditional-field" id="customPrefixField">
-                    <textarea id="customPrefix" placeholder="输入你想附加到 AI Prompt 前面的特殊要求，例如：叙事要更加黑暗残酷 / 增加更多悬疑元素 / NPC 对话要更口语化..." style="min-height:80px;"></textarea>
+                <div class="form-group">
+                    <label>上传世界观/小说源文件（可选）</label>
+                    <div class="file-upload-area" id="fileUploadArea">
+                        <span id="fileUploadText">点击上传 TXT / DOCX / EPUB 文件</span>
+                    </div>
+                    <input type="file" id="sourceFile" accept=".txt,.docx,.epub" data-action="handleFileSelect" data-event="change">
+                    <div class="upload-hint">支持 .txt、.docx 和 .epub 格式，源文件内容将作为世界观生成的参考材料</div>
                 </div>
+                <div class="form-group">
+                    <label>文风参考</label>
+                    <div class="radio-group" id="styleRefGroup">
+                        <label class="radio-option selected" >
+                            <input type="radio" name="styleRef" value="original" checked data-action="selectStyleRef" data-event="change">
+                            <div class="radio-indicator"></div>
+                            <div>
+                                <div class="radio-label">参考原版文风</div>
+                                <div class="radio-desc">AI 将模仿源文件或描述中的写作风格</div>
+                            </div>
+                        </label>
+                        <label class="radio-option" >
+                            <input type="radio" name="styleRef" value="custom" data-action="selectStyleRef" data-event="change">
+                            <div class="radio-indicator"></div>
+                            <div>
+                                <div class="radio-label">自定义文风</div>
+                                <div class="radio-desc">手动输入你想要的叙事风格</div>
+                            </div>
+                        </label>
+                        <label class="radio-option" >
+                            <input type="radio" name="styleRef" value="none" data-action="selectStyleRef" data-event="change">
+                            <div class="radio-indicator"></div>
+                            <div>
+                                <div class="radio-label">不参考文风</div>
+                                <div class="radio-desc">AI 将使用通用叙事风格</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="conditional-field" id="customStyleField">
+                        <textarea id="customStyle" placeholder="描述你想要的文风，例如：冷峻克制、江湖气息浓厚、对话简练不拖沓..." style="min-height:80px;"></textarea>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>剧情自由度</label>
+                    <div class="range-slider-wrapper">
+                        <input type="range" id="plotFreedom" min="1" max="5" value="3" data-action="updatePlotFreedomLabel" data-event="input">
+                        <div class="range-current" id="plotFreedomLabel">适中发散 — 在原著世界观内适度创新</div>
+                        <div class="range-labels">
+                            <span>严格遵循原著</span>
+                            <span>完全自由创作</span>
+                        </div>
+                    </div>
+                </div>
+                <details class="advanced-details">
+                    <summary>高级选项（特殊要求）</summary>
+                    <div class="form-group">
+                        <label>特殊要求（世界观生成，可选）</label>
+                        <div class="radio-group" id="worldPrefixGroup">
+                            <label class="radio-option selected" >
+                                <input type="radio" name="worldPrefixEnable" value="off" checked data-action="toggleWorldPrefix" data-event="change">
+                                <div class="radio-indicator"></div>
+                                <div>
+                                    <div class="radio-label">不添加</div>
+                                    <div class="radio-desc">不附加额外指令</div>
+                                </div>
+                            </label>
+                            <label class="radio-option" >
+                                <input type="radio" name="worldPrefixEnable" value="on" data-action="toggleWorldPrefix" data-event="change">
+                                <div class="radio-indicator"></div>
+                                <div>
+                                    <div class="radio-label">添加特殊要求</div>
+                                    <div class="radio-desc">输入的内容将作为 AI Prompt 前缀用于生成知识库等世界观内容</div>
+                                </div>
+                            </label>
+                        </div>
+                        <div class="conditional-field" id="worldPrefixField">
+                            <textarea id="worldPrefix" placeholder="输入你想附加到世界观生成 AI Prompt 前面的特殊要求..." style="min-height:80px;"></textarea>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>特殊要求（对话，可选）</label>
+                        <div class="radio-group" id="customPrefixGroup">
+                            <label class="radio-option selected" >
+                                <input type="radio" name="customPrefixEnable" value="off" checked data-action="toggleCustomPrefix" data-event="change">
+                                <div class="radio-indicator"></div>
+                                <div>
+                                    <div class="radio-label">不添加</div>
+                                    <div class="radio-desc">不附加额外指令</div>
+                                </div>
+                            </label>
+                            <label class="radio-option" >
+                                <input type="radio" name="customPrefixEnable" value="on" data-action="toggleCustomPrefix" data-event="change">
+                                <div class="radio-indicator"></div>
+                                <div>
+                                    <div class="radio-label">添加特殊要求</div>
+                                    <div class="radio-desc">输入的内容将作为 AI Prompt 前缀注入每次对话</div>
+                                </div>
+                            </label>
+                        </div>
+                        <div class="conditional-field" id="customPrefixField">
+                            <textarea id="customPrefix" placeholder="输入你想附加到 AI Prompt 前面的特殊要求，例如：叙事要更加黑暗残酷 / 增加更多悬疑元素 / NPC 对话要更口语化..." style="min-height:80px;"></textarea>
+                        </div>
+                    </div>
+                </details>
             </div>
-
         </div>
-        <div class="modal-footer">
-            <button class="btn secondary" data-action="closeModal" data-modal="createWorldModal">返回</button>
-            <button class="btn primary" id="generateWorldBtn" data-action="generateWorld">确认生成</button>
+        <div class="modal-footer cw-footer">
+            <button class="btn secondary" data-action="cwPrev" id="cwPrevBtn" style="visibility:hidden;">上一步</button>
+            <button class="btn primary" data-action="cwNext" id="cwNextBtn">下一步</button>
+            <button class="btn primary" data-action="generateWorld" id="generateWorldBtn" style="display:none;">确认生成</button>
         </div>
     </div>
 </div>

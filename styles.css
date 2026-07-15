@@ -421,6 +421,22 @@
             opacity: 0.8;
         }
 
+        /* ★ PC 大屏：主界面内容间距随视口高度弹性放大，消除「居中后底部空一节」 */
+        /* 仅作用于宽屏(>=768px)且有一定高度(>=700px)，手机端(max-width:480px)不受影响 */
+        @media (min-width: 768px) and (min-height: 700px) {
+            .home-content {
+                padding-top: clamp(44px, 7vh, 110px);
+                padding-bottom: clamp(44px, 7vh, 110px);
+            }
+            .home-content .home-est { margin-bottom: clamp(18px, 3vh, 40px); }
+            .home-content .home-subtitle-en { margin-bottom: clamp(22px, 3.4vh, 48px); }
+            .home-content .divider { margin-bottom: clamp(20px, 3vh, 44px); }
+            .home-content .home-subtitle { margin-bottom: clamp(34px, 5vh, 72px); }
+            .home-content .menu-grid { gap: clamp(12px, 2.2vh, 26px); }
+            .home-content .home-disclaimer { margin-top: clamp(30px, 5vh, 72px); }
+            .home-content .home-local-note { margin-top: clamp(10px, 2vh, 24px); }
+        }
+
         /* 列表屏幕 */
         .create-world-bar {
             margin: 12px 16px 0;
@@ -593,6 +609,88 @@
             overflow-y: auto;
             flex: 1;
         }
+        /* ★ 高级选项折叠（API 配置 / 创建世界向导共用） */
+        .advanced-details {
+            margin-top: 6px;
+            border-top: 1px solid var(--separator);
+            padding-top: 12px;
+        }
+        .advanced-details > summary {
+            list-style: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            user-select: none;
+            padding: 4px 0;
+        }
+        .advanced-details > summary::-webkit-details-marker { display: none; }
+        .advanced-details > summary::before {
+            content: "▸";
+            font-size: 10px;
+            transition: transform 0.2s ease;
+        }
+        .advanced-details[open] > summary::before {
+            transform: rotate(90deg);
+        }
+        .advanced-details[open] {
+            padding-bottom: 4px;
+        }
+        /* ★ 创建新世界向导：步骤指示 + 分步面板 */
+        .cw-steps {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 16px 20px 0;
+        }
+        .cw-step-dot {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+        }
+        .cw-step-dot.active {
+            background: var(--primary);
+            color: var(--btn-primary-text);
+            border-color: var(--primary);
+        }
+        .cw-step-dot.done {
+            background: var(--card-hover);
+            color: var(--primary-light);
+        }
+        .cw-step-line {
+            width: 26px;
+            height: 1px;
+            background: var(--card-border);
+        }
+        .cw-step { display: none; }
+        .cw-step.active { display: block; animation: fadeSlideIn 0.3s ease; }
+        .cw-step-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text);
+            margin: 4px 0 6px;
+            text-align: center;
+        }
+        .cw-step-hint {
+            font-size: 12.5px;
+            color: var(--text-secondary);
+            margin: 0 0 14px;
+            text-align: center;
+            line-height: 1.5;
+        }
+        .cw-footer { gap: 10px; }
+        .cw-footer .btn { flex: 1; }
         .modal-footer {
             padding: 12px 20px 20px;
             display: flex;
