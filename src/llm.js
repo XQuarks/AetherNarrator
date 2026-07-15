@@ -6,7 +6,8 @@ import { DEFAULT_PERIOD_LABELS, getActiveConditionTags } from "./store.js";
 import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, tryRepairJSON } from "./utils.js";
 import { getNextPeriod, getTemperature } from "./theme.js";
 import { getWorldLoreKB, summarizeFactsFromChanges } from "./rag.js";
-import { buildSystemPrompt, buildTurnUserMessage, buildWorldGenerationPrompt, buildAuthorNote } from "./prompt.js";
+import { buildSystemPrompt, buildTurnUserMessage, buildWorldGenerationPrompt, buildAuthorNote, getPositionedLore } from "./prompt.js";
+import { getProvider, readApiInputs } from "./providers.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
 import { processTurn } from "./game.js";
 import { buildLoreRevisionDiff, parseLoreRevisionResponse } from "./lore-revision.js";
@@ -38,10 +39,7 @@ export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sou
         return mockGenerateWorld(name, type, desc, hero, ipName);
     }
 
-    const baseUrl = document.getElementById("baseUrl").value.trim();
-    const corsProxy = document.getElementById("corsProxy").value.trim();
-    const apiKey = document.getElementById("apiKey").value.trim();
-    const model = document.getElementById("modelName").value.trim();
+    const { baseUrl, corsProxy, apiKey, model } = readApiInputs();
     if (!baseUrl || !apiKey || !model) {
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
@@ -253,13 +251,24 @@ export async function callLLM(input, retrieved) {
     const mock = document.getElementById("mockMode").checked;
     const systemPrompt = buildSystemPrompt();
     const userContent = buildTurnUserMessage(input, retrieved);
+    // ★ P0-2：按 insert_at 分流的动态 lore。before_user/after_user 已在 buildTurnUserMessage 里
+    // 拼进 userContent；这里取 system / author_note 两个槽位并入对应 role 消息。
+    const positioned = getPositionedLore(retrieved);
+
     // ★ B2：中部注入位 author_note —— 独立消息，插在稳定的缓存前缀（system + 历史对话）之后、
     // 本轮 user 输入之前。既拿到"贴近生成点"的高关注度，又不改动缓存前缀，DeepSeek 缓存不受影响。
-    const authorNote = buildAuthorNote();
+    // P0-2：insert_at=author_note 的检索片段一并并入作者注。
+    const authorNote = [
+        buildAuthorNote(),
+        positioned.author_note ? "【相关世界知识（检索命中，供导演参考）】\n" + positioned.author_note : ""
+    ].filter(Boolean).join("\n\n");
 
     const messages = [
         { role: "system", content: systemPrompt },
         ...S.chatHistory,
+        // P0-2：insert_at=system 的检索片段作为独立 system 消息，放在历史之后、作者注之前，
+        // 既有 system 级权威、贴近生成点，又不改动核心 system 前缀（保护 DeepSeek 缓存）。
+        ...(positioned.system ? [{ role: "system", content: "# 世界知识（检索命中·请作为事实依据）\n\n" + positioned.system }] : []),
         ...(authorNote ? [{ role: "system", content: "# 剧情导演提示（作者注）\n\n" + authorNote }] : []),
         { role: "user", content: userContent }
     ];
@@ -268,10 +277,7 @@ export async function callLLM(input, retrieved) {
     if (mock) {
         parsed = mockLLM(input, retrieved);
     } else {
-        const baseUrl = document.getElementById("baseUrl").value.trim();
-        const corsProxy = document.getElementById("corsProxy").value.trim();
-        const apiKey = document.getElementById("apiKey").value.trim();
-        const model = document.getElementById("modelName").value.trim();
+        const { baseUrl, corsProxy, apiKey, model } = readApiInputs();
         if (!baseUrl || !apiKey || !model) {
             throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
         }
@@ -305,6 +311,7 @@ export async function callLLMNonStreaming(url, apiKey, model, messages) {
     const controller = new AbortController();
     S.currentAbortController = controller; // ★ P0: 暴露给导航 abort
     const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const provider = getProvider();
     try {
         const res = await fetch(url, {
             method: "POST",
@@ -312,13 +319,7 @@ export async function callLLMNonStreaming(url, apiKey, model, messages) {
                 "Content-Type": "application/json",
                 "Authorization": "Bearer " + apiKey
             },
-            body: JSON.stringify({
-                model, messages,
-                temperature: getTemperature(),
-                max_tokens: 8192,
-                thinking: { type: "disabled" },
-                response_format: { type: "json_object" }
-            }),
+            body: JSON.stringify(provider.buildBody(model, messages, { temperature: getTemperature() })),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -332,9 +333,7 @@ export async function callLLMNonStreaming(url, apiKey, model, messages) {
     const parsed = parseResponse(content);
 
     if (data.usage) {
-        const hit = data.usage.prompt_cache_hit_tokens || 0;
-        const miss = data.usage.prompt_cache_miss_tokens || 0;
-        const total = hit + miss;
+        const { hit, miss, total } = provider.parseUsage(data.usage);
         S.lastCacheStats = {
             hitTokens: hit, missTokens: miss, totalTokens: total,
             hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
@@ -360,6 +359,7 @@ export async function callLLMStreaming(url, apiKey, model, messages) {
         idleTimer = setTimeout(() => controller.abort(), 30000);
     };
     resetIdle();
+    const provider = getProvider();
     try {
     const res = await fetch(url, {
         method: "POST",
@@ -367,15 +367,7 @@ export async function callLLMStreaming(url, apiKey, model, messages) {
             "Content-Type": "application/json",
             "Authorization": "Bearer " + apiKey
         },
-        body: JSON.stringify({
-            model, messages,
-            temperature: getTemperature(),
-            max_tokens: 8192,
-            thinking: { type: "disabled" },
-            stream: true,
-            stream_options: { include_usage: true },
-            response_format: { type: "json_object" }
-        }),
+        body: JSON.stringify({ ...provider.buildBody(model, messages, { temperature: getTemperature() }), stream: true, stream_options: { include_usage: true } }),
         signal: controller.signal
     });
     if (!res.ok) {
@@ -439,9 +431,7 @@ export async function callLLMStreaming(url, apiKey, model, messages) {
     const parsed = parseResponse(fullContent);
 
     if (usage) {
-        const hit = usage.prompt_cache_hit_tokens || 0;
-        const miss = usage.prompt_cache_miss_tokens || 0;
-        const total = hit + miss;
+        const { hit, miss, total } = provider.parseUsage(usage);
         S.lastCacheStats = {
             hitTokens: hit, missTokens: miss, totalTokens: total,
             hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
@@ -589,10 +579,7 @@ function getWorldLoreForJudge() {
 async function callLLMJson(systemContent, userContent, opts = {}) {
     const mock = document.getElementById("mockMode") && document.getElementById("mockMode").checked;
     if (mock) return null; // 模拟模式无 API，跳过裁判
-    const baseUrl = document.getElementById("baseUrl").value.trim();
-    const corsProxy = document.getElementById("corsProxy").value.trim();
-    const apiKey = document.getElementById("apiKey").value.trim();
-    const model = document.getElementById("modelName").value.trim();
+    const { baseUrl, corsProxy, apiKey, model, provider } = readApiInputs();
     if (!baseUrl || !apiKey || !model) return null;
     const url = buildApiUrl(baseUrl, corsProxy);
     const controller = new AbortController();
@@ -602,17 +589,10 @@ async function callLLMJson(systemContent, userContent, opts = {}) {
         const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-            body: JSON.stringify({
-                model,
-                messages: [
-                    { role: "system", content: systemContent },
-                    { role: "user", content: userContent }
-                ],
-                temperature: opts.temperature != null ? opts.temperature : 0,
-                max_tokens: opts.maxTokens || 400,
-                thinking: { type: "disabled" },
-                response_format: { type: "json_object" }
-            }),
+            body: JSON.stringify(provider.buildBody(model, [
+                { role: "system", content: systemContent },
+                { role: "user", content: userContent }
+            ], { temperature: opts.temperature != null ? opts.temperature : 0, maxTokens: opts.maxTokens || 400 })),
             signal: controller.signal
         });
         if (!res.ok) {
@@ -698,12 +678,10 @@ export async function judgeWorldviewConsistency(narrative, stateChangesObj, opts
 export async function callLoreRevisionLLM() {
     const kb = getWorldLoreKB();
     if (!kb || !kb.snippets || !kb.snippets.length) return null;
-    const baseUrl = document.getElementById("baseUrl") && document.getElementById("baseUrl").value.trim();
-    const apiKey = document.getElementById("apiKey") && document.getElementById("apiKey").value.trim();
-    const model = document.getElementById("modelName") && document.getElementById("modelName").value.trim() || "deepseek-v4-flash";
+    const { baseUrl, corsProxy, apiKey, model: readModel } = readApiInputs();
+    const model = readModel || "deepseek-v4-flash";
     const mock = document.getElementById("mockMode") && document.getElementById("mockMode").checked;
     if (!baseUrl || !apiKey) { if (!mock) return null; }
-    const corsProxy = document.getElementById("corsProxy") && document.getElementById("corsProxy").value.trim() || "";
     const apiUrl = buildApiUrl(baseUrl, corsProxy);
 
     const behaviorRecords = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords.slice(-20) : [];

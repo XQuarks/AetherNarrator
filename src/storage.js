@@ -7,6 +7,8 @@ import { deepClone, defaultWorldSchema } from "./utils.js";
 import { closeModal, showToast } from "./render.js";
 import { migrateSaveRecord, migrateWorldRecord, parseStoredArray, parseStoredObject } from "./migrations.js";
 import { idbGet, idbSet, idbDel } from "./idb.js";
+import { PROVIDERS, detectProvider } from "./providers.js";
+import { EMBED_MODEL, EMBED_DIM } from "./rag.js";
 
 export async function loadConfig() {
     const parsed = parseStoredObject(await idbGet(STORAGE_KEYS.config), {});
@@ -18,6 +20,9 @@ export async function loadConfig() {
     document.getElementById("modelName").value = cfg.modelName || "deepseek-v4-flash";
     document.getElementById("mockMode").checked = cfg.mockMode === true;
     document.getElementById("noStreamMode").checked = cfg.noStreamMode === true;
+    // 高亮当前模型预设下拉（按存储的 provider 或 baseUrl 自动识别）
+    const sel = document.getElementById("providerSelect");
+    if (sel) sel.value = cfg.provider || detectProvider(cfg.baseUrl || "");
 }
 
 export async function loadWorlds() {
@@ -48,6 +53,16 @@ export async function loadWorlds() {
     if (changed) saveWorlds().catch(() => {});
 }
 
+// ★ P0-3-C：默认世界优先用「构建期预计算」的中文向量知识库（data/lore_kb_with_embeddings.json），
+// 免去玩家首次进入时的模型下载/推理开销；仅当预计算文件缺失或模型版本不符时，回落到无向量模板（运行时经 Worker 重算）。
+function pickDefaultLoreKB() {
+    const pre = S.loreEmbeddings;
+    if (pre && pre.embedModel === EMBED_MODEL && pre.embedDim === EMBED_DIM && Array.isArray(pre.snippets)) {
+        return pre;
+    }
+    return S.loreKB || { ip: name, snippets: [] };
+}
+
 export function createDemoWorld(name, type, desc, tags) {
     return {
         id: "demo_" + name,
@@ -59,7 +74,7 @@ export function createDemoWorld(name, type, desc, tags) {
         tags,
         schema: defaultWorldSchema("修仙"),
         initial_state: null,
-        lore_kb: deepClone(S.loreKB || { ip: name, snippets: [] }),
+        lore_kb: deepClone(pickDefaultLoreKB()),
         system_prompt: "",
         behavior_records: [],
         initial_choices: []
@@ -350,9 +365,19 @@ export async function saveConfig() {
         apiKey: document.getElementById("apiKey").value.trim(),
         modelName: document.getElementById("modelName").value.trim(),
         mockMode: document.getElementById("mockMode").checked,
-        noStreamMode: document.getElementById("noStreamMode").checked
+        noStreamMode: document.getElementById("noStreamMode").checked,
+        provider: detectProvider(baseUrl)
     };
     await idbSet(STORAGE_KEYS.config, JSON.stringify(cfg));
+}
+
+// 模型预设下拉切换时：自动填入对应默认 Base URL 与模型名称
+export function applyProviderPreset(key) {
+    const p = PROVIDERS[key];
+    if (!p) return;
+    if (p.defaultBaseUrl) document.getElementById("baseUrl").value = p.defaultBaseUrl;
+    if (p.defaultModel) document.getElementById("modelName").value = p.defaultModel;
+    saveConfig();
 }
 
 export async function saveApiConfig() {

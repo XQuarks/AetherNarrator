@@ -102,6 +102,11 @@ export function sanitizeWorldConfig(raw) {
                 activation_keys: Array.isArray(s.activation_keys) ? s.activation_keys.slice(0, 20).map(k => typeof k === "string" ? k.slice(0, 50) : "") : [],
                 trigger_mode: typeof s.trigger_mode === "string" ? s.trigger_mode.slice(0, 20) : "",
                 scan_depth: (typeof s.scan_depth === "number" && s.scan_depth > 0) ? Math.min(Math.floor(s.scan_depth), 10) : 1,
+                // ★ P0-2：多插入位。insert_at 决定该片段被检索命中后注入到哪个槽位
+                //   system｜author_note｜before_user｜after_user；未设置默认 before_user（等于旧版行为）
+                insert_at: (typeof s.insert_at === "string" && ["system", "author_note", "before_user", "after_user"].includes(s.insert_at)) ? s.insert_at : "before_user",
+                // ★ P0-2：insert_depth（保留字段，供后续按对话深度插入用；仅 before_user 语义相关）
+                insert_depth: (typeof s.insert_depth === "number" && s.insert_depth >= 0) ? Math.min(Math.floor(s.insert_depth), 20) : 1,
                 // ★ B4：priority（重要度，预算裁剪时优先保留）+ recursive（是否允许被连带触发）
                 priority: (typeof s.priority === "number") ? Math.max(-10, Math.min(Math.floor(s.priority), 10)) : 0,
                 recursive: s.recursive === false ? false : undefined,
@@ -109,7 +114,11 @@ export function sanitizeWorldConfig(raw) {
                 links: Array.isArray(s.links) ? s.links.slice(0, 8).map(l => ({
                     target: typeof l.target === "string" ? l.target.slice(0, 50) : "",
                     relation: (typeof l.relation === "string" && LINK_RELATIONS.includes(l.relation)) ? l.relation : "related"
-                })).filter(l => l.target && l.target !== s.id) : []
+                })).filter(l => l.target && l.target !== s.id) : [],
+                // ★ P0-3：向量与模型标记（放行，避免 sanitize 清掉已算向量 / 供维度校验强制重算）
+                embedding: Array.isArray(s.embedding) ? s.embedding : undefined,
+                embedDim: (typeof s.embedDim === "number") ? s.embedDim : undefined,
+                embedModel: (typeof s.embedModel === "string") ? s.embedModel.slice(0, 100) : undefined
             }))
         };
     }

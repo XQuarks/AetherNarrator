@@ -3,9 +3,10 @@
 // ============================================================
 import { S } from "./store.js";
 import { STORAGE_KEYS } from "./store.js";
+import { warmupEmbeddingWorker } from "./rag.js";
 import { deepClone, migrateGameState } from "./utils.js";
 import { applyFontSize, applyTheme, changeFontSize, toggleTheme, updateTempLabel } from "./theme.js";
-import { loadConfig, loadSaves, loadWorlds, saveApiConfig } from "./storage.js";
+import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel } from "./render.js";
@@ -66,17 +67,8 @@ async function init() {
     renderWorldList();
     renderSaveList();
 
-    // 后台预热 embedding 模型
-    if (S.loreEmbeddings && typeof window.transformers !== "undefined") {
-        setTimeout(async () => {
-            try {
-                if (!S.embeddingModel) {
-                    S.embeddingModel = await window.transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-                    console.log("Embedding model pre-warmed");
-                }
-            } catch (e) { console.warn("Embedding model pre-warm failed:", e.message); }
-        }, 500);
-    }
+    // 后台预热 embedding 模型（★ P0-3-E：改在 Web Worker 内加载，主线程不卡 UI）
+    setTimeout(() => { try { warmupEmbeddingWorker(); } catch (e) { /* Worker 不可用则运行时回落主线程 */ } }, 800);
 
     // iOS 键盘适配
     if (window.visualViewport) {
@@ -152,6 +144,7 @@ const ACTIONS = {
     updateTempLabel: () => updateTempLabel(),
     updatePlotFreedomLabel: (el) => updatePlotFreedomLabel(el.value),
     onWorldTypeChange: (el) => onWorldTypeChange(el.value),
+    onProviderChange: (el) => applyProviderPreset(el.value),
     handleFileSelect: (el, e) => handleFileSelect(e),
     // radio 组
     selectStyleRef: (el) => selectStyleRef(el.value, el.closest(".radio-option")),

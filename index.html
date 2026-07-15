@@ -15,9 +15,20 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
     <title>以太叙事 · AetherNarrator</title>
     <!-- ★ P1.2.3: transformers.js 为 ESM，必须以 module 方式加载；否则经典 script 会因 export 语法报错且全局 transformers 永不定义，向量 RAG 永远降级为关键词 -->
-    <script type="module">
-      import * as transformers from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
-      window.transformers = transformers;
+    <!-- ★ P0-3-E 内置化：transformers 运行时与中文模型随项目发布，不再从 jsdelivr 加载 -->
+    <script src="./vendor/transformers/transformers.min.js"></script>
+    <script>
+      (function () {
+        try {
+          var e = transformers.env;
+          e.allowRemoteModels = false;
+          e.localModelPath = "models";                  // 相对文档根 → 项目根/models/
+          if (e.backends && e.backends.onnx && e.backends.onnx.wasm) {
+            e.backends.onnx.wasm.wasmPaths = "vendor/transformers/";
+          }
+        } catch (_) {}
+        window.transformers = transformers;
+      })();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js" integrity="sha384-/cXAMbzovUIKbBERjPmR3SnPTh8siWr5lsvFYj1Uq4XP0yaJUZJmsh0YXyGv5P0y" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
@@ -182,6 +193,18 @@
             <button class="modal-close" data-action="closeModal" data-modal="apiModal">×</button>
         </div>
         <div class="modal-body">
+            <div class="form-group">
+                <label>模型预设</label>
+                <select id="providerSelect" data-action="onProviderChange" data-event="change">
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="qwen">通义千问</option>
+                    <option value="zhipu">智谱 GLM</option>
+                    <option value="ollama">本地 Ollama</option>
+                    <option value="openai">OpenAI 兼容</option>
+                    <option value="custom">自定义</option>
+                </select>
+                <div class="hint">选择后自动填入对应 Base URL 与默认模型，可再手动修改</div>
+            </div>
             <div class="form-group">
                 <label>AI 接口 Base URL</label>
                 <input type="text" id="baseUrl" placeholder="https://api.deepseek.com" value="https://api.deepseek.com">

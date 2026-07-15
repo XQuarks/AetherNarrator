@@ -23,12 +23,13 @@ function syncLoreEditFromDOM() {
     S._loreEdit.forEach((s, i) => {
         const g = (p) => document.getElementById(p + i);
         const title = g("le_title_"), cat = g("le_cat_"), content = g("le_content_");
-        const keys = g("le_keys_"), mode = g("le_mode_"), pri = g("le_pri_"), depth = g("le_depth_"), links = g("le_links_");
+        const keys = g("le_keys_"), mode = g("le_mode_"), pri = g("le_pri_"), depth = g("le_depth_"), links = g("le_links_"), pos = g("le_pos_");
         if (title) s.title = title.value;
         if (cat) s.category = cat.value;
         if (content) s.content = content.value;
         if (keys) s.activation_keys = keys.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean);
         if (mode) s.trigger_mode = mode.value;
+        if (pos) s.insert_at = pos.value; // ★ P0-2：注入位置
         if (pri) s.priority = parseInt(pri.value) || 0;
         if (depth) s.scan_depth = Math.max(1, Math.min(10, parseInt(depth.value) || 1));
         if (links) s.links = links.value.split(/[,，、\n]+/).map(part => {
@@ -93,6 +94,7 @@ function renderLoreReviewBody() {
 
     const rows = list.map((s, i) => {
         const mode = s.trigger_mode || (s.activation_keys && s.activation_keys.length ? "keyword" : "always");
+        const pos = ["system", "author_note", "before_user", "after_user"].includes(s.insert_at) ? s.insert_at : "before_user"; // ★ P0-2
         return `
         <div class="lore-row">
             <div class="lore-row-head">
@@ -108,6 +110,14 @@ function renderLoreReviewBody() {
                         <option value="keyword"${mode === "keyword" ? " selected" : ""}>关键词</option>
                         <option value="always"${mode === "always" ? " selected" : ""}>常驻</option>
                         <option value="regex"${mode === "regex" ? " selected" : ""}>正则</option>
+                    </select>
+                </label>
+                <label>位置
+                    <select id="le_pos_${i}" class="lore-inp lore-sel" title="命中后注入到哪个位置">
+                        <option value="before_user"${pos === "before_user" ? " selected" : ""}>用户输入前</option>
+                        <option value="after_user"${pos === "after_user" ? " selected" : ""}>用户输入后</option>
+                        <option value="author_note"${pos === "author_note" ? " selected" : ""}>作者注</option>
+                        <option value="system"${pos === "system" ? " selected" : ""}>系统</option>
                     </select>
                 </label>
                 <label>优先级<input id="le_pri_${i}" class="lore-inp lore-pri" type="number" value="${Number(s.priority) || 0}"></label>
@@ -148,7 +158,8 @@ export function addLoreEntry() {
     S._loreEdit.push({
         id: "u" + Date.now().toString(36),
         category: "补充", title: "", content: "",
-        keywords: [], activation_keys: [], trigger_mode: "keyword", scan_depth: 1, priority: 0
+        keywords: [], activation_keys: [], trigger_mode: "keyword", scan_depth: 1, priority: 0,
+        insert_at: "before_user", insert_depth: 1 // ★ P0-2：默认注入位置
     });
     renderLoreReviewBody();
 }
@@ -179,6 +190,7 @@ export async function saveLoreReview() {
         s.activation_keys = (s.activation_keys || []).slice(0, 20);
         if (!s.trigger_mode) s.trigger_mode = s.activation_keys.length ? "keyword" : "always";
         s.scan_depth = (typeof s.scan_depth === "number" && s.scan_depth > 0) ? s.scan_depth : 1;
+        s.insert_at = ["system", "author_note", "before_user", "after_user"].includes(s.insert_at) ? s.insert_at : "before_user"; // ★ P0-2
         s.priority = Number(s.priority) || 0;
         if (!Array.isArray(s.keywords) || !s.keywords.length) s.keywords = s.activation_keys.slice();
         delete s.embedding; // 内容可能已改，清空向量以便按需重算

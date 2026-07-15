@@ -9,6 +9,62 @@ import { getPeriodLabel } from "./theme.js";
 import { buildTurnUserMessage, isLoreFullInSystem } from "./prompt.js";
 import { showToast } from "./render.js";
 
+// ★ P0-3-A：中文 embedding 模型（替代英文 all-MiniLM，中文语义召回更强）。维度由模型固定为 512。
+export const EMBED_MODEL = "Xenova/bge-small-zh-v1.5";
+export const EMBED_DIM = 512;
+// bge 系列官方约定：查询句加检索前缀、文档句不加，召回质量明显提升
+const BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章：";
+
+// ★ P0-3-E：embedding 推理移入 Web Worker，主线程不卡（首载模型下载也在 worker 内完成）
+let _embedWorker = null;
+let _embedReqId = 0;
+const _embedPending = new Map();
+
+function getEmbedWorker() {
+    if (_embedWorker) return _embedWorker;
+    if (typeof Worker === "undefined") throw new Error("当前环境不支持 Web Worker");
+    _embedWorker = new Worker(new URL("./embedding-worker.js", import.meta.url)); // 经典 worker（UMD importScripts 加载 transformers）
+    _embedWorker.onmessage = (e) => {
+        const { id, type, data } = e.data || {};
+        if (type === "ready" || type === "progress") return; // warmup / 进度消息，无 pending
+        const p = _embedPending.get(id);
+        if (!p) return;
+        _embedPending.delete(id);
+        if (type === "result") p.resolve(data);
+        else if (type === "error") p.reject(new Error(data));
+    };
+    _embedWorker.onerror = (err) => {
+        const errMsg = String((err && err.message) || err);
+        for (const [, p] of _embedPending) p.reject(new Error("embedding worker 错误: " + errMsg));
+        _embedPending.clear();
+        _embedWorker = null; // 允许下次回落主线程重试
+    };
+    return _embedWorker;
+}
+
+function embedViaWorker(text, isQuery) {
+    return new Promise((resolve, reject) => {
+        let w;
+        try { w = getEmbedWorker(); }
+        catch (e) { reject(e); return; }
+        const id = ++_embedReqId;
+        _embedPending.set(id, { resolve, reject });
+        try {
+            w.postMessage({ id, text, isQuery });
+        } catch (e) {
+            _embedPending.delete(id);
+            reject(e);
+        }
+    });
+}
+
+// 主动预热（init 时调用）：让 worker 后台加载模型，玩家首次语义检索即命中、不卡
+export function warmupEmbeddingWorker() {
+    try {
+        getEmbedWorker().postMessage({ id: ++_embedReqId, type: "warmup" });
+    } catch (e) { /* Worker 不可用（如 Node 测试环境），忽略，运行时回落主线程 */ }
+}
+
 export function getWorldLoreKB() {
     // ★ B7：优先使用当前存档的独立知识库副本（不污染 world 出厂默认）
     return S.activeLoreKB || (S.currentWorld && S.currentWorld.lore_kb) || S.loreKB;
@@ -80,16 +136,13 @@ export async function embeddingRetrieve(input, topK = 5) {
     }
     const embeddedSnippets = kb.snippets.filter(s => Array.isArray(s.embedding) && s.embedding.length);
     if (!embeddedSnippets.length) return [];
-    if (!S.embeddingModel) {
-        try {
-            S.embeddingModel = await window.transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-        } catch (e) {
-            console.warn("Embedding model load failed", e);
-            return [];
-        }
+    let qVec;
+    try {
+        qVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
+    } catch (e) {
+        console.warn("查询向量计算失败", e);
+        return [];
     }
-    const out = await S.embeddingModel(input, { pooling: "mean", normalize: true });
-    const qVec = Array.from(out.data);
     const scored = embeddedSnippets.map(s => {
         const sim = cosineSimilarity(qVec, s.embedding);
         return { snippet: s, embScore: sim };
@@ -97,24 +150,35 @@ export async function embeddingRetrieve(input, topK = 5) {
     return scored;
 }
 
-export async function computeEmbedding(text) {
+export async function computeEmbedding(text, isQuery = false) {
+    // ★ P0-3-E：优先走 Web Worker（不卡 UI）；任何失败回落主线程
+    try {
+        return await embedViaWorker(text, isQuery);
+    } catch (e) {
+        console.warn("Worker 向量计算失败，回落主线程:", e && e.message);
+    }
+    // 主线程回落（需 window.transformers）
     if (typeof window.transformers === "undefined") throw new Error("transformers 不可用");
     if (!S.embeddingModel) {
-        S.embeddingModel = await window.transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+        S.embeddingModel = await window.transformers.pipeline("feature-extraction", EMBED_MODEL);
     }
-    const out = await S.embeddingModel(text, { pooling: "mean", normalize: true });
+    const input = isQuery ? BGE_QUERY_PREFIX + text : text;
+    const out = await S.embeddingModel(input, { pooling: "mean", normalize: true });
     return Array.from(out.data);
 }
 
 export async function ensureLoreEmbeddings(kb) {
     if (!kb || !kb.snippets || !kb.snippets.length) return;
-    if (kb.snippets.every(s => Array.isArray(s.embedding) && s.embedding.length)) return;
-    if (typeof window.transformers === "undefined") return; // 环境不支持，降级为关键词
+    // ★ P0-3 维度打标：全部已算且模型/维度一致才跳过，否则需重算（换模型后旧向量错配）
+    if (kb.snippets.every(s => Array.isArray(s.embedding) && s.embedding.length && s.embedDim === EMBED_DIM && s.embedModel === EMBED_MODEL)) return;
+    if (typeof window.transformers === "undefined" && typeof Worker === "undefined") return; // 环境不支持，降级为关键词
     for (const s of kb.snippets) {
-        if (s.embedding) continue;
+        if (s.embedding && s.embedDim === EMBED_DIM && s.embedModel === EMBED_MODEL) continue;
         const text = [s.category, s.title, s.content, (s.keywords || []).join(" ")].filter(Boolean).join(" ");
         try {
-            s.embedding = await computeEmbedding(text);
+            s.embedding = await computeEmbedding(text); // 文档句不加查询前缀
+            s.embedDim = EMBED_DIM;
+            s.embedModel = EMBED_MODEL;
         } catch (e) {
             console.warn("知识库片段向量计算失败:", e.message);
             return; // 一旦模型不可用，剩余片段也不再尝试
@@ -233,12 +297,10 @@ export async function retrieve(input) {
         merged.set("behavior_" + b.id, { snippet: { id: "behavior_" + b.id, category: "行为记录", title: "关键事实", content: b.text }, kw: 1.5, emb: 0 });
     }
 
-    // ★ B1: 触发门禁（混合触发）。老存档（所有 snippet 均无 activation_keys 元数据）→ 跳过，沿用原全量 Top8，零回退
+    // ★ B1: 触发门禁（混合触发）。P0-2：按用户要求不再兼容"无元数据老存档"，
+    // 移除原「无 activation_keys → 全量 Top8 回退」分支，所有知识库统一走触发门禁。
     const _kb = getWorldLoreKB();
-    const hasTriggerMeta = _kb && _kb.snippets && _kb.snippets.some(s =>
-        (Array.isArray(s.activation_keys) && s.activation_keys.length > 0) || !!s.trigger_mode
-    );
-    if (hasTriggerMeta) {
+    if (_kb && _kb.snippets) {
         // always 是真正的常驻条目，不能依赖关键词/向量候选池是否先召回。
         for (const s of _kb.snippets) {
             const mode = s.trigger_mode || (s.activation_keys?.length ? "keyword" : "always");
@@ -297,13 +359,6 @@ export async function retrieve(input) {
         }
     }
 
-    // 老存档（无触发元数据）：完全沿用原逻辑，零回退
-    if (!hasTriggerMeta) {
-        return Array.from(merged.values())
-            .map(x => ({ ...x.snippet, score: KW_W * (x.kw || 0) + EMB_W * (x.emb || 0) }))
-            .sort((a, b) => b.score - a.score).slice(0, 8);
-    }
-
     // ★ B4：token 预算裁剪 —— 先按 priority（重要度）再按相关度排序，累计到预算上限即停。
     // 预算用字符数近似（1 token ≈ 2 中文字符）。行为记录（记忆）不占 lore 预算、始终保留。
     const BUDGET_CHARS = (_kb && typeof _kb.budget_tokens === "number" && _kb.budget_tokens > 0)
@@ -343,7 +398,7 @@ export async function retrieveBehaviorRecords(input, topK = 3) {
     let qVec = null;
     try {
         if (typeof window.transformers !== "undefined" && terms.length > 0) {
-            qVec = await computeEmbedding(input);
+            qVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
             useVector = true;
             // 后台补算未计算的记忆 embedding
             ensureBehaviorEmbeddings();
@@ -408,13 +463,16 @@ export function addBehaviorRecords(facts) {
 
 // ★ C4：后台异步补算所有行为记忆的向量 embedding（"黛玉病了"→"黛玉咳血" 语义匹配）
 export async function ensureBehaviorEmbeddings() {
-    if (typeof window.transformers === "undefined") return;
+    if (typeof window.transformers === "undefined" && typeof Worker === "undefined") return;
     const records = S.activeBehaviorRecords;
     if (!records || !records.length) return;
     for (const r of records) {
-        if (r.embedding) continue;
+        // ★ P0-3 维度打标：模型/维度一致才跳过，否则重算
+        if (r.embedding && r.embedDim === EMBED_DIM && r.embedModel === EMBED_MODEL) continue;
         try {
-            r.embedding = await computeEmbedding(r.text);
+            r.embedding = await computeEmbedding(r.text); // 记忆文本作为文档，不加查询前缀
+            r.embedDim = EMBED_DIM;
+            r.embedModel = EMBED_MODEL;
         } catch (e) { /* 单条失败不阻塞其余 */ }
     }
 }
