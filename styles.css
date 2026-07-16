@@ -159,6 +159,8 @@
             padding: 24px;
             overflow-y: auto;
             position: relative;
+            min-height: 100%;
+            min-height: 100dvh;
         }
         /* 氛围背景层：雾 / 暗角 / 浮尘（仅首页，固定在该屏内，不溢出到其他屏） */
         #homeMotes {
@@ -202,6 +204,7 @@
             text-align: center;
             position: relative;
             z-index: 2;
+            margin: auto; /* ★ 确保内容在宽高不足时仍居中，且顶部不会被 flex 居中截断 */
         }
         /* 首页主题切换按钮：固定到视口右上角（仅主页，不影响游戏屏头部按钮） */
         .home-content .theme-toggle-btn {
@@ -421,21 +424,8 @@
             opacity: 0.8;
         }
 
-        /* ★ PC 大屏：主界面内容间距随视口高度弹性放大，消除「居中后底部空一节」 */
-        /* 仅作用于宽屏(>=768px)且有一定高度(>=700px)，手机端(max-width:480px)不受影响 */
-        @media (min-width: 768px) and (min-height: 700px) {
-            .home-content {
-                padding-top: clamp(44px, 7vh, 110px);
-                padding-bottom: clamp(44px, 7vh, 110px);
-            }
-            .home-content .home-est { margin-bottom: clamp(18px, 3vh, 40px); }
-            .home-content .home-subtitle-en { margin-bottom: clamp(22px, 3.4vh, 48px); }
-            .home-content .divider { margin-bottom: clamp(20px, 3vh, 44px); }
-            .home-content .home-subtitle { margin-bottom: clamp(34px, 5vh, 72px); }
-            .home-content .menu-grid { gap: clamp(12px, 2.2vh, 26px); }
-            .home-content .home-disclaimer { margin-top: clamp(30px, 5vh, 72px); }
-            .home-content .home-local-note { margin-top: clamp(10px, 2vh, 24px); }
-        }
+        /* 主界面在所有尺寸下整体垂直居中：由 .home-screen 的 flex 居中 + .home-content 的 margin:auto 实现，
+           含顶部标题组与底部脚注，作为一个整体块居中，不会顶到上下边缘。背景层本就 absolute inset:0 全屏，与此无关。 */
 
         /* 列表屏幕 */
         .create-world-bar {
@@ -568,6 +558,8 @@
             opacity: 0;
             transition: opacity 0.25s ease;
         }
+        /* 叙事约束弹窗需要盖在游戏设置弹窗之上 */
+        #authorNoteModal.modal-overlay { z-index: 1100; }
         .modal-overlay.show {
             display: flex;
             opacity: 1;
@@ -1505,3 +1497,14 @@
             .mist, .title-sheen, .menu-btn { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
             * { transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
         }
+
+        /* ★ 步骤二：知识库初览中的"时间体系"卡片 */
+        .time-cfg-card { border:1px solid var(--border, rgba(0,0,0,0.12)); border-radius:10px; padding:12px 14px; margin-bottom:14px; background:rgba(127,127,213,0.06); }
+        .time-cfg-head { font-weight:600; margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .time-cfg-ai, .time-cfg-lock { font-size:12px; font-weight:400; color:var(--text-secondary, #666); }
+        .time-cfg-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:10px 16px; }
+        .time-cfg-grid .form-group { margin:0; display:flex; flex-direction:column; gap:4px; }
+        .time-cfg-show { justify-content:center; }
+        .time-cfg-summary { line-height:1.7; }
+        .time-cfg-hint { font-size:12px; color:var(--text-secondary, #666); margin:8px 0 0; }
+        @media (max-width: 560px) { .time-cfg-grid { grid-template-columns:1fr; } }

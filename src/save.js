@@ -8,7 +8,7 @@ import { S } from "./store.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState } from "./storage.js";
 import {
     stopTypewriter, showScreen, renderLog, renderChoices, updateGameDayInfo,
-    updateInputState, startTypewriter, showToast, closeModal, restoreLastChoices,
+    updateInputState, startTypewriter, showToast, closeModal, closeAllModals, restoreLastChoices,
     checkDeathBanner, renderSaveList, renderWorldList
 } from "./render.js";
 import { normalizeSimulationState } from "./simulation.js";
@@ -119,6 +119,7 @@ export function loadSave(saveId) {
     S.chatHistory = save.chatHistory ? deepClone(save.chatHistory) : rebuildChatFromHistory(save.history);
     S.chatSummary = (save.chatSummary && save.chatSummary.length) ? deepClone(save.chatSummary) : rebuildSummaryFromHistory(save.history);
     showToast(`加载存档：${save.worldName}`, "success");
+    closeAllModals();
     showScreen("gameScreen");
     document.getElementById("gameWorldName").textContent = save.worldName;
     updateGameDayInfo();

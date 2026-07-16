@@ -10,7 +10,7 @@ import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset }
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, cwNext, cwPrev } from "./render.js";
-import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, saveTimeConfig, showAuthorNoteModal, showGameSettings, showLoreGraph, showSaveList, showTimeConfigModal, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreSpoilerSettings, togglePinMemory, triggerMemoryPackImport } from "./game.js";
+import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showLoreGraph, showSaveList, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, togglePinMemory, triggerMemoryPackImport } from "./game.js";
 
 async function init() {
     applyTheme();
@@ -177,8 +177,6 @@ const ACTIONS = {
     // ★ B2：导演提示 / 持续约束
     showAuthorNoteModal: () => showAuthorNoteModal(),
     saveAuthorNote: () => saveAuthorNote(),
-    showTimeConfigModal: () => showTimeConfigModal(),
-    saveTimeConfig: () => saveTimeConfig(),
     // ★ B3：知识库编辑面板
     editWorldLore: (el) => editWorldLore(el.dataset.id),
     openLoreReview: () => openLoreReview(),
@@ -188,7 +186,6 @@ const ACTIONS = {
     confirmLoreRevision: () => confirmLoreRevision(),
     rejectLoreRevision: () => rejectLoreRevision(),
     toggleLoreSpoiler: () => toggleLoreSpoiler(),
-    toggleLoreSpoilerSettings: () => toggleLoreSpoilerSettings(),
     toggleAIEnhanced: () => toggleAIEnhanced(),
     showLoreGraph: () => showLoreGraph(),
 };

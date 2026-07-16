@@ -443,14 +443,14 @@
 <div class="modal-overlay" id="authorNoteModal">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="authorNoteModalTitle">
         <div class="modal-header">
-            <h2 id="authorNoteModalTitle">导演提示（持续约束）</h2>
+            <h2 id="authorNoteModalTitle">叙事约束（作者注）</h2>
             <button class="modal-close" data-action="closeModal" data-modal="authorNoteModal">×</button>
         </div>
         <div class="modal-body">
             <div class="form-group">
                 <label for="authorNoteInput">持续剧情约束</label>
                 <p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:var(--text-secondary);">
-                    这里写的要求会作为"导演提示"在每一轮都提醒 AI，持续生效，直到你修改或清空。<br>
+                    这里写的要求会作为"叙事约束"在每一轮都提醒 AI，持续生效，直到你修改或清空。<br>
                     例如：多描写环境与感官细节 / 保持第三人称 / 对话更口语化 / 节奏放慢别急着推进主线。
                 </p>
                 <textarea id="authorNoteInput" placeholder="输入你希望 AI 长期遵守的叙事约束..." style="min-height:120px;"></textarea>
@@ -519,37 +519,12 @@
             <button class="modal-close" data-action="closeModal" data-modal="gameSettingsModal">×</button>
         </div>
         <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;">
-            <button class="btn" data-action="showAuthorNoteModal" style="text-align:left;">✍️ 导演提示（作者注）</button>
-            <button class="btn" data-action="showTimeConfigModal" style="text-align:left;">⏰ 世界时间设置</button>
+            <button class="btn" data-action="showAuthorNoteModal" style="text-align:left;">✍️ 叙事约束（作者注）</button>
             <button class="btn" id="aiEnhancedToggle" data-action="toggleAIEnhanced" style="text-align:left;">🧠 AI 增强检查：已关闭</button>
-            <button class="btn" data-action="toggleTheme" style="text-align:left;">🌓 切换日间 / 夜间模式</button>
-            <button class="btn" data-action="toggleLoreSpoilerSettings" style="text-align:left;">🔒 / 🔓 知识库防剧透</button>
             <button class="btn" data-action="exportStory" style="text-align:left;">📄 导出剧情文本</button>
         </div>
         <div class="modal-footer">
             <button class="btn primary" data-action="closeModal" data-modal="gameSettingsModal">关闭</button>
-        </div>
-    </div>
-</div>
-
-<!-- ================= 世界时间设置（E13） ================= -->
-<div class="modal-overlay" id="timeConfigModal">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="timeConfigTitle">
-        <div class="modal-header">
-            <h2 id="timeConfigTitle">世界时间设置</h2>
-            <button class="modal-close" data-action="closeModal" data-modal="timeConfigModal">×</button>
-        </div>
-        <div class="modal-body">
-            <div class="form-group"><label for="timeConfigEra">纪元 / 年份</label><input id="timeConfigEra" maxlength="40" placeholder="例如：大清乾隆年间"></div>
-            <div class="form-group"><label for="timeConfigCalendar">历法</label><select id="timeConfigCalendar"><option value="day">第 N 天</option><option value="gregorian">公历</option><option value="lunar">阴历</option><option value="custom_calendar">自定义历法</option><option value="none">不显示日期</option></select></div>
-            <div class="form-group"><label for="timeConfigClock">时钟</label><select id="timeConfigClock"><option value="period">时段</option><option value="clock">具体时钟</option><option value="none">不显示时钟</option></select></div>
-            <div class="form-group"><label for="timeConfigSeason">季节</label><input id="timeConfigSeason" maxlength="10" placeholder="例如：仲春"></div>
-            <div class="form-group"><label for="timeConfigWeather">当前天气</label><input id="timeConfigWeather" maxlength="20" placeholder="例如：细雨"></div>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="timeConfigShow" style="width:auto;"><span>在界面显示世界时间</span></label>
-        </div>
-        <div class="modal-footer">
-            <button class="btn secondary" data-action="closeModal" data-modal="timeConfigModal">取消</button>
-            <button class="btn primary" data-action="saveTimeConfig">保存</button>
         </div>
     </div>
 </div>

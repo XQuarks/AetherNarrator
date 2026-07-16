@@ -2,7 +2,7 @@
 // AetherNarrator · game.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_ORDER, DEFAULT_TIME_CONFIG, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
+import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
 import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState } from "./storage.js";
@@ -780,12 +780,6 @@ export function togglePinMemory(id) {
     if (r) { r.pinned = !r.pinned; createOrUpdateSave(); renderStatusPanel(S.currentStatusTab); }
 }
 
-export function toggleLoreSpoilerSettings() {
-    S.loreSpoilerHidden = !S.loreSpoilerHidden;
-    closeModal("gameSettingsModal");
-    showToast(S.loreSpoilerHidden ? "知识库已隐藏" : "知识库已显示", "success");
-}
-
 function updateAIEnhancedButton() {
     const button = document.getElementById("aiEnhancedToggle");
     if (button) button.textContent = S.aiEnhanced
@@ -843,32 +837,4 @@ export async function importMemoryPack(file) {
     }
 }
 
-// ★ E13：时间显示设置面板
-export function showTimeConfigModal() {
-    showModal("timeConfigModal");
-    const schema = getWorldSchema(S.currentWorld);
-    const cfg = (schema && schema.time_config) || DEFAULT_TIME_CONFIG; // fallback
-    document.getElementById("timeConfigEra").value = cfg.era_label || "";
-    document.getElementById("timeConfigCalendar").value = cfg.calendar_mode || "day";
-    document.getElementById("timeConfigClock").value = cfg.clock_mode || "period";
-    document.getElementById("timeConfigSeason").value = cfg.season || "";
-    document.getElementById("timeConfigWeather").value = cfg.weather || "";
-    document.getElementById("timeConfigShow").checked = cfg.show !== false;
-}
-
-export async function saveTimeConfig() {
-    const schema = getWorldSchema(S.currentWorld);
-    if (!schema) return;
-    if (!schema.time_config) schema.time_config = {};
-    schema.time_config.era_label = document.getElementById("timeConfigEra").value.trim().slice(0, 40);
-    schema.time_config.calendar_mode = document.getElementById("timeConfigCalendar").value;
-    schema.time_config.clock_mode = document.getElementById("timeConfigClock").value;
-    schema.time_config.season = document.getElementById("timeConfigSeason").value.trim().slice(0, 10);
-    schema.time_config.weather = document.getElementById("timeConfigWeather").value.trim().slice(0, 20);
-    schema.time_config.show = document.getElementById("timeConfigShow").checked;
-    saveWorlds();
-    closeModal("timeConfigModal");
-    updateGameDayInfo();
-    if (S.currentStatusTab === "timeline") renderStatusPanel("timeline");
-    showToast("时间设置已更新", "success");
-}
+// （时间设置已迁移至知识库初览面板：见 lore-ui.js 的 renderTimeConfigSection；游戏中不再提供独立二级弹窗）

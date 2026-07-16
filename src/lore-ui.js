@@ -4,8 +4,8 @@
 // 仅依赖 rag / render / store / utils / worldview / lore-revision / llm / prompt / save，
 // 不反向依赖 game.js，避免循环引用。
 // ============================================================
-import { S, LINK_RELATION_LABELS } from "./store.js";
-import { deepClone, escapeHtml } from "./utils.js";
+import { S, LINK_RELATION_LABELS, DEFAULT_TIME_CONFIG, normalizeTimeConfig } from "./store.js";
+import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema } from "./utils.js";
 import { showModal, closeModal, showToast } from "./render.js";
 import { getWorldLoreKB, ensureLoreEmbeddings } from "./rag.js";
 import { createOrUpdateSave } from "./save.js";
@@ -68,10 +68,54 @@ function checkLoreQuality(list) {
     return warns;
 }
 
+// ★ 步骤二：把"时间体系"作为知识库条目，在创建初览里正式呈现（AI 已按世界观判定，仅在创建世界时可调）
+const CALENDAR_LABELS = { day: "按第 N 天推进", gregorian: "公历（月/日/星期）", lunar: "阴历（月/日）", custom_calendar: "自定义历法", none: "不显示日期" };
+const CLOCK_LABELS = { period: "时段标签", clock: "具体时钟", none: "不显示时刻" };
+
+function summarizeTimeConfig(cfg) {
+    const c = normalizeTimeConfig(cfg);
+    const parts = [];
+    if (c.era_label) parts.push(`纪元：${c.era_label}`);
+    parts.push(`历法：${CALENDAR_LABELS[c.calendar_mode] || c.calendar_mode}`);
+    parts.push(`时钟：${CLOCK_LABELS[c.clock_mode] || c.clock_mode}`);
+    if (c.season) parts.push(`季节：${c.season}`);
+    if (c.weather) parts.push(`天气：${c.weather}`);
+    parts.push(`界面显示：${c.show ? "开启" : "关闭"}`);
+    return parts.join(" · ");
+}
+
+function renderTimeConfigSection(mode) {
+    const cfg = normalizeTimeConfig((getWorldSchema(S.currentWorld) || {}).time_config);
+    if (mode !== "world") {
+        return `<div class="time-cfg-card">
+            <div class="time-cfg-head">🌐 世界时间体系 <span class="time-cfg-lock">🔒 进入游戏后已锁定</span></div>
+            <div class="time-cfg-summary">${escapeHtml(summarizeTimeConfig(cfg))}</div>
+            <p class="time-cfg-hint">时间体系由 AI 在创建世界时自动判定，仅创建当次可调，游戏中不可实时修改。</p>
+        </div>`;
+    }
+    const calOpts = Object.entries(CALENDAR_LABELS)
+        .map(([v, t]) => `<option value="${v}"${cfg.calendar_mode === v ? " selected" : ""}>${t}</option>`).join("");
+    const clkOpts = Object.entries(CLOCK_LABELS)
+        .map(([v, t]) => `<option value="${v}"${cfg.clock_mode === v ? " selected" : ""}>${t}</option>`).join("");
+    return `<div class="time-cfg-card">
+        <div class="time-cfg-head">🌐 世界时间体系 <span class="time-cfg-ai">⚙️ AI 已按世界观自动设定，可在此微调</span></div>
+        <div class="time-cfg-grid">
+            <div class="form-group"><label>纪元 / 年份</label><input id="tc_era" maxlength="40" value="${escapeHtml(cfg.era_label || "")}" placeholder="例如：大清乾隆年间"></div>
+            <div class="form-group"><label>历法</label><select id="tc_calendar">${calOpts}</select></div>
+            <div class="form-group"><label>时钟</label><select id="tc_clock">${clkOpts}</select></div>
+            <div class="form-group"><label>季节</label><input id="tc_season" maxlength="10" value="${escapeHtml(cfg.season || "")}" placeholder="例如：仲春"></div>
+            <div class="form-group"><label>当前天气</label><input id="tc_weather" maxlength="20" value="${escapeHtml(cfg.weather || "")}" placeholder="例如：细雨"></div>
+            <div class="form-group time-cfg-show"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="tc_show" style="width:auto;" ${cfg.show !== false ? "checked" : ""}><span>在界面显示世界时间</span></label></div>
+        </div>
+        <p class="time-cfg-hint">此设定仅在创建本世界时可调整；进入游戏后将锁定，不可实时修改。</p>
+    </div>`;
+}
+
 function renderLoreReviewBody() {
     const body = document.getElementById("loreReviewBody");
     if (!body) return;
     const list = S._loreEdit || [];
+    const timeSection = renderTimeConfigSection(S._loreEditingWorldDefault ? "world" : "save");
 
     // B5：若有 AI 修订缓冲，顶部展示修订提示
     const revisionHint = S._loreRevisionBuffer
@@ -127,7 +171,7 @@ function renderLoreReviewBody() {
             ${(s.links && s.links.length) ? `<div class="lore-links">${s.links.map(l => `<span class="lore-link-tag">→ ${escapeHtml(l.target)}（${escapeHtml(LINK_RELATION_LABELS[l.relation] || l.relation)}）</span>`).join(" ")}</div>` : ""}
         </div>`;
     }).join("");
-    body.innerHTML = spoilerBtn + revisionHint + warnHtml + `<div style="margin-bottom:10px"><button class="btn secondary" data-action="showLoreGraph" style="font-size:12px;padding:4px 12px;">🔗 查看关联图</button></div>` + (rows || `<p style="color:var(--text-secondary);">暂无条目，点下方"添加条目"新建。</p>`);
+    body.innerHTML = timeSection + spoilerBtn + revisionHint + warnHtml + `<div style="margin-bottom:10px"><button class="btn secondary" data-action="showLoreGraph" style="font-size:12px;padding:4px 12px;">🔗 查看关联图</button></div>` + (rows || `<p style="color:var(--text-secondary);">暂无条目，点下方"添加条目"新建。</p>`);
 }
 
 export function openLoreReview(mode = "save") {
@@ -135,6 +179,7 @@ export function openLoreReview(mode = "save") {
     S._loreEditingWorldDefault = mode === "world";
     const title = document.getElementById("loreReviewModalTitle");
     if (title) title.textContent = mode === "world" ? "编辑新周目默认知识库" : "当前存档知识库";
+    // ★ 步骤二：时间体系已作为卡片直接渲染在初览面板顶部（renderTimeConfigSection）；world 模式可编辑，save 模式只读锁定
     if (!S.activeLoreKB) S.activeLoreKB = { ip: "", snippets: [] };
     if (!Array.isArray(S.activeLoreKB.snippets)) S.activeLoreKB.snippets = [];
     S._loreEdit = deepClone(S.activeLoreKB.snippets); // 深拷贝到缓冲，取消不影响原数据
@@ -182,6 +227,18 @@ export async function saveLoreReview() {
         showToast("知识库存在阻断错误，请先修复红色质量提示", "error", 4000);
         renderLoreReviewBody();
         return;
+    }
+    // ★ 步骤二：创建世界（world 模式）时，把"时间体系"卡片里的输入写回 schema.time_config
+    if (S._loreEditingWorldDefault) {
+        const tc = (S.currentWorld.schema && S.currentWorld.schema.time_config) || {};
+        tc.era_label = (document.getElementById("tc_era")?.value || "").trim().slice(0, 40);
+        tc.calendar_mode = document.getElementById("tc_calendar")?.value || "day";
+        tc.clock_mode = document.getElementById("tc_clock")?.value || "period";
+        tc.season = (document.getElementById("tc_season")?.value || "").trim().slice(0, 10);
+        tc.weather = (document.getElementById("tc_weather")?.value || "").trim().slice(0, 20);
+        tc.show = !!document.getElementById("tc_show")?.checked;
+        if (!S.currentWorld.schema) S.currentWorld.schema = defaultWorldSchema(S.currentWorld.name);
+        S.currentWorld.schema.time_config = tc;
     }
     list.forEach(s => {
         s.title = (s.title || "").trim().slice(0, 200);

@@ -67,15 +67,16 @@ try {
     await page.locator('[data-action="showWorldDetail"][data-id="demo_红楼梦"]').click();
     await page.locator('#worldDetailModal [data-action="startGame"]').click();
     await page.locator('[data-action="showGameSettings"]').click();
-    await page.locator('[data-action="showTimeConfigModal"]').click();
-    if (!(await page.locator("#timeConfigModal").isVisible())) throw new Error("时间设置面板不可见");
+    // 时间设置已迁移至知识库初览，游戏设置中不应再出现独立按钮
+    if (await page.locator('[data-action="showTimeConfigModal"]').count() !== 0) throw new Error("游戏设置仍残留已移除的「世界时间设置」按钮");
     if (!(await page.locator("#aiEnhancedToggle").isVisible())) throw new Error("AI 增强开关不可见");
+    await page.locator('[data-action="closeModal"][data-modal="gameSettingsModal"]').click();
 
     await page.setViewportSize({ width: 390, height: 844 });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     if (overflow) throw new Error("移动端存在横向溢出");
     if (pageErrors.length) throw new Error("浏览器运行错误：" + pageErrors.join("；"));
-    console.log("✅ 浏览器烟雾测试通过：开局、设置、时间面板、移动端布局");
+    console.log("✅ 浏览器烟雾测试通过：开局、设置（已移除独立时间面板）、移动端布局");
 } finally {
     if (browser) await browser.close();
     await new Promise(resolve => server.close(resolve));

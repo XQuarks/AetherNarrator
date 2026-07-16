@@ -45,6 +45,10 @@ export function closeModal(id) {
     S.lastFocusedBeforeModal = null;
 }
 
+export function closeAllModals() {
+    document.querySelectorAll(".modal-overlay.show").forEach(el => closeModal(el.id));
+}
+
 export function showApiModal() {
     showModal("apiModal");
 }
