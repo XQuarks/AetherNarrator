@@ -7,6 +7,7 @@ import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, get
 import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, updateFontSizeButtons, updateTempLabel } from "./theme.js";
 import { abortCurrentRequest, chooseOption, confirmRestart, continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./game.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
+import { migrateSaveRecord } from "./migrations.js";
 
 export function showScreen(id) {
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -138,10 +139,12 @@ function renderCwStep() {
 
 export function onWorldTypeChange(value) {
     const ipNameField = document.getElementById("ipNameField");
+    const ipUploadField = document.getElementById("ipUploadField");
     const worldDescHint = document.getElementById("worldDescHint");
     const worldDescTextarea = document.getElementById("worldDesc");
     if (value === "ip") {
         ipNameField.classList.add("show");
+        ipUploadField.classList.add("show");
         worldDescHint.innerHTML = "你可以直接使用原作的世界观描述，也可以在此基础上进行修改和扩展——例如调整力量体系、加入新势力、改变时间线等。描述越详细，AI 生成的剧情越贴合你的构想。";
         worldDescTextarea.placeholder = "可以直接填写原作的世界观概述，也可以在此基础上修改...\n例如：在原著的世界观基础上，增加了一个隐秘的地下组织...";
         // 若描述为空，自动填入"原作世界观"
@@ -150,6 +153,15 @@ export function onWorldTypeChange(value) {
         }
     } else {
         ipNameField.classList.remove("show");
+        ipUploadField.classList.remove("show");
+        // 切到原创时清掉可能已上传的 IP 源文件，避免被错误带入生成
+        S.sourceFileContent = "";
+        const area = document.getElementById("fileUploadArea");
+        const text = document.getElementById("fileUploadText");
+        const input = document.getElementById("sourceFile");
+        if (area) area.classList.remove("has-file");
+        if (text) text.innerHTML = "点击上传 TXT / DOCX / EPUB 文件";
+        if (input) input.value = "";
         worldDescHint.innerHTML = "描述越详细，AI 生成的内容越贴近你的预期。";
         worldDescTextarea.placeholder = "描述这个世界的规则、力量体系、主要势力、地点、人物关系等...";
     }
@@ -263,7 +275,7 @@ export function renderSaveList() {
                 <div class="item-meta">${escapeHtml(s.progress)}<br>最后游玩：${escapeHtml(s.updatedAt)}</div>
             </div>
             <div class="save-actions">
-                <button class="save-play-btn" data-action="loadSave" data-id="${s.id}">继续游玩</button>
+                <button class="save-play-btn" data-action="showSaveDetail" data-id="${s.id}">继续游玩</button>
                 <button class="save-del-btn" data-action="deleteSave" data-id="${s.id}">删除</button>
             </div>
         </div>
@@ -336,17 +348,63 @@ export function showWorldDetail(worldId) {
     if (hasSave) {
         footer.innerHTML = `
             <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
-            <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">编辑新周目默认知识库</button>
+            <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">默认知识库</button>
+            <button class="btn secondary" data-action="showExportWorldChoice" data-id="${S.currentWorld.id}">导出世界</button>
             <button class="btn primary" data-action="continueLatestSave" data-id="${S.currentWorld.id}">继续游戏</button>
             <button class="btn secondary" data-action="confirmRestart" data-id="${S.currentWorld.id}">重新开始</button>`;
     } else {
         footer.innerHTML = `
             <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
-            <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">编辑新周目默认知识库</button>
+            <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">默认知识库</button>
+            <button class="btn secondary" data-action="showExportWorldChoice" data-id="${S.currentWorld.id}">导出世界</button>
             <button class="btn primary" data-action="startGame" data-opts='{"resetBehavior":true}'>开始游玩</button>`;
     }
 
     showModal("worldDetailModal");
+}
+
+// ★ 存档详情二级界面（镜像世界详情，底部按钮改为 返回/存档知识库/导出世界/继续游戏）
+export function renderSaveDetail(saveId) {
+    const stored = S.saves.find(s => s.id === saveId);
+    const save = stored ? migrateSaveRecord(stored, S.worlds.find(w => w.id === stored.worldId)) : null;
+    if (!save) { showToast("未找到该存档", "error"); return; }
+    const world = S.worlds.find(w => w.id === save.worldId);
+    S.currentWorld = world || S.currentWorld; // 供导出世界等依赖 world 的逻辑兜底
+    document.getElementById("detailSaveTitle").textContent = `存档详情 · ${save.worldName}`;
+    const isDead = save.state && save.state.is_alive === false;
+    document.getElementById("detailSaveBody").innerHTML = `
+        <div class="form-group">
+            <label>所属世界</label>
+            <p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(save.worldName)}</p>
+        </div>
+        ${world ? `
+        <div class="form-group">
+            <label>世界类型</label>
+            <p style="margin:0;font-size:15px;">${world.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p>
+        </div>` : ""}
+        <div class="form-group">
+            <label>进度</label>
+            <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(save.progress || "—")}</p>
+        </div>
+        <div class="form-group">
+            <label>最后游玩</label>
+            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${escapeHtml(save.updatedAt || "—")}</p>
+        </div>
+        <div class="form-group">
+            <label>状态</label>
+            <p style="margin:0;font-size:14px;color:${isDead ? "var(--danger)" : "var(--text-secondary)"};">${isDead ? "☠ 已死亡（可查看，继续将进入死亡结局）" : "进行中"}</p>
+        </div>
+        <div class="form-group">
+            <label>知识库条目</label>
+            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${save.lore_kb && save.lore_kb.snippets ? save.lore_kb.snippets.length : 0} 条（含本存档独立副本）</p>
+        </div>`;
+    const footer = document.getElementById("detailSaveModalFooter");
+    footer.innerHTML = `
+        <button class="btn secondary" data-action="returnFromSaveDetail">返回</button>
+        <button class="btn secondary" data-action="editSaveLore" data-id="${save.id}">存档知识库</button>
+        <button class="btn secondary" data-action="showExportWorldChoice" data-id="${save.worldId}">导出世界</button>
+        <button class="btn primary" data-action="loadSave" data-id="${save.id}">继续游戏</button>`;
+    showModal("saveDetailModal");
 }
 
 export function showStatusPanel() {

@@ -10,7 +10,7 @@ import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset }
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, cwNext, cwPrev } from "./render.js";
-import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showLoreGraph, showSaveList, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, togglePinMemory, triggerMemoryPackImport } from "./game.js";
+import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, togglePinMemory, triggerMemoryPackImport } from "./game.js";
 
 async function init() {
     applyTheme();
@@ -161,8 +161,16 @@ const ACTIONS = {
     doRestartConfirmed: () => doRestartConfirmed(),
     restToNextDay: () => restToNextDay(),
     loadSave: (el) => loadSave(el.dataset.id),
+    showSaveDetail: (el) => showSaveDetail(el.dataset.id),
+    returnFromSaveDetail: () => returnFromSaveDetail(),
+    editSaveLore: (el) => editSaveLore(el.dataset.id),
     deleteSave: (el) => deleteSave(el.dataset.id),
     deleteWorld: (el) => deleteWorld(el.dataset.id),
+    showExportWorldChoice: (el) => showExportWorldChoice(el.dataset.id),
+    exportWorldChoiceLite: () => exportWorldChoice(true),
+    exportWorldChoiceFull: () => exportWorldChoice(false),
+    triggerWorldPackImport: () => triggerWorldPackImport(),
+    importWorld: (el) => importWorld(el.files && el.files[0]),
     // 状态面板
     closeStatusPanel: () => closeStatusPanel(),
     switchStatusTab: (el) => switchStatusTab(el.dataset.key),
@@ -187,7 +195,6 @@ const ACTIONS = {
     rejectLoreRevision: () => rejectLoreRevision(),
     toggleLoreSpoiler: () => toggleLoreSpoiler(),
     toggleAIEnhanced: () => toggleAIEnhanced(),
-    showLoreGraph: () => showLoreGraph(),
 };
 
 document.addEventListener("keydown", (e) => {

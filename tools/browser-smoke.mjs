@@ -70,7 +70,7 @@ try {
     // 时间设置已迁移至知识库初览，游戏设置中不应再出现独立按钮
     if (await page.locator('[data-action="showTimeConfigModal"]').count() !== 0) throw new Error("游戏设置仍残留已移除的「世界时间设置」按钮");
     if (!(await page.locator("#aiEnhancedToggle").isVisible())) throw new Error("AI 增强开关不可见");
-    await page.locator('[data-action="closeModal"][data-modal="gameSettingsModal"]').click();
+    await page.locator('[data-action="closeModal"][data-modal="gameSettingsModal"]').first().click();
 
     await page.setViewportSize({ width: 390, height: 844 });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);

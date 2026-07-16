@@ -5,15 +5,16 @@ import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
 import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
-import { saveSaves, saveState, saveWorlds, clearCurrentRunState } from "./storage.js";
+import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, getWorldLoreKB, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
 import { callLLM, callWorldGenerationLLM, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
-import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
+import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
 import { LATEST_SAVE_SCHEMA_VERSION, migrateSaveRecord } from "./migrations.js";
 import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
+import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
 import { applySimulationChanges, createRestEvent, normalizeSimulationState } from "./simulation.js";
@@ -21,9 +22,9 @@ import { acquireTurn, isSessionContextCurrent, releaseTurn } from "./turn-lifecy
 
 // 以下函数体已拆分至 save.js / lore-ui.js；此处重新导出以保持 app.js / render.js 的导入不变
 import { abortCurrentRequest, startGame, continueLatestSave, loadSave, deleteSave, deleteWorld, createOrUpdateSave } from "./save.js";
-import { openLoreReview, editWorldLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreSpoiler, showLoreGraph } from "./lore-ui.js";
+import { openLoreReview, editWorldLore, editSaveLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreSpoiler } from "./lore-ui.js";
 export { abortCurrentRequest, startGame, continueLatestSave, loadSave, deleteSave, deleteWorld, createOrUpdateSave };
-export { openLoreReview, editWorldLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreSpoiler, showLoreGraph };
+export { openLoreReview, editWorldLore, editSaveLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreSpoiler };
 
 export function goHome() {
     abortCurrentRequest();
@@ -183,6 +184,19 @@ export function showWorldList() {
 }
 
 export function showSaveList() {
+    renderSaveList();
+    showScreen("saveListScreen");
+}
+
+// ★ 存档详情二级界面：打开前先确保存档列表在底层（方便「返回」回到列表）
+export function showSaveDetail(saveId) {
+    renderSaveList();
+    renderSaveDetail(saveId);
+}
+
+// ★ 存档详情「返回」：关闭弹窗并刷新底层存档列表
+export function returnFromSaveDetail() {
+    closeModal("saveDetailModal");
     renderSaveList();
     showScreen("saveListScreen");
 }
@@ -838,3 +852,59 @@ export async function importMemoryPack(file) {
 }
 
 // （时间设置已迁移至知识库初览面板：见 lore-ui.js 的 renderTimeConfigSection；游戏中不再提供独立二级弹窗）
+
+// ===== A：世界（含知识库 lore_kb）导入 / 导出 =====
+// 导出整个世界（含知识库向量，或剥离向量），生成可分享的 .json 包。
+export function exportWorld(worldId, lite = false) {
+    const world = S.worlds.find(w => w.id === worldId);
+    if (!world) { showToast("未找到该世界", "error"); return; }
+    const pack = createWorldPack(world, { includeEmbeddings: !lite });
+    const blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `以太叙事-世界-${(world.name || "world").replace(/[\\/:*?"<>|]/g, "_")}${lite ? "-精简" : ""}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast(`已导出世界「${world.name}」${lite ? "（精简·不含向量，导入时需重算）" : "（完整·含向量）"}`, "success", 4000);
+}
+
+// 点击「导入世界」→ 触发隐藏的文件选择框
+export function triggerWorldPackImport() {
+    const input = document.getElementById("worldPackFile");
+    if (input) { input.value = ""; input.click(); }
+}
+
+// 文件选择后：解析 → 合并 → 持久化 → 刷新列表
+export async function importWorld(file) {
+    if (!file) return;
+    try {
+        const text = await file.text();
+        const result = await importWorldPack(text, { onConflict: "rename" });
+        if (result.action === "skipped") {
+            showToast("已跳过：世界 ID 冲突且选择跳过", "info");
+            return;
+        }
+        renderWorldList();
+        const conflictNote = result.conflictId ? `（ID 冲突已自动改名：${result.imported.id}）` : "";
+        const embedNote = result.needsEmbedding ? "（当前环境无法计算向量，已降级为关键词检索）" : "";
+        showToast(`世界「${result.imported.name}」已导入${conflictNote}${embedNote}`, "success", 4000);
+    } catch (error) {
+        showToast("世界导入失败：" + error.message, "error", 4000);
+    }
+}
+
+// 点击「导出世界」→ 弹出 精简版 / 完整版 选择
+let pendingExportWorldId = null;
+export function showExportWorldChoice(worldId) {
+    pendingExportWorldId = worldId;
+    showModal("exportWorldChoiceModal");
+}
+
+export function exportWorldChoice(lite) {
+    const id = pendingExportWorldId;
+    pendingExportWorldId = null;
+    closeModal("exportWorldChoiceModal");
+    if (!id) { showToast("未找到目标世界", "error"); return; }
+    exportWorld(id, lite);
+}

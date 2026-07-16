@@ -14,24 +14,25 @@
     -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
     <title>以太叙事 · AetherNarrator</title>
-    <!-- ★ P1.2.3: transformers.js 为 ESM，必须以 module 方式加载；否则经典 script 会因 export 语法报错且全局 transformers 永不定义，向量 RAG 永远降级为关键词 -->
+    <!-- ★ P1.2.3: transformers.js 为单文件 ESM，必须以 module 方式加载；经典 script 会因 export 语法报错且全局 transformers 永不定义，向量 RAG 永远降级为关键词 -->
     <!-- ★ P0-3-E 内置化：transformers 运行时与中文模型随项目发布，不再从 jsdelivr 加载 -->
-    <script src="./vendor/transformers/transformers.min.js"></script>
-    <script>
-      (function () {
-        try {
-          var e = transformers.env;
-          e.allowRemoteModels = false;
-          e.localModelPath = "models";                  // 相对文档根 → 项目根/models/
-          if (e.backends && e.backends.onnx && e.backends.onnx.wasm) {
-            e.backends.onnx.wasm.wasmPaths = "vendor/transformers/";
-          }
-        } catch (_) {}
-        window.transformers = transformers;
-      })();
+    <script type="module">
+      import * as transformers from "./vendor/transformers/transformers.min.js";
+      try {
+        const e = transformers.env;
+        e.allowRemoteModels = false;
+        e.localModelPath = "models";                  // 相对文档根 → 项目根/models/
+        if (e.backends && e.backends.onnx && e.backends.onnx.wasm) {
+          e.backends.onnx.wasm.wasmPaths = "vendor/transformers/";
+        }
+      } catch (_) {}
+      window.transformers = transformers;
     </script>
     <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js" integrity="sha384-/cXAMbzovUIKbBERjPmR3SnPTh8siWr5lsvFYj1Uq4XP0yaJUZJmsh0YXyGv5P0y" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+    <!-- ★ 步骤 B：Obsidian 风 markdown 渲染（离线内置，UMD 全局 markdownit / DOMPurify；CSP 'self' 已放行 vendor/） -->
+    <script src="./vendor/markdown-it.min.js"></script>
+    <script src="./vendor/dompurify.min.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -121,6 +122,11 @@
         <span class="create-label">创建新世界</span>
         <span class="create-desc">输入 IP 或原创世界观</span>
     </div>
+    <div class="create-world-bar import-world-bar" data-action="triggerWorldPackImport">
+        <span class="create-icon">📥</span>
+        <span class="create-label">导入世界</span>
+        <span class="create-desc">从文件导入（含知识库）</span>
+    </div>
     <div class="list-content" id="worldListContent"></div>
 </div>
 
@@ -195,7 +201,7 @@
         <div class="modal-body">
             <div class="form-group">
                 <label>模型预设</label>
-                <select id="providerSelect" data-action="onProviderChange" data-event="change">
+                <select id="providerSelect" class="lore-inp lore-sel" data-action="onProviderChange" data-event="change">
                     <option value="deepseek">DeepSeek</option>
                     <option value="qwen">通义千问</option>
                     <option value="zhipu">智谱 GLM</option>
@@ -279,7 +285,7 @@
                 <p class="cw-step-title">这是什么类型的世界？</p>
                 <div class="form-group">
                     <label>世界类型</label>
-                    <select id="worldType" data-action="onWorldTypeChange" data-event="change">
+                    <select id="worldType" class="lore-inp lore-sel" data-action="onWorldTypeChange" data-event="change">
                         <option value="ip">基于已有 IP / 小说</option>
                         <option value="original">原创世界观</option>
                     </select>
@@ -293,6 +299,16 @@
                     <div class="upload-tip-box">
                         <div class="upload-tip-title">建议上传源文件以获得更精准的生成效果</div>
                         <div class="upload-tip-desc">仅凭作品名称，AI 依赖自身训练数据，可能存在遗漏或偏差。上传原著 TXT/DOCX 文件后，AI 能从原文中精确提取世界观设定、人物关系和叙事风格。</div>
+                    </div>
+                </div>
+                <div class="conditional-field show" id="ipUploadField">
+                    <div class="form-group">
+                        <label>上传世界观/小说源文件（可选）</label>
+                        <div class="file-upload-area" id="fileUploadArea">
+                            <span id="fileUploadText">点击上传 TXT / DOCX / EPUB 文件</span>
+                        </div>
+                        <input type="file" id="sourceFile" accept=".txt,.docx,.epub" data-action="handleFileSelect" data-event="change">
+                        <div class="upload-hint">支持 .txt、.docx 和 .epub 格式，源文件内容将作为世界观生成的参考材料</div>
                     </div>
                 </div>
             </div>
@@ -311,14 +327,6 @@
                 <div class="form-group">
                     <label>主角设定（可选）</label>
                     <textarea id="heroDesc" placeholder="例如：一名来自小镇的少年，性格谨慎，渴望变强..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>上传世界观/小说源文件（可选）</label>
-                    <div class="file-upload-area" id="fileUploadArea">
-                        <span id="fileUploadText">点击上传 TXT / DOCX / EPUB 文件</span>
-                    </div>
-                    <input type="file" id="sourceFile" accept=".txt,.docx,.epub" data-action="handleFileSelect" data-event="change">
-                    <div class="upload-hint">支持 .txt、.docx 和 .epub 格式，源文件内容将作为世界观生成的参考材料</div>
                 </div>
                 <div class="form-group">
                     <label>文风参考</label>
@@ -439,6 +447,23 @@
     </div>
 </div>
 
+<!-- ================= 存档详情弹窗（二级界面，镜像世界详情） ================= -->
+<div class="modal-overlay" id="saveDetailModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detailSaveTitle">
+        <div class="modal-header">
+            <h2 id="detailSaveTitle">存档详情</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="saveDetailModal">×</button>
+        </div>
+        <div class="modal-body" id="detailSaveBody"></div>
+        <div class="modal-footer" id="detailSaveModalFooter">
+            <button class="btn secondary" data-action="returnFromSaveDetail">返回</button>
+            <button class="btn secondary" data-action="editSaveLore" data-id="">存档知识库</button>
+            <button class="btn secondary" data-action="showExportWorldChoice" data-id="">导出世界</button>
+            <button class="btn primary" data-action="loadSave" data-id="">继续游戏</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= 作者注 / 持续约束弹窗（B2） ================= -->
 <div class="modal-overlay" id="authorNoteModal">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="authorNoteModalTitle">
@@ -485,6 +510,34 @@
     </div>
 </div>
 
+<!-- ================= 导出世界：精简版 / 完整版 选择弹窗 ================= -->
+<div class="modal-overlay" id="exportWorldChoiceModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exportWorldChoiceModalTitle">
+        <div class="modal-header">
+            <h2 id="exportWorldChoiceModalTitle">导出世界</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="exportWorldChoiceModal">×</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin:0 0 12px;font-size:14px;line-height:1.7;color:var(--text-secondary);">
+                请选择导出方式：
+            </p>
+            <div class="export-choice-list">
+                <button class="export-choice-item" data-action="exportWorldChoiceFull">
+                    <span class="export-choice-title">📦 导出完整版</span>
+                    <span class="export-choice-desc">包含知识库语义向量（文件较大），导入后可直接使用语义检索，无需重新计算。</span>
+                </button>
+                <button class="export-choice-item" data-action="exportWorldChoiceLite">
+                    <span class="export-choice-title">🪶 导出精简版</span>
+                    <span class="export-choice-desc">不含向量（文件更小、便于分享），导入后需在本机重新计算向量才能启用语义检索。</span>
+                </button>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="exportWorldChoiceModal">取消</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= 知识库编辑面板（B3） ================= -->
 <div class="modal-overlay" id="loreReviewModal">
     <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="loreReviewModalTitle">
@@ -502,6 +555,8 @@
 </div>
 
 <!-- ================= 游戏结束弹窗 ================= -->
+
+<!-- 注：世界观图谱已迁入知识库弹窗（loreReviewModal）内的「🔗 图谱」页签，不再有独立弹窗 -->
 <div class="game-over-overlay" id="gameOverOverlay">
     <div class="game-over-box">
         <h2>游戏结束</h2>
@@ -532,6 +587,7 @@
 <!-- ================= Toast ================= -->
 <div class="toast" id="toast"></div>
 <input type="file" id="memoryPackFile" accept="application/json,.json" hidden data-action="importMemoryPack" data-event="change">
+<input type="file" id="worldPackFile" accept=".json,application/json" hidden data-action="importWorld" data-event="change">
 
     <script type="module" src="src/app.js"></script>
     <script>

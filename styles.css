@@ -774,6 +774,23 @@
         .form-group textarea::placeholder { color: var(--text-muted); }        .form-group input:focus,
         .form-group textarea:focus,
         .form-group select:focus { border-color: var(--primary); background: var(--card-hover); }
+        /* ★ 与知识库面板下拉（.lore-inp）保持一致：浅底 / 圆角 8px / 字号 13px */
+        .form-group select.lore-inp {
+            background: var(--bg-panel);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text);
+            padding: 8px 10px;
+            font-size: 13px;
+            font-family: inherit;
+            box-sizing: border-box;
+            width: 100%;
+        }
+        .form-group select.lore-inp:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: var(--bg-panel);
+        }
         .form-group textarea { min-height: 120px; resize: vertical; }
         .form-group .hint {
             font-size: 11px;
@@ -998,6 +1015,17 @@
             border: 1px solid var(--card-border);
         }
         .btn.secondary:hover { border-color: var(--accent); color: var(--text); box-shadow: 0 0 12px -3px var(--glow); }
+        /* 导出世界：精简版 / 完整版 选择卡片 */
+        .export-choice-list { display: flex; flex-direction: column; gap: 12px; }
+        .export-choice-item {
+            display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+            width: 100%; text-align: left; padding: 14px 16px; border-radius: 10px;
+            border: 1px solid var(--card-border); background: var(--card-hover, transparent);
+            cursor: pointer; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+        }
+        .export-choice-item:hover { border-color: var(--primary); background: var(--card-border-hover, transparent); box-shadow: 0 0 12px -3px var(--glow); }
+        .export-choice-title { font-size: 15px; font-weight: 600; color: var(--text); }
+        .export-choice-desc { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
         .btn.danger { background: transparent; color: var(--danger); border: 1px solid rgba(208, 72, 72, 0.2); }
         .btn.danger:hover { border-color: var(--danger); box-shadow: 0 0 12px -3px rgba(197, 107, 94, 0.3); }
         .btn.full-width { width: 100%; flex: none; }
@@ -1508,3 +1536,141 @@
         .time-cfg-summary { line-height:1.7; }
         .time-cfg-hint { font-size:12px; color:var(--text-secondary, #666); margin:8px 0 0; }
         @media (max-width: 560px) { .time-cfg-grid { grid-template-columns:1fr; } }
+
+/* ===== 步骤 B：Obsidian 风三栏链状知识库 UI ===== */
+#loreReviewModal .modal { max-width: min(1180px, 96vw); }
+.lore-obsidian { display: flex; flex-direction: column; gap: 12px; max-height: 80vh; }
+.lore-obs-toolbar { display: flex; gap: 8px; align-items: center; }
+.lore-search { flex: 1; background: var(--bg-panel); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 8px 12px; font-size: 13px; font-family: inherit; }
+.lore-search:focus { outline: none; border-color: var(--primary); }
+.btn-secondary-sm { background: var(--bg-panel); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 8px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.btn-secondary-sm:hover { border-color: var(--primary); color: var(--primary); }
+
+.lore-obs-cols { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.lore-tree { width: 230px; flex: 0 0 230px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 10px; padding: 8px; background: var(--bg-sidebar); }
+.lore-tree-empty { color: var(--text-secondary); font-size: 13px; padding: 12px; }
+.lore-tree-group { margin-bottom: 10px; }
+.lore-tree-group-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary); padding: 4px 6px; text-transform: uppercase; letter-spacing: .03em; }
+.lore-tree-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.lore-tree-count { margin-left: auto; opacity: .6; font-weight: 400; }
+.lore-tree-items { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.lore-tree-item { padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text); display: flex; align-items: center; }
+.lore-tree-item:hover { background: rgba(201,168,124,0.10); }
+.lore-tree-item.active { background: rgba(201,168,124,0.20); color: var(--primary); font-weight: 600; }
+.lore-tree-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.lore-note { flex: 1; min-width: 0; max-height: 66vh; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; background: var(--bg-panel); display: block; }
+.lore-note > * + * { margin-top: 10px; }
+.lore-note-head { display: flex; gap: 8px; align-items: center; }
+.lore-note-title { flex: 1; font-size: 16px; font-weight: 600; background: transparent; border: none; border-bottom: 1px solid var(--card-border); color: var(--text); padding: 6px 2px; font-family: inherit; }
+.lore-note-title:focus { outline: none; border-color: var(--primary); }
+.lore-note-cat { width: 110px; background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 6px 8px; font-size: 13px; font-family: inherit; }
+.lore-note-toolbar { display: flex; align-items: center; gap: 6px; }
+.lore-tab { background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text-secondary); padding: 4px 12px; font-size: 12px; cursor: pointer; }
+.lore-tab.active { background: var(--primary); color: #1a1a1a; border-color: var(--primary); font-weight: 600; }
+.lore-note-meta { margin-left: auto; font-size: 11px; color: var(--text-secondary); }
+.lore-note-body { display: block; }
+.lore-note-textarea { width: 100%; min-height: 240px; resize: vertical; background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 10px; font-size: 14px; line-height: 1.6; font-family: inherit; box-sizing: border-box; }
+.lore-note-textarea:focus { outline: none; border-color: var(--primary); }
+
+/* markdown 正文排版 */
+.lore-md { font-size: 14px; line-height: 1.7; color: var(--text); overflow-wrap: break-word; word-break: break-word; overflow-x: hidden; }
+.lore-md h1, .lore-md h2, .lore-md h3 { margin: 0.6em 0 0.3em; line-height: 1.3; }
+.lore-md h1 { font-size: 1.5em; border-bottom: 1px solid var(--card-border); padding-bottom: .2em; }
+.lore-md h2 { font-size: 1.3em; }
+.lore-md h3 { font-size: 1.12em; }
+.lore-md p { margin: 0.5em 0; }
+.lore-md ul, .lore-md ol { margin: 0.4em 0; padding-left: 1.4em; }
+.lore-md li { margin: 0.2em 0; }
+.lore-md blockquote { margin: 0.6em 0; padding: 0.3em 0.9em; border-left: 3px solid var(--primary); background: rgba(201,168,124,0.08); color: var(--text-secondary); border-radius: 0 6px 6px 0; }
+.lore-md code { background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: 4px; padding: 0.1em 0.35em; font-size: 0.9em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.lore-md pre { background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px; overflow-x: auto; }
+.lore-md pre code { background: none; border: none; padding: 0; }
+.lore-md a { color: var(--primary); }
+.lore-md .wikilink { color: var(--primary); text-decoration: none; border-bottom: 1px dashed var(--primary); cursor: pointer; }
+.lore-md .wikilink:hover { background: rgba(201,168,124,0.15); }
+
+.lore-props { border-top: 1px solid var(--card-border); padding-top: 10px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.lore-props-head { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .03em; }
+.lore-prop { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.lore-prop-wide { grid-column: 1 / -1; }
+.lore-prop .lore-inp { font-size: 13px; }
+
+.lore-backlinks { width: 250px; flex: 0 0 250px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 10px; padding: 12px; background: var(--bg-sidebar); }
+.lore-back-head { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .03em; margin: 4px 0 8px; display: flex; align-items: center; gap: 6px; }
+.lore-back-count { background: rgba(201,168,124,0.15); color: var(--primary); border-radius: 10px; padding: 0 7px; font-size: 11px; }
+.lore-back-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.lore-link-row { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 8px; border-radius: 6px; background: var(--bg-panel); border: 1px solid var(--card-border); cursor: pointer; }
+.lore-link-row:hover { border-color: var(--primary); color: var(--primary); }
+.lore-link-missing { opacity: .6; cursor: default; }
+.lore-link-missing:hover { border-color: var(--card-border); color: inherit; }
+.lore-link-rel { color: var(--primary); font-size: 11px; flex: 0 0 auto; }
+.lore-link-arrow { color: var(--text-secondary); }
+.lore-link-target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lore-back-empty { font-size: 12px; color: var(--text-secondary); padding: 4px 2px; }
+.lore-empty { color: var(--text-secondary); font-size: 14px; padding: 30px 10px; text-align: center; }
+
+@media (max-width: 720px) {
+  .lore-obs-cols { flex-direction: column; max-height: none; }
+  .lore-tree, .lore-backlinks { width: auto; flex: none; max-height: 180px; }
+}
+
+/* ===== 知识库弹窗：视图切换（知识库 / 图谱 / 时间体系） ===== */
+.lore-review-shell { display: flex; flex-direction: column; gap: 12px; max-height: 82vh; }
+.lore-view-tabs { display: flex; gap: 6px; padding: 4px; background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m); }
+.lore-view-tab { flex: 1; padding: 9px 10px; border: 1px solid transparent; border-radius: var(--radius-s);
+  background: transparent; color: var(--text-secondary); font-size: 14px; font-weight: 500; cursor: pointer;
+  transition: background .15s, color .15s; }
+.lore-view-tab:hover { background: var(--card-hover); color: var(--text); }
+.lore-view-tab.active { background: var(--bg-panel); color: var(--text); border-color: var(--card-border); box-shadow: var(--shadow-card); }
+.lore-view-pane { min-height: 300px; }
+.lore-view-pane.lore-view-graph { min-height: min(70vh, 640px); }
+
+/* ===== 图谱（已迁入知识库弹窗） ===== */
+.modal-graph-wide { max-width: min(1100px, 96vw); width: 100%; }
+.lore-graph-pane { position: relative; display: flex; flex-direction: column; gap: 8px; }
+.lore-graph-tools { display: flex; align-items: center; gap: 8px; }
+.lore-graph-canvas-wrap { position: relative; height: min(64vh, 600px); border: 1px solid var(--card-border); border-radius: var(--radius-m); overflow: hidden; background:
+  radial-gradient(circle at 50% 40%, rgba(201,168,124,0.08), transparent 70%),
+  var(--bg-panel); }
+#loreGraphCanvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.btn-icon { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--card-border);
+  background: var(--bg-panel); color: var(--text); font-size: 20px; line-height: 1; cursor: pointer; flex: none;
+  display: inline-flex; align-items: center; justify-content: center; transition: border-color .15s, background .15s; }
+.btn-icon:hover { border-color: var(--primary); background: var(--card-hover); color: var(--text); }
+.graph-stats { font-size: 13px; color: var(--text-secondary); margin-left: 4px; white-space: nowrap; }
+.graph-legend { position: absolute; left: 12px; top: 12px; background: var(--bg-panel);
+  border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text);
+  box-shadow: var(--shadow-card); max-width: 46%; }
+.graph-legend .legend-group { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.legend-line { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.graph-info { position: absolute; right: 12px; top: 12px; max-width: 42%; padding: 4px 10px;
+  border-radius: 6px; background: var(--bg-panel); color: var(--text);
+  border: 1px solid var(--card-border); font-size: 13px; font-weight: 600; pointer-events: none;
+  box-shadow: var(--shadow-card); }
+.graph-hint { position: absolute; left: 0; right: 0; bottom: 0; text-align: center;
+  padding: 5px; font-size: 11px; color: var(--text-secondary);
+  background: linear-gradient(transparent, color-mix(in srgb, var(--bg-panel) 72%, transparent)); pointer-events: none; }
+
+/* 图谱节点快速预览卡（点击节点不切走图谱，视口保留） */
+.graph-preview { position: absolute; left: 12px; right: 12px; bottom: 34px; max-height: 52%; overflow: auto;
+  background: var(--bg-panel); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px;
+  box-shadow: var(--shadow-card); color: var(--text); z-index: 6; }
+.graph-preview[hidden] { display: none; }
+.graph-preview-head { display: flex; align-items: center; gap: 8px; }
+.graph-preview-cat { font-size: 11px; padding: 2px 8px; border-radius: 10px; color: #1a1a1a; background: var(--c, var(--primary)); font-weight: 600; flex: none; }
+.graph-preview-title { font-size: 15px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graph-preview-close { background: transparent; border: none; color: var(--text-secondary); font-size: 22px; line-height: 1; cursor: pointer; flex: none; padding: 0 4px; }
+.graph-preview-close:hover { color: var(--text); }
+.graph-preview-summary { font-size: 13px; line-height: 1.6; color: var(--text); margin: 8px 0; overflow-wrap: break-word; word-break: break-word; }
+.graph-preview-foot { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); }
+.graph-preview-edit { font-size: 12px; padding: 4px 12px; margin-left: auto; }
+.lore-time-pane { max-height: 70vh; overflow: auto; }
+
+@media (max-width: 720px) {
+  .graph-legend { max-width: 60%; font-size: 11px; }
+  .lore-graph-canvas-wrap { height: 56vh; }
+}

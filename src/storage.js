@@ -9,6 +9,7 @@ import { migrateSaveRecord, migrateWorldRecord, parseStoredArray, parseStoredObj
 import { idbGet, idbSet, idbDel } from "./idb.js";
 import { PROVIDERS, detectProvider } from "./providers.js";
 import { EMBED_MODEL, EMBED_DIM } from "./rag.js";
+import { mergeWorldPack } from "./world-transfer.js";
 
 export async function loadConfig() {
     const parsed = parseStoredObject(await idbGet(STORAGE_KEYS.config), {});
@@ -391,4 +392,16 @@ export function clearCurrentRunState() {
     idbDel(STORAGE_KEYS.state).catch(() => {});
     idbDel(STORAGE_KEYS.history).catch(() => {});
     idbDel(STORAGE_KEYS.chatHistory).catch(() => {});
+}
+
+// 导入世界包（字符串或已解析对象）：合并进现有 worlds 并持久化。
+// 委托 world-transfer.mergeWorldPack 处理 ID 冲突与维度校验/向量重算。
+// 返回 { worlds, imported, action, conflictId, needsEmbedding }。
+export async function importWorldPack(raw, options) {
+    const result = await mergeWorldPack(S.worlds, raw, options);
+    if (result.imported) {
+        S.worlds = result.worlds;
+        await saveWorlds();
+    }
+    return result;
 }

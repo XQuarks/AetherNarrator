@@ -99,11 +99,10 @@ export function continueLatestSave(worldId) {
     if (save) loadSave(save.id);
 }
 
-export function loadSave(saveId) {
+// ★ 载入会话：把存档数据灌入运行时（S.currentWorld / S.gameState / S.activeLoreKB / 历史等），不跳转界面。
+// loadSave 与「存档详情-存档知识库」编辑共用，保证进入游戏前/知识库编辑前状态一致。
+export function prepareSessionFromSave(save) {
     abortCurrentRequest(); // ★ P0: 失效在途请求
-    const stored = S.saves.find(s => s.id === saveId);
-    const save = stored ? migrateSaveRecord(stored, S.worlds.find(w => w.id === stored.worldId)) : null;
-    if (!save) return;
     stopTypewriter();
     S.currentWorld = S.worlds.find(w => w.id === save.worldId);
     S.currentSession.worldId = save.worldId;
@@ -118,6 +117,13 @@ export function loadSave(saveId) {
     if (save.history) S.conversationHistory = deepClone(save.history);
     S.chatHistory = save.chatHistory ? deepClone(save.chatHistory) : rebuildChatFromHistory(save.history);
     S.chatSummary = (save.chatSummary && save.chatSummary.length) ? deepClone(save.chatSummary) : rebuildSummaryFromHistory(save.history);
+}
+
+export function loadSave(saveId) {
+    const stored = S.saves.find(s => s.id === saveId);
+    const save = stored ? migrateSaveRecord(stored, S.worlds.find(w => w.id === stored.worldId)) : null;
+    if (!save) return;
+    prepareSessionFromSave(save);
     showToast(`加载存档：${save.worldName}`, "success");
     closeAllModals();
     showScreen("gameScreen");

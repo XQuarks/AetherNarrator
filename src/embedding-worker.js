@@ -1,12 +1,12 @@
 // ============================================================
-// AetherNarrator · embedding-worker.js（★ P0-3-E：Web Worker，经典 worker）
+// AetherNarrator · embedding-worker.js（★ P0-3-E：Web Worker，ESM module worker）
 // 在后台线程跑中文 embedding 推理，避免阻塞主线程 UI。
-// transformers 运行时以 UMD 方式 importScripts 加载（vendor/transformers/transformers.min.js），
+// transformers 运行时以 ESM import 加载（vendor/transformers/transformers.min.js 为单文件 ESM），
 // 与页面共用同一模型，保证维度/数值一致。
 // ============================================================
 // ★ 内置化：transformers 运行时与中文模型随项目发布（vendor/ + models/），
 // 不再依赖外部 jsdelivr / HuggingFace，玩家彻底摆脱 CDN 下载失败风险。
-importScripts('../vendor/transformers/transformers.min.js');
+import * as transformers from '../vendor/transformers/transformers.min.js';
 
 const EMBED_MODEL = "Xenova/bge-small-zh-v1.5";
 // bge 系列官方约定：查询句加检索前缀、文档句不加

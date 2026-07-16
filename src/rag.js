@@ -23,7 +23,7 @@ const _embedPending = new Map();
 function getEmbedWorker() {
     if (_embedWorker) return _embedWorker;
     if (typeof Worker === "undefined") throw new Error("当前环境不支持 Web Worker");
-    _embedWorker = new Worker(new URL("./embedding-worker.js", import.meta.url)); // 经典 worker（UMD importScripts 加载 transformers）
+    _embedWorker = new Worker(new URL("./embedding-worker.js", import.meta.url), { type: "module" }); // ESM module worker（import 加载 transformers 单文件 ESM）
     _embedWorker.onmessage = (e) => {
         const { id, type, data } = e.data || {};
         if (type === "ready" || type === "progress") return; // warmup / 进度消息，无 pending
