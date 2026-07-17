@@ -451,9 +451,58 @@ export function tryRepairJSON(text, raw) {
             }
         }
     }
+    // 兜底 4（抢救模式）：截掉最后一个不完整元素，保留前面所有完整条目（分块/游玩均受益）
+    const salvaged = salvageLastCompleteElement(text);
+    if (salvaged) return salvaged;
+
     // ★ P1.2.5: 彻底无法修复时抛错，交由上层按"错误回合"处理（不 applyStateChanges / 不存盘 / 不推进时间），
     // 不再返回伪造成功的占位回合把玩家这一轮悄悄吞掉。
     throw new Error("AI 返回的 JSON 无法修复（内容截断或结构损坏）\n原始内容：" + String(raw != null ? raw : text).slice(0, 800));
+}
+
+// ★ 抢救：截掉最后一个不完整数组/对象元素（如写到一半的 snippet），保留前面所有完整条目。
+// 用于 JSON 被截断且补括号无效时（如对象中部留下悬挂 key），尽量挽回已生成内容，而非整段丢弃。
+function salvageLastCompleteElement(text) {
+    // 找最后一个“},”边界（不在字符串内，其后紧跟逗号即表示这是一个完整元素结束）
+    let cut = -1, inStr = false, esc = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (esc) { esc = false; continue; }
+        if (ch === "\\") { esc = true; continue; }
+        if (ch === '"') { inStr = !inStr; continue; }
+        if (inStr) continue;
+        if (ch === "}" && /^\s*,/.test(text.slice(i + 1))) cut = i;
+    }
+    if (cut < 0) return null;
+    const sliced = text.slice(0, cut + 1); // 保留到该 }
+    // 重新统计深度并补全未闭合的括号/方括号
+    let brace = 0, bracket = 0, s = false, e = false;
+    for (let i = 0; i < sliced.length; i++) {
+        const ch = sliced[i];
+        if (e) { e = false; continue; }
+        if (ch === "\\") { e = true; continue; }
+        if (ch === '"') { s = !s; continue; }
+        if (s) continue;
+        if (ch === "{") brace++; else if (ch === "}") brace--;
+        else if (ch === "[") bracket++; else if (ch === "]") bracket--;
+    }
+    let fixed = sliced;
+    while (bracket > 0) { fixed += "]"; bracket--; }
+    while (brace > 0) { fixed += "}"; brace--; }
+    try {
+        const obj = JSON.parse(fixed);
+        // 游玩型：补齐缺失字段，避免下游 applyStateChanges 因缺 state_changes 崩溃
+        if (obj.narrative !== undefined) {
+            obj.choices = Array.isArray(obj.choices) ? obj.choices : [];
+            obj.state_changes = (obj.state_changes && typeof obj.state_changes === "object") ? obj.state_changes : {};
+            obj.narrative = typeof obj.narrative === "string" ? obj.narrative : "";
+            if (!Array.isArray(obj.key_facts)) obj.key_facts = [];
+            return JSON.stringify(obj);
+        }
+        // 分块型：保留抢救出的片段（lore_kb / snippets）
+        if (obj.lore_kb || obj.snippets) return fixed;
+        return null;
+    } catch (_) { return null; }
 }
 
 export function isNonStoryResponse(text) {

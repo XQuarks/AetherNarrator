@@ -259,8 +259,9 @@ export function buildSystemPrompt() {
     // ★ 时间线单向进度指令（仅当知识库存在带 timeline 的条目时注入，避免污染无时间线的世界）
     const hasTimeline = allSnippets.some(s => Array.isArray(s.timeline) && s.timeline.length);
     if (hasTimeline) {
-        const sp = (S.gameState && typeof S.gameState.story_progress === "number") ? S.gameState.story_progress : 1;
-        systemPrompt += "\n\n# 时间线进度（单向，重要）\n\n本世界部分知识条目带有「时间线」（timeline），按剧情时间先后用 order 编号（order=1 为最早）。当前故事进度指针 story_progress = " + sp + "。\n- **单向不剧透**：order 大于当前 story_progress 的时间线阶段属于「尚未发生的未来」，你与角色都不得知晓、不得提及或暗示，直到剧情真正推进到那里（例如角色第一章在甲地、最后才首次去乙地，则玩家处于早期时角色不应知道乙地发生的事）。\n- **按需推进**：当剧情自然发展到时间线的下一阶段（如角色首次抵达某地、某关键事件发生）时，在 state_changes 中返回 story_progress 为新的整数（**只增不减**），使其等于当前应解锁到的最大 order。\n- 时间线是叙事内部顺序，请勿在叙事中出现「第X章」「第几回」等字样，只按自然时间推进。";
+        // ★ token/缓存优化：story_progress 的具体数值不再内联进 system（否则每轮时间推进都会改写 system 前缀、打破 DeepSeek 前缀缓存，导致整段超长 system 全量未命中）。
+        // 当前进度值改由 buildCompactGameState() 注入每轮 user 消息（动态段），system 完全静态 → 前缀缓存稳定命中 95%+，超大 system 永远按 1 折计费。
+        systemPrompt += "\n\n# 时间线进度（单向，重要）\n\n本世界部分知识条目带有「时间线」（timeline），按剧情时间先后用 order 编号（order=1 为最早）。当前故事进度指针 story_progress 的具体数值见每轮「当前游戏状态」JSON 中的 story_progress 字段。\n- **单向不剧透**：order 大于当前 story_progress 的时间线阶段属于「尚未发生的未来」，你与角色都不得知晓、不得提及或暗示，直到剧情真正推进到那里（例如角色第一章在甲地、最后才首次去乙地，则玩家处于早期时角色不应知道乙地发生的事）。\n- **按需推进**：当剧情自然发展到时间线的下一阶段（如角色首次抵达某地、某关键事件发生）时，在 state_changes 中返回 story_progress 为新的整数（**只增不减**），使其等于当前应解锁到的最大 order。\n- 时间线是叙事内部顺序，请勿在叙事中出现「第X章」「第几回」等字样，只按自然时间推进。";
     }
 
     // P0: 硬化缓存（none 策略不缓存，避免大字符串驻留本地模型场景）
@@ -440,6 +441,7 @@ export function buildCompactGameState() {
         background: S.gameState.background || (S.currentWorld && S.currentWorld.hero ? S.currentWorld.hero : "未指定"),
         current_location: S.gameState.current_location,
         current_date: S.gameState.current_date,
+        story_progress: (typeof S.gameState.story_progress === "number" && isFinite(S.gameState.story_progress)) ? S.gameState.story_progress : 1,
         time_label: formatWorldTime(S.gameState),
         attributes: S.gameState.attributes,
         progression: S.gameState.progression,

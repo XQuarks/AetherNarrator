@@ -97,7 +97,7 @@ export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, c
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
 
-    const prompt = buildLoreChunkPrompt(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle);
+        const prompt = buildLoreChunkPrompt(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle);
     const url = buildApiUrl(baseUrl, corsProxy);
     const res = await fetch(url, {
         method: "POST",
@@ -109,7 +109,7 @@ export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, c
             model,
             messages: [{ role: "system", content: prompt }],
             temperature: 0.7,
-            max_tokens: 8192,
+            max_tokens: 16000,
             response_format: { type: "json_object" }
         })
     });

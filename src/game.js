@@ -123,8 +123,11 @@ export async function generateWorld() {
                 (content, idx) => callLoreChunkLLM(name, ipName, content, idx + 1, chunks.length, COUNT_HINT, styleRef, customStyle),
                 {
                     retries: 4,
-                    isRetryable: (e) => /429|timeout|network|fetch|abort|ECONN|ETIMEDOUT/i.test(String((e && e.message) || "")),
-                    onRetry: (idx, n) => showToast(`第 ${idx}/${chunks.length} 段被限流，自动重试(${n})...`, "warn"),
+                    isRetryable: (e) => /429|timeout|network|fetch|abort|ECONN|ETIMEDOUT|无法修复|JSON 解析失败|截断|结构损坏/i.test(String((e && e.message) || "")),
+                    onRetry: (idx, n, err) => {
+                        const isJson = err && /无法修复|JSON 解析失败|截断|结构损坏/i.test(String((err && err.message) || ""));
+                        showToast(`第 ${idx}/${chunks.length} 段${isJson ? "生成结果损坏" : "被限流"}，自动重试(${n})...`, "warn");
+                    },
                     onProgress: (done, total) => { btn.textContent = `生成中 (已完成 ${done}/${total})...`; },
                     onError: (idx, err) => {
                         showToast(`第 ${idx}/${chunks.length} 段知识库生成失败，已跳过：${err.message}`, "error");
@@ -668,7 +671,21 @@ export async function processTurn(input) {
         return;
     }
         const retrieved = await retrieve(input);
-        const resp = await callLLM(input, retrieved);
+        // ★ 容错：游玩回合遇 AI 空白/JSON 损坏等偶发坏响应，自动重试最多 2 次再报错（对应日志里 "JSON 无法修复" 偶发空白）
+        let resp;
+        {
+            const TURN_RETRIES = 2;
+            for (let attempt = 0; attempt <= TURN_RETRIES; attempt++) {
+                try {
+                    resp = await callLLM(input, retrieved);
+                    break;
+                } catch (e) {
+                    const retryable = /无法修复|JSON 解析失败|截断|结构损坏|空白|空响应|empty/i.test(String((e && e.message) || ""));
+                    if (!retryable || attempt === TURN_RETRIES) throw e;
+                    showToast(`AI 响应异常，正在重试 (${attempt + 1}/${TURN_RETRIES})...`, "warn");
+                }
+            }
+        }
         // ★ P0: 会话失效校验 —— 期间若发生导航/切换/重开，丢弃此响应
         if (resp._sessionEpoch !== myEpoch || resp._sessionWorldId !== (S.currentWorld && S.currentWorld.id)) {
             hideLoading();
