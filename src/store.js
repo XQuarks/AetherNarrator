@@ -29,7 +29,7 @@ export const S = {
   auxiliaryControllers: new Set(),
   isGenerating: false,
   lastCacheStats: { hitTokens: 0, missTokens: 0, totalTokens: 0, hitRate: "0%" },
-  debugLog: { sessionStart: new Date().toISOString(), worldCreations: [], turns: [] },
+  debugLog: { sessionStart: new Date().toISOString(), worldCreations: [], chunkErrors: [], turns: [] },
   themeClickCount: 0,
   themeClickTimer: null,
   lastFocusedBeforeModal: null,
@@ -103,7 +103,7 @@ export function normalizeTimeConfig(raw) {
         if (typeof raw.era_label === "string") cfg.era_label = raw.era_label.slice(0, 40);
         const calModes = ["day", "gregorian", "lunar", "custom_calendar", "none"];
         if (calModes.includes(raw.calendar_mode)) cfg.calendar_mode = raw.calendar_mode;
-        const clkModes = ["period", "clock", "none"];
+        const clkModes = ["period", "none"]; // 仅允许「时段标签」或「不显示」；禁用「具体时钟」以免界面出现具体小时
         if (clkModes.includes(raw.clock_mode)) cfg.clock_mode = raw.clock_mode;
         if (typeof raw.season === "string" && raw.season.trim()) cfg.season = raw.season.slice(0, 10);
         if (typeof raw.weather === "string" && raw.weather.trim()) cfg.weather = raw.weather.slice(0, 20);

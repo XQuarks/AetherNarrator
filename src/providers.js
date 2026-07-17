@@ -147,3 +147,12 @@ export function getChunkConcurrency() {
     const v = parseInt(el?.value, 10);
     return Number.isFinite(v) && v >= 1 ? v : 100;
 }
+
+// 向量化并发数（默认 100）。生成知识库后为各条目计算语义向量（本地中文模型、单线程 Worker），
+// 此值决定主线程同时预投喂给 Worker 的任务数。跑在浏览器环境；非浏览器（如 Node 测试）兜回 100。
+export function getEmbedConcurrency() {
+    if (typeof document === "undefined") return 100;
+    const el = document.getElementById("embedConcurrency");
+    const v = parseInt(el?.value, 10);
+    return Number.isFinite(v) && v >= 1 ? v : 100;
+}

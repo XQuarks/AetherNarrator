@@ -250,6 +250,11 @@
                     <input type="number" id="chunkConcurrency" min="1" max="1000" step="1" value="100">
                     <div class="hint">导入大书分块生成知识库时，同时发出的 API 请求数量（默认 100）。DeepSeek-v4-flash 账号级并发额度为 2500，数值越大生成越快；若频繁被限流（429），可调小该值。</div>
                 </div>
+                <div class="form-group">
+                    <label>向量化并发数</label>
+                    <input type="number" id="embedConcurrency" min="1" max="1000" step="1" value="100">
+                    <div class="hint">生成知识库后为各条目计算语义向量（本地中文模型、单线程）。此值决定主线程同时预投喂给计算线程的任务数（默认 100）。本地模型为单线程计算，并发主要决定预投喂量、对整体速度影响有限，设 100 已足够让模型满载；如设备内存紧张可调小。</div>
+                </div>
             </details>
         </div>
         <div class="modal-footer">

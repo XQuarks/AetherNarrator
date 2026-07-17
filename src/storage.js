@@ -23,6 +23,8 @@ export async function loadConfig() {
     document.getElementById("noStreamMode").checked = cfg.noStreamMode === true;
     const cc = document.getElementById("chunkConcurrency");
     if (cc) cc.value = (cfg.chunkConcurrency != null) ? cfg.chunkConcurrency : 100;
+    const ec = document.getElementById("embedConcurrency");
+    if (ec) ec.value = (cfg.embedConcurrency != null) ? cfg.embedConcurrency : 100;
     // 高亮当前模型预设下拉（按存储的 provider 或 baseUrl 自动识别）
     const sel = document.getElementById("providerSelect");
     if (sel) sel.value = cfg.provider || detectProvider(cfg.baseUrl || "");
@@ -370,6 +372,7 @@ export async function saveConfig() {
         mockMode: document.getElementById("mockMode").checked,
         noStreamMode: document.getElementById("noStreamMode").checked,
         chunkConcurrency: (() => { const v = parseInt(document.getElementById("chunkConcurrency").value, 10); return Number.isFinite(v) && v >= 1 ? v : 100; })(),
+        embedConcurrency: (() => { const v = parseInt(document.getElementById("embedConcurrency").value, 10); return Number.isFinite(v) && v >= 1 ? v : 100; })(),
         provider: detectProvider(baseUrl)
     };
     await idbSet(STORAGE_KEYS.config, JSON.stringify(cfg));

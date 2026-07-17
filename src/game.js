@@ -126,7 +126,19 @@ export async function generateWorld() {
                     isRetryable: (e) => /429|timeout|network|fetch|abort|ECONN|ETIMEDOUT/i.test(String((e && e.message) || "")),
                     onRetry: (idx, n) => showToast(`第 ${idx}/${chunks.length} 段被限流，自动重试(${n})...`, "warn"),
                     onProgress: (done, total) => { btn.textContent = `生成中 (已完成 ${done}/${total})...`; },
-                    onError: (idx, err) => { showToast(`第 ${idx}/${chunks.length} 段知识库生成失败，已跳过：${err.message}`, "error"); console.warn(err); }
+                    onError: (idx, err) => {
+                        showToast(`第 ${idx}/${chunks.length} 段知识库生成失败，已跳过：${err.message}`, "error");
+                        console.warn(err);
+                        // ★ 日志增强：区块失败原因写入可导出日志（含 AI 原始返回片段，见 parseResponse 报错）
+                        if (S.debugLog && S.debugLog.chunkErrors) {
+                            S.debugLog.chunkErrors.push({
+                                time: new Date().toISOString(),
+                                chunkIndex: idx,
+                                total: chunks.length,
+                                errorMessage: err && err.message
+                            });
+                        }
+                    }
                 }
             );
             // 统一合并各段结果（同名条目汇总加长，顺序无关；失败段为 __error 占位、跳过）
@@ -134,17 +146,38 @@ export async function generateWorld() {
             for (const r of chunkResults) {
                 if (r && !r.__error) allSnippets = mergeLoreSnippets(allSnippets, (r.snippets) || []);
             }
-            // 重排唯一 id，避免各段 id 冲突
-            allSnippets.forEach((s, i) => { s.id = "m" + (i + 1); });
+            // 重排唯一 id，避免各段 id 冲突；同时改写 links.target 跟随新 id。
+            // AI 给的 target 可能是「带前缀 id」（新提示词要求）或「标题」（旧/兼容），
+            // 两者都尝试解析；指向不存在目标的悬空链接丢弃（AI 幻觉或未合并项）。
+            const idRemap = new Map();
+            const titleToId = new Map();
+            allSnippets.forEach((s, i) => {
+                const nid = "m" + (i + 1);
+                idRemap.set(s.id, nid);
+                if (s.title) titleToId.set(s.title.trim().toLowerCase(), nid);
+                s.id = nid;
+            });
+            for (const s of allSnippets) {
+                if (Array.isArray(s.links) && s.links.length) {
+                    s.links = s.links
+                        .map(l => {
+                            const t = typeof l.target === "string" ? l.target.trim() : "";
+                            const resolved = idRemap.get(t) || titleToId.get(t.toLowerCase()) || "";
+                            return { target: resolved, relation: l.relation || "related" };
+                        })
+                        .filter(l => l.target && l.target !== s.id)
+                        .slice(0, 8);
+                }
+            }
             loreKb = { ip: name, snippets: allSnippets };
-            try { await ensureLoreEmbeddings(loreKb); }
+            try { await ensureLoreEmbeddings(loreKb, (done, total) => { btn.textContent = `生成中 (向量化 ${done}/${total})...`; }); }
             catch (e) { console.warn("知识库向量预计算失败，将降级为关键词检索:", e.message); }
         } else {
             // 小书：沿用原有单次生成
             generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix));
             loreKb = generated.lore_kb;
             if (loreKb) {
-                try { await ensureLoreEmbeddings(loreKb); }
+                try { await ensureLoreEmbeddings(loreKb, (done, total) => { btn.textContent = `生成中 (向量化 ${done}/${total})...`; }); }
                 catch (e) { console.warn("世界生成后向量预计算失败，将降级为关键词检索:", e.message); }
             }
         }
@@ -782,7 +815,8 @@ export async function processTurn(input) {
             model: model,
             temperature: temp,
             status: "error",
-            errorType: e.message.includes("JSON 解析失败") ? "parse_failure" :
+            errorType: e.message.includes("无法修复") ? "json_unrepairable" :
+                       e.message.includes("JSON 解析失败") ? "parse_failure" :
                        e.message.includes("Failed to fetch") || e.message.includes("NetworkError") ? "network" :
                        e.message.includes("超时") ? "timeout" : "unknown",
             errorMessage: e.message,

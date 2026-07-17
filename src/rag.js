@@ -4,7 +4,8 @@
 import { S } from "./store.js";
 import { MEMORY_TYPES } from "./store.js";
 
-import { cosineSimilarity, isFuzzyFact, normFact } from "./utils.js";
+import { cosineSimilarity, isFuzzyFact, normFact, runPool } from "./utils.js";
+import { getEmbedConcurrency } from "./providers.js";
 import { getPeriodLabel } from "./theme.js";
 import { buildTurnUserMessage, isLoreFullInSystem } from "./prompt.js";
 import { showToast } from "./render.js";
@@ -167,23 +168,30 @@ export async function computeEmbedding(text, isQuery = false) {
     return Array.from(out.data);
 }
 
-export async function ensureLoreEmbeddings(kb) {
+export async function ensureLoreEmbeddings(kb, onProgress) {
     if (!kb || !kb.snippets || !kb.snippets.length) return;
     // ★ P0-3 维度打标：全部已算且模型/维度一致才跳过，否则需重算（换模型后旧向量错配）
     if (kb.snippets.every(s => Array.isArray(s.embedding) && s.embedding.length && s.embedDim === EMBED_DIM && s.embedModel === EMBED_MODEL)) return;
     if (typeof window.transformers === "undefined" && typeof Worker === "undefined") return; // 环境不支持，降级为关键词
-    for (const s of kb.snippets) {
-        if (s.embedding && s.embedDim === EMBED_DIM && s.embedModel === EMBED_MODEL) continue;
-        const text = [s.category, s.title, s.content, (s.keywords || []).join(" ")].filter(Boolean).join(" ");
-        try {
-            s.embedding = await computeEmbedding(text); // 文档句不加查询前缀
-            s.embedDim = EMBED_DIM;
-            s.embedModel = EMBED_MODEL;
-        } catch (e) {
-            console.warn("知识库片段向量计算失败:", e.message);
-            return; // 一旦模型不可用，剩余片段也不再尝试
-        }
-    }
+    // 收集仍需计算向量的片段（已算过且维度一致的跳过，不重复算）
+    const pending = kb.snippets.filter(s => !(s.embedding && s.embedDim === EMBED_DIM && s.embedModel === EMBED_MODEL));
+    if (!pending.length) return;
+    // ★ 提速：并发算向量（复用 runPool）。并发数由界面设置读取（getEmbedConcurrency，默认 100）；
+    //    embedding Worker 按 id 配对响应，并发安全；单条失败仅该条降级为关键词检索，不中断整体。
+    const EMBED_CONCURRENCY = getEmbedConcurrency();
+    await runPool(pending, EMBED_CONCURRENCY,
+        async (s) => {
+            const text = [s.category, s.title, s.content, (s.keywords || []).join(" ")].filter(Boolean).join(" ");
+            try {
+                s.embedding = await computeEmbedding(text); // 文档句不加查询前缀
+                s.embedDim = EMBED_DIM;
+                s.embedModel = EMBED_MODEL;
+            } catch (e) {
+                console.warn("知识库片段向量计算失败，降级为关键词检索:", e && e.message);
+            }
+        },
+        { onProgress: onProgress ? (done, total) => onProgress(done, total) : undefined }
+    );
 }
 
 // ★ B1: lore 触发门禁（混合触发：关键词命中 或 向量相似度≥阈值 → 注入）

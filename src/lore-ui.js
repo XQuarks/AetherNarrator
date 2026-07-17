@@ -72,7 +72,7 @@ function checkLoreQuality(list) {
 
 // ★ 步骤二：把"时间体系"作为知识库条目，在创建初览里正式呈现（AI 已按世界观判定，仅在创建世界时可调）
 const CALENDAR_LABELS = { day: "按第 N 天推进", gregorian: "公历（月/日/星期）", lunar: "阴历（月/日）", custom_calendar: "自定义历法", none: "不显示日期" };
-const CLOCK_LABELS = { period: "时段标签", clock: "具体时钟", none: "不显示时刻" };
+const CLOCK_LABELS = { period: "时段标签", none: "不显示时刻" }; // 已移除「具体时钟」：界面一律不显示具体小时，最多到时段粒度
 
 function summarizeTimeConfig(cfg) {
     const c = normalizeTimeConfig(cfg);

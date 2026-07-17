@@ -316,7 +316,7 @@ export function parseResponse(content) {
         return JSON.parse(text);
     } catch (e) {
         // JSON 截断/不完整 → 尝试自动补全缺失的括号
-        const fixed = tryRepairJSON(text);
+        const fixed = tryRepairJSON(text, content);
         try { return JSON.parse(fixed); } catch (e2) {
             throw new Error("AI 返回的 JSON 解析失败：" + e2.message + "\n原始内容：" + content.slice(0, 500));
         }
@@ -399,7 +399,7 @@ export function mergeLoreSnippets(existing, incoming) {
     return out;
 }
 
-export function tryRepairJSON(text) {
+export function tryRepairJSON(text, raw) {
     let braceDepth = 0, bracketDepth = 0, inString = false, escaped = false;
     for (let i = 0; i < text.length; i++) {
         const ch = text[i];
@@ -453,7 +453,7 @@ export function tryRepairJSON(text) {
     }
     // ★ P1.2.5: 彻底无法修复时抛错，交由上层按"错误回合"处理（不 applyStateChanges / 不存盘 / 不推进时间），
     // 不再返回伪造成功的占位回合把玩家这一轮悄悄吞掉。
-    throw new Error("AI 返回的 JSON 无法修复（内容截断或结构损坏）");
+    throw new Error("AI 返回的 JSON 无法修复（内容截断或结构损坏）\n原始内容：" + String(raw != null ? raw : text).slice(0, 800));
 }
 
 export function isNonStoryResponse(text) {
