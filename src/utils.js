@@ -525,3 +525,40 @@ export function validateStateShape(changes) {
         }
     }
 }
+
+// ★ 并发池：同时最多 concurrency 个异步任务在飞，全部完成返回结果数组（按原索引对齐）。
+// 支持 429 等可重试错误的指数退避重试。用于「分块抽取知识库」提速（替代串行 for+await）。
+export async function runPool(items, concurrency, worker, opts = {}) {
+    const { retries = 0, isRetryable = () => false, onRetry, onProgress, onError } = opts;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const results = new Array(items.length);
+    let cursor = 0, done = 0;
+    async function callWithRetry(item, i) {
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await worker(item, i);
+            } catch (e) {
+                if (attempt >= retries || !isRetryable(e)) throw e;
+                const delay = Math.min(1000 * 2 ** attempt, 8000);
+                if (onRetry) onRetry(i + 1, attempt + 1, e);
+                await sleep(delay);
+            }
+        }
+    }
+    async function runner() {
+        while (cursor < items.length) {
+            const i = cursor++;
+            try {
+                results[i] = await callWithRetry(items[i], i);
+            } catch (e) {
+                results[i] = { __error: e };
+                if (onError) onError(i + 1, e);
+            } finally {
+                done++;
+                if (onProgress) onProgress(done, items.length);
+            }
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runner()));
+    return results;
+}

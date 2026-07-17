@@ -245,6 +245,11 @@
                         <span>禁用流式输出（CORS 代理不支持时开启）</span>
                     </label>
                 </div>
+                <div class="form-group">
+                    <label>大书分块抽取并发数</label>
+                    <input type="number" id="chunkConcurrency" min="1" max="1000" step="1" value="100">
+                    <div class="hint">导入大书分块生成知识库时，同时发出的 API 请求数量（默认 100）。DeepSeek-v4-flash 账号级并发额度为 2500，数值越大生成越快；若频繁被限流（429），可调小该值。</div>
+                </div>
             </details>
         </div>
         <div class="modal-footer">

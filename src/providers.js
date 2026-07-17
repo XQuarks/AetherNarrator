@@ -139,3 +139,11 @@ export function readApiInputs() {
     const model = (document.getElementById("modelName")?.value || "").trim();
     return { baseUrl, corsProxy, apiKey, model, provider: PROVIDERS[detectProvider(baseUrl)] };
 }
+
+// 大书分块抽取并发数（默认 100，与 game.js 原硬编码一致）。
+// API 输入框常驻 DOM，直接读取即可；非法/缺失值时兜回 100。
+export function getChunkConcurrency() {
+    const el = document.getElementById("chunkConcurrency");
+    const v = parseInt(el?.value, 10);
+    return Number.isFinite(v) && v >= 1 ? v : 100;
+}

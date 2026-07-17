@@ -3,7 +3,7 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
-import { analyzeWorldTags, capSource, chunkText, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, mergeLoreSnippets, sanitizeWorldConfig, validateStateShape } from "./utils.js";
+import { analyzeWorldTags, capSource, chunkText, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, mergeLoreSnippets, runPool, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
@@ -18,6 +18,7 @@ import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
 import { applySimulationChanges, createRestEvent, normalizeSimulationState } from "./simulation.js";
+import { getChunkConcurrency } from "./providers.js";
 import { acquireTurn, isSessionContextCurrent, releaseTurn } from "./turn-lifecycle.js";
 
 // 以下函数体已拆分至 save.js / lore-ui.js；此处重新导出以保持 app.js / render.js 的导入不变
@@ -114,16 +115,24 @@ export async function generateWorld() {
             // ① 基础世界配置（结构/开场）由首段生成
             generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, chunks[0], styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT));
             // ② 逐段抽取 lore 并合并（覆盖全书，同名条目汇总）
-            let allSnippets = [];
-            for (let i = 0; i < chunks.length; i++) {
-                btn.textContent = `生成中 (${i + 1}/${chunks.length})...`;
-                try {
-                    const lore = await callLoreChunkLLM(name, ipName, chunks[i], i + 1, chunks.length, COUNT_HINT, styleRef, customStyle);
-                    allSnippets = mergeLoreSnippets(allSnippets, (lore && lore.snippets) || []);
-                } catch (err) {
-                    showToast(`第 ${i + 1}/${chunks.length} 段知识库生成失败，已跳过：${err.message}`, "error");
-                    console.warn(err);
+      // ★ 提速：并发抽取（不再串行一个个等）。并发数由设置读取（默认 100 路）；
+      //    DeepSeek 限速是「并发额度」模型（非 TPM）：deepseek-v4-flash 账号级并发额度 2500，
+      //    100 路仍远低于上限，不会因并发触发 429。runPool 自带 429 退避兜底，极端超额也不丢块。
+      const CONCURRENCY = getChunkConcurrency();
+            const chunkResults = await runPool(chunks, CONCURRENCY,
+                (content, idx) => callLoreChunkLLM(name, ipName, content, idx + 1, chunks.length, COUNT_HINT, styleRef, customStyle),
+                {
+                    retries: 4,
+                    isRetryable: (e) => /429|timeout|network|fetch|abort|ECONN|ETIMEDOUT/i.test(String((e && e.message) || "")),
+                    onRetry: (idx, n) => showToast(`第 ${idx}/${chunks.length} 段被限流，自动重试(${n})...`, "warn"),
+                    onProgress: (done, total) => { btn.textContent = `生成中 (已完成 ${done}/${total})...`; },
+                    onError: (idx, err) => { showToast(`第 ${idx}/${chunks.length} 段知识库生成失败，已跳过：${err.message}`, "error"); console.warn(err); }
                 }
+            );
+            // 统一合并各段结果（同名条目汇总加长，顺序无关；失败段为 __error 占位、跳过）
+            let allSnippets = [];
+            for (const r of chunkResults) {
+                if (r && !r.__error) allSnippets = mergeLoreSnippets(allSnippets, (r.snippets) || []);
             }
             // 重排唯一 id，避免各段 id 冲突
             allSnippets.forEach((s, i) => { s.id = "m" + (i + 1); });
