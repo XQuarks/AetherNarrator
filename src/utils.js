@@ -13,6 +13,7 @@ export function migrateGameState(gs) {
     if (!gs || typeof gs !== "object") return;
     if (gs.active_event === undefined) gs.active_event = null;
     if (!Array.isArray(gs.completed_events)) gs.completed_events = [];
+    if (typeof gs.story_progress !== "number" || gs.story_progress < 1) gs.story_progress = 1; // ★ 时间线进度指针兜底（老存档补 1）
     if (Array.isArray(gs.goals)) {
         gs.goals.forEach(g => {
             if (!g) return;
@@ -67,6 +68,16 @@ export function getWorldSchema(world) {
 
 export function capSource(text) { return (text || "").slice(0, MAX_SOURCE_CHARS); }
 
+// ★ Plan A：把长文本按约 size 字符硬切块（不依赖段落边界），用于全书分块抽取知识库
+export function chunkText(text, size) {
+    const safe = Math.max(500, size | 0);
+    const t = String(text || "");
+    if (t.length <= safe) return [t];
+    const result = [];
+    for (let i = 0; i < t.length; i += safe) result.push(t.slice(i, i + safe));
+    return result;
+}
+
 export function sanitizeWorldConfig(raw) {
     if (!raw || typeof raw !== "object") return {};
     const out = {};
@@ -110,6 +121,13 @@ export function sanitizeWorldConfig(raw) {
                 // ★ B4：priority（重要度，预算裁剪时优先保留）+ recursive（是否允许被连带触发）
                 priority: (typeof s.priority === "number") ? Math.max(-10, Math.min(Math.floor(s.priority), 10)) : 0,
                 recursive: s.recursive === false ? false : undefined,
+                // ★ 时间线单向：timeline 归一（与 normSnippet 一致，供小书单次生成路径保留 timeline）
+                timeline: Array.isArray(s.timeline) ? s.timeline.slice(0, 12).map((t, i) => ({
+                    order: (typeof t.order === "number" && t.order > 0) ? Math.floor(t.order) : (i + 1),
+                    phase: typeof t.phase === "string" ? t.phase.slice(0, 60) : "",
+                    location: typeof t.location === "string" ? t.location.slice(0, 60) : "",
+                    summary: typeof t.summary === "string" ? t.summary.slice(0, 300) : ""
+                })).filter((t) => t.phase || t.location || t.summary) : [],
                 // ★ B9：关联链接（Operit 式图谱第一步：metadata-only）
                 links: Array.isArray(s.links) ? s.links.slice(0, 8).map(l => ({
                     target: typeof l.target === "string" ? l.target.slice(0, 50) : "",
@@ -177,6 +195,7 @@ export function defaultInitialState() {
         inventory: [],
         completed_events: [],
         current_location: "初始地点",
+        story_progress: 1,   // ★ 时间线进度指针（单向，仅增）：知识库 timeline 片段只在 order ≤ 此值时才注入，避免剧透未来
         current_date: { day: 1, period: "morning" },
         goals: [],
         status_effects: [],
@@ -302,6 +321,82 @@ export function parseResponse(content) {
             throw new Error("AI 返回的 JSON 解析失败：" + e2.message + "\n原始内容：" + content.slice(0, 500));
         }
     }
+}
+
+// ★ Plan A：跨分块合并同名 lore 条目——同一条目在多处出现时汇总内容、并集触发词/链接，
+// 而非产生多个同名词条；也不覆盖最新，而是把所有出现处的信息累积成更全的一条。
+export function mergeLoreSnippets(existing, incoming) {
+    const normTitle = (t) => (t || "").trim().toLowerCase();
+    const dedupe = (arr) => Array.from(new Set(arr.filter(Boolean)));
+    const dedupeLinks = (arr) => {
+        const seen = new Set();
+        const res = [];
+        for (const l of (arr || [])) {
+            const k = (l && l.target ? l.target : "") + "|" + (l && l.relation ? l.relation : "related");
+            if (!seen.has(k)) { seen.add(k); res.push(l); }
+        }
+        return res;
+    };
+    const normSnippet = (s) => ({
+        id: typeof s.id === "string" ? s.id : "",
+        category: (typeof s.category === "string" && s.category) ? s.category.slice(0, 50) : "其他",
+        title: (typeof s.title === "string" && s.title) ? s.title.slice(0, 200) : "未命名",
+        content: typeof s.content === "string" ? s.content : "",
+        keywords: Array.isArray(s.keywords) ? s.keywords.map((k) => String(k).slice(0, 50)).filter(Boolean) : [],
+        activation_keys: Array.isArray(s.activation_keys) ? s.activation_keys.map((k) => String(k).slice(0, 50)).filter(Boolean) : [],
+        trigger_mode: (typeof s.trigger_mode === "string" && s.trigger_mode) ? s.trigger_mode.slice(0, 20) : "keyword",
+        scan_depth: (typeof s.scan_depth === "number" && s.scan_depth > 0) ? Math.min(Math.floor(s.scan_depth), 10) : 1,
+        priority: (typeof s.priority === "number") ? Math.max(-10, Math.min(Math.floor(s.priority), 10)) : 0,
+        links: Array.isArray(s.links) ? s.links.slice(0, 8).map((l) => ({
+            target: typeof l.target === "string" ? l.target.slice(0, 50) : "",
+            relation: (typeof l.relation === "string") ? l.relation : "related"
+        })).filter((l) => l.target) : [],
+        timeline: (Array.isArray(s.timeline) ? s.timeline.slice(0, 12).map((t, i) => ({
+            order: (typeof t.order === "number" && t.order > 0) ? Math.floor(t.order) : (i + 1), // 时间线顺序号（单向排序/门禁用；缺失按数组序兜底）
+            phase: typeof t.phase === "string" ? t.phase.slice(0, 60) : "",
+            location: typeof t.location === "string" ? t.location.slice(0, 60) : "",
+            summary: typeof t.summary === "string" ? t.summary.slice(0, 300) : ""
+        })).filter((t) => t.phase || t.location || t.summary) : []).sort((a, b) => a.order - b.order)
+    });
+    const out = (existing || []).map(normSnippet);
+    const map = new Map();
+    out.forEach((s, i) => { const k = normTitle(s.title); if (k) map.set(k, i); });
+    for (const raw of (incoming || [])) {
+        const s = normSnippet(raw);
+        const key = normTitle(s.title);
+        if (key && map.has(key)) {
+            const cur = out[map.get(key)];
+            const add = s.content.trim();
+            // 仅当新增内容未被现有内容覆盖时追加（避免重复堆积）
+            if (add && !cur.content.includes(add.slice(0, Math.min(60, add.length)))) {
+                cur.content = (cur.content + "\n" + add).slice(0, 2000);
+            }
+            cur.keywords = dedupe([...cur.keywords, ...s.keywords]).slice(0, 20);
+            cur.activation_keys = dedupe([...cur.activation_keys, ...s.activation_keys]).slice(0, 20);
+            cur.links = dedupeLinks([...cur.links, ...s.links]).slice(0, 8);
+            // 合并 timeline：按 order（顺序号）去重合并，同序 summary 拼接、缺失 location/phase 补全，最后按 order 升序排列
+            if (Array.isArray(s.timeline) && s.timeline.length) {
+                for (const t of s.timeline) {
+                    const ex = cur.timeline.find((x) => x.order === t.order);
+                    if (ex) {
+                        if (t.summary && !ex.summary.includes(t.summary.slice(0, 40))) {
+                            ex.summary = (ex.summary + " " + t.summary).slice(0, 300);
+                        }
+                        if (t.location && !ex.location) ex.location = t.location;
+                        if (t.phase && !ex.phase) ex.phase = t.phase;
+                    } else {
+                        cur.timeline.push(t);
+                    }
+                }
+                cur.timeline.sort((a, b) => a.order - b.order);
+            }
+            if (s.priority > cur.priority) cur.priority = s.priority;
+        } else {
+            if (key) map.set(key, out.length);
+            out.push(s);
+        }
+    }
+    return out;
 }
 
 export function tryRepairJSON(text) {

@@ -292,9 +292,10 @@
                 </div>
                 <div class="conditional-field show" id="ipNameField">
                     <div class="form-group">
-                        <label>作品名称</label>
+                        <label>作品名称 <span id="ipNameReqTag" class="req-tag">必填</span></label>
                         <input type="text" id="ipName" placeholder="例如：剑来、哈利波特、三体、红楼梦...">
                         <div class="hint">AI 将根据作品名称从训练数据中检索相关设定、人物、力量体系来生成世界观。</div>
+                        <div class="hint opt-hint" id="ipNameOptHint" style="display:none;color:var(--primary);">已上传源文件，作品名称可留空——AI 将以你上传的原文为准生成世界观，名称仅作辅助参考。</div>
                     </div>
                     <div class="upload-tip-box">
                         <div class="upload-tip-title">建议上传源文件以获得更精准的生成效果</div>

@@ -89,6 +89,20 @@ function resetCreateWorldForm() {
     });
     const cpf = document.getElementById("customPrefixField"); if (cpf) cpf.classList.remove("show");
     const wpf = document.getElementById("worldPrefixField"); if (wpf) wpf.classList.remove("show");
+    // ★ 彩蛋回填：用户此前触发主题切换彩蛋后，打开创建向导时把预填文字写回并自动展开「特殊要求」
+    if (S.easterEggPrefix) {
+        ["worldPrefix", "customPrefix"].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el && !el.value.trim()) el.value = S.easterEggPrefix;
+        });
+        const wg = document.getElementById("worldPrefixGroup");
+        const cg = document.getElementById("customPrefixGroup");
+        const wOn = wg && wg.querySelector('input[type=radio][value="on"]');
+        const cOn = cg && cg.querySelector('input[type=radio][value="on"]');
+        if (wOn) toggleWorldPrefix(true, wOn.closest(".radio-option"));
+        if (cOn) toggleCustomPrefix(true, cOn.closest(".radio-option"));
+        delete S.easterEggPrefix; // 只生效一次
+    }
     // 剧情自由度默认：3
     const pf = document.getElementById("plotFreedom"); if (pf) pf.value = "3";
     updatePlotFreedomLabel("3");
@@ -102,8 +116,11 @@ export function cwNext() {
     if (cwStep === 1) {
         if (!document.getElementById("worldName").value.trim()) { showToast("请先填写世界名称", "error"); return; }
     } else if (cwStep === 2) {
-        if (document.getElementById("worldType").value === "ip" && !document.getElementById("ipName").value.trim()) {
-            showToast("基于已有 IP 时请填写作品名称", "error"); return;
+        const typeVal = document.getElementById("worldType").value;
+        const ipNameVal = document.getElementById("ipName").value.trim();
+        // ★ 上传了小说源文件后，作品名称改为可选填写
+        if (typeVal === "ip" && !ipNameVal && !isSourceFileUploaded()) {
+            showToast("基于已有 IP 时请填写作品名称，或上传小说源文件后留空", "error"); return;
         }
     } else if (cwStep === 3) {
         if (!document.getElementById("worldDesc").value.trim()) { showToast("请填写世界观描述", "error"); return; }
@@ -165,6 +182,27 @@ export function onWorldTypeChange(value) {
         worldDescHint.innerHTML = "描述越详细，AI 生成的内容越贴近你的预期。";
         worldDescTextarea.placeholder = "描述这个世界的规则、力量体系、主要势力、地点、人物关系等...";
     }
+    // 切换类型后，刷新「作品名称 必填/选填」状态
+    refreshIpNameRequirement();
+}
+
+// 判断玩家是否已上传小说源文件（用于决定作品名称是否必填）
+export function isSourceFileUploaded() {
+    return !!(S.sourceFileContent && S.sourceFileContent.length > 0);
+}
+
+// 上传源文件后，把「作品名称」从必填切到选填（反之亦然）。由 onWorldTypeChange / 上传完成 / 移除文件 调用。
+export function refreshIpNameRequirement() {
+    const field = document.getElementById("ipNameField");
+    if (!field) return;
+    const optional = document.getElementById("worldType").value === "ip" && isSourceFileUploaded();
+    const tag = document.getElementById("ipNameReqTag");
+    if (tag) {
+        tag.textContent = optional ? "选填" : "必填";
+        tag.className = optional ? "opt-tag" : "req-tag";
+    }
+    const optHint = document.getElementById("ipNameOptHint");
+    if (optHint) optHint.style.display = optional ? "" : "none";
 }
 
 export function selectStyleRef(value, el) {

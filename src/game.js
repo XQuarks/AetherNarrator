@@ -3,14 +3,14 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
-import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
+import { analyzeWorldTags, capSource, chunkText, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, mergeLoreSnippets, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, getWorldLoreKB, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
-import { callLLM, callWorldGenerationLLM, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
-import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState } from "./render.js";
+import { callLLM, callWorldGenerationLLM, callLoreChunkLLM, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
+import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded } from "./render.js";
 import { LATEST_SAVE_SCHEMA_VERSION, migrateSaveRecord } from "./migrations.js";
 import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
@@ -92,8 +92,9 @@ export async function generateWorld() {
         showToast("请填写世界名称和世界观描述", "error");
         return;
     }
-    if (type === "ip" && !ipName) {
-        showToast("基于已有 IP 时请填写作品名称", "error");
+    // ★ 上传了小说源文件后，作品名称改为可选填写
+    if (type === "ip" && !ipName && !isSourceFileUploaded()) {
+        showToast("基于已有 IP 时请填写作品名称，或上传小说源文件后留空", "error");
         return;
     }
 
@@ -102,11 +103,41 @@ export async function generateWorld() {
     btn.textContent = "生成中...";
 
     try {
-        const generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, S.sourceFileContent, styleRef, customStyle, plotFreedom, worldPrefix));
-        // 为 AI 生成世界的 lore_kb 补算向量（transformers 不可用时静默跳过，降级为关键词检索）
-        if (generated && generated.lore_kb) {
-            try { await ensureLoreEmbeddings(generated.lore_kb); }
-            catch (e) { console.warn("世界生成后向量预计算失败，将降级为关键词检索:", e.message); }
+        const CHUNK_SIZE = 15000;   // ★ Plan A：单块 1.5 万字
+        const COUNT_HINT = 25;      // ★ Plan A：每块抽 20-30 条
+        const src = S.sourceFileContent || "";
+        let generated, loreKb;
+        if (src.length > CHUNK_SIZE) {
+            // ===== Plan A：全书分块多遍抽取，合并去重成覆盖全书的大知识库 =====
+            const chunks = chunkText(src, CHUNK_SIZE);
+            showToast(`本书较大，知识库将分 ${chunks.length} 段生成，可能需要较长时间（数十次 API 调用），请耐心等待。`, "warn");
+            // ① 基础世界配置（结构/开场）由首段生成
+            generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, chunks[0], styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT));
+            // ② 逐段抽取 lore 并合并（覆盖全书，同名条目汇总）
+            let allSnippets = [];
+            for (let i = 0; i < chunks.length; i++) {
+                btn.textContent = `生成中 (${i + 1}/${chunks.length})...`;
+                try {
+                    const lore = await callLoreChunkLLM(name, ipName, chunks[i], i + 1, chunks.length, COUNT_HINT, styleRef, customStyle);
+                    allSnippets = mergeLoreSnippets(allSnippets, (lore && lore.snippets) || []);
+                } catch (err) {
+                    showToast(`第 ${i + 1}/${chunks.length} 段知识库生成失败，已跳过：${err.message}`, "error");
+                    console.warn(err);
+                }
+            }
+            // 重排唯一 id，避免各段 id 冲突
+            allSnippets.forEach((s, i) => { s.id = "m" + (i + 1); });
+            loreKb = { ip: name, snippets: allSnippets };
+            try { await ensureLoreEmbeddings(loreKb); }
+            catch (e) { console.warn("知识库向量预计算失败，将降级为关键词检索:", e.message); }
+        } else {
+            // 小书：沿用原有单次生成
+            generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix));
+            loreKb = generated.lore_kb;
+            if (loreKb) {
+                try { await ensureLoreEmbeddings(loreKb); }
+                catch (e) { console.warn("世界生成后向量预计算失败，将降级为关键词检索:", e.message); }
+            }
         }
         const world = {
             id: "w" + Date.now(),
@@ -119,7 +150,7 @@ export async function generateWorld() {
             tags: analyzeWorldTags(name, desc, hero, type, ipName),
             schema: generated.schema || defaultWorldSchema(name + " " + desc),
             initial_state: generated.initial_state,
-            lore_kb: generated.lore_kb,
+            lore_kb: loreKb,
             opening_narrative: generated.opening_narrative || "",
             initial_choices: generated.initial_choices || [],
             system_prompt: generated.system_prompt,
@@ -304,6 +335,12 @@ export function applyStateChanges(changes) {
     }
 
     if (changes.current_location) s.current_location = changes.current_location;
+    // ★ 时间线进度指针：单向只增（取 max）；推进时失效 system prompt 缓存，使下轮注入的 story_progress 值同步更新
+    if (typeof changes.story_progress === "number" && isFinite(changes.story_progress)) {
+        const nextSp = Math.max(1, Math.floor(changes.story_progress));
+        const curSp = (typeof s.story_progress === "number") ? s.story_progress : 1;
+        if (nextSp > curSp) { s.story_progress = nextSp; invalidateSystemPromptCache(); }
+    }
     // 注意：current_date 不在本处直接写回——时间钳制段（下方）须基于「旧时间」推导目标，
     // 若先写回则 prevSeq 失真、回退钳制失效（P1#8 真实缺陷修复）。
     if (changes.time_mode) s.time_mode = changes.time_mode;

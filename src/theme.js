@@ -101,7 +101,8 @@ export function toggleTheme() {
         [document.getElementById("worldPrefix"), document.getElementById("customPrefix")].forEach(el => {
             if (el && !el.value.trim()) el.value = defaultPrefix;
         });
-        showToast("特殊要求默认文字已填入 ✨", "success");
+        S.easterEggPrefix = defaultPrefix;
+        showToast("🎉 彩蛋已触发！已为你预填「特殊要求」默认文字，去创建新世界即可看到并使用", "success");
     } else {
         S.themeClickTimer = setTimeout(() => { S.themeClickCount = 0; }, 2000);
     }

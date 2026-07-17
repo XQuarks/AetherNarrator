@@ -254,6 +254,52 @@ function expandRecursiveTriggers(seedSnips, kb, maxDepth) {
     return chosen;
 }
 
+// ★ 时间线切片（乙·语义版 + 单向门禁）：带 timeline 的命中条目，
+//   ① 先按 story_progress 单向门禁——只保留 order ≤ 当前进度的阶段，屏蔽"尚未发生的未来"（不剧透）；
+//   ② 在已解锁阶段内按对话语义/关键词精选相关片段（无匹配则给全部已解锁阶段作为"已知经历"）；
+//   ③ 按 order 升序输出，不露"第X章"等章节字（只用地点+要点）。
+// 仅对走动态召回的 nonCore 类生效；人物/地点等固定在 system 的类不走此处，靠结构化 timeline + system 指令由 AI 自判。
+export async function selectTimelineSlice(snippet, input, qVec) {
+    const tl = snippet.timeline;
+    if (!Array.isArray(tl) || !tl.length) return snippet;
+    const orderOf = (t) => (typeof t.order === "number" ? t.order : 1);
+    // ① 单向门禁：只保留 order ≤ 当前故事进度的阶段（未发生的未来一律不注入，避免剧透）
+    const progress = (S.gameState && typeof S.gameState.story_progress === "number") ? S.gameState.story_progress : 1;
+    const unlocked = tl.filter((t) => orderOf(t) <= progress);
+    if (!unlocked.length) return snippet; // 连最早阶段都未解锁（异常）→ 不注入 timeline，保留原 content
+    const textOf = (t) => ((t.location || "") + " " + (t.summary || "")); // 不含 phase，避免章节字混入匹配
+    // ② 关键词匹配（零成本，始终可用）——仅在已解锁片段内
+    const terms = segmentChinese(input || "");
+    const kwMatched = [];
+    for (const t of unlocked) {
+        const text = textOf(t).toLowerCase();
+        let hit = 0;
+        for (const term of terms) if (text.includes(term)) hit++;
+        if (hit > 0) kwMatched.push({ t, hit });
+    }
+    // 语义匹配（向量可用时增强）——仅在已解锁片段内
+    let chosen = null;
+    if (qVec && (typeof window !== "undefined" && (typeof window.transformers !== "undefined" || typeof Worker !== "undefined"))) {
+        try {
+            const scored = [];
+            for (const t of unlocked) {
+                const tv = await computeEmbedding(textOf(t), false);
+                scored.push({ t, sim: cosineSimilarity(qVec, tv) });
+            }
+            chosen = scored.sort((a, b) => b.sim - a.sim).slice(0, 3).map((x) => x.t);
+        } catch (e) { /* 降级关键词 */ }
+    }
+    if (!chosen && kwMatched.length) {
+        chosen = kwMatched.sort((a, b) => b.hit - a.hit).slice(0, 3).map((x) => x.t);
+    }
+    // 无语义/关键词匹配 → 给已解锁的全部阶段（"到目前为止的已知经历"），仍不剧透未来
+    if (!chosen || !chosen.length) chosen = unlocked;
+    // ③ 按 order 升序输出，不露章节字（只用地点+要点）
+    chosen = chosen.slice().sort((a, b) => orderOf(a) - orderOf(b));
+    const tlText = chosen.map((t) => `- ${t.location ? t.location + "：" : ""}${t.summary || ""}`).join("\n");
+    return { ...snippet, content: `${(snippet.content || "").trim()}\n\n【已知经历·按时间顺序（未发生的不在此列）】\n${tlText}` };
+}
+
 export async function retrieve(input) {
     // P1#2：小知识库（全文已注入 system）无需每轮跑 embedding 推理 + 关键词向量检索——
     // 那段知识在 buildTurnUserMessage 里不会进入 user 消息，纯属浪费（手机端尤卡）。
@@ -277,6 +323,14 @@ export async function retrieve(input) {
         Promise.resolve(keywordRetrieve(input, 7)),
         embeddingRetrieve(input, 7)
     ]);
+    // 缓存查询向量，供时间线切片做语义匹配（向量可用时；兜底不影响主流程）
+    let qVec = null;
+    try {
+        if (typeof window !== "undefined" && (typeof window.transformers !== "undefined" || typeof Worker !== "undefined")) {
+            qVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
+        }
+    } catch (e) { qVec = null; }
+
     // 保留真实分数（关键词分 + 余弦相似度）做加权融合，而非归一为 1/2 常量（修复 #1 丢失区分度）
     const KW_W = 1.0, EMB_W = 2.0;
     const merged = new Map();
@@ -385,6 +439,16 @@ export async function retrieve(input) {
         usedChars += cost; loreCount++; out.push(s);
         if (loreCount >= 12) break; // 硬上限，正常由预算先触发
     }
+    // ★ 时间线切片（乙·语义版）：对命中且带 timeline 的动态召回条目，按对话语义/关键词筛最相关时间段注入，
+    // 避免跨阶段信息混淆（如角色第一章在a城、第三章在b城）。无匹配时保留完整 timeline，由 AI 自判。
+    for (let i = 0; i < out.length; i++) {
+        const s = out[i];
+        if (String(s.id).startsWith("behavior_")) continue;
+        if (s.timeline && s.timeline.length) {
+            out[i] = await selectTimelineSlice(s, input, qVec);
+        }
+    }
+
     return out;
 }
 

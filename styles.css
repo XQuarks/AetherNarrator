@@ -1674,3 +1674,18 @@
   .graph-legend { max-width: 60%; font-size: 11px; }
   .lore-graph-canvas-wrap { height: 56vh; }
 }
+
+/* 作品名称 必填/选填 角标 */
+.req-tag, .opt-tag {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: 9px;
+  vertical-align: middle;
+  margin-left: 6px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.req-tag { color: #b42318; background: #fef3f2; border: 1px solid #fda29b; }
+.opt-tag { color: #067647; background: #ecfdf3; border: 1px solid #abefc6; }

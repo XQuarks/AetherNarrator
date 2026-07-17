@@ -4,7 +4,7 @@
 
 import { S } from "./store.js";
 import { capSource, escapeHtml, formatFileSize } from "./utils.js";
-import { showToast } from "./render.js";
+import { showToast, refreshIpNameRequirement } from "./render.js";
 
 export function autoFillWorldDesc() {
     const descEl = document.getElementById("worldDesc");
@@ -16,9 +16,9 @@ export function autoFillWorldDesc() {
 export function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
-    // ★ P1.2.9: 上传大小上限（5MB），避免超大文件拖垮体验与 localStorage 配额
-    if (file.size > 5 * 1024 * 1024) {
-        showToast("文件过大（上限 5MB），请压缩或拆分后上传", "error");
+    // ★ Plan A：上传大小上限放宽到 20MB，配合全书分块抽取知识库
+    if (file.size > 20 * 1024 * 1024) {
+        showToast("文件过大（上限 20MB），请压缩或拆分后上传", "error");
         event.target.value = ""; // 允许重新选择
         return;
     }
@@ -33,6 +33,7 @@ export function handleFileSelect(event) {
             autoFillWorldDesc();
             area.classList.add("has-file");
             text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" data-action="clearSourceFile" tabindex="0" role="button" aria-label="移除上传的文件">✕</span>`;
+            refreshIpNameRequirement(); // ★ 上传后：作品名称改为可选填写
             // 点击已由初始化时的事件委托统一处理（允许重新选择/更换源文件）
         };
         reader.readAsText(file, "UTF-8");
@@ -46,6 +47,7 @@ export function handleFileSelect(event) {
                         autoFillWorldDesc();
                         area.classList.add("has-file");
                         text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" data-action="clearSourceFile" tabindex="0" role="button" aria-label="移除上传的文件">✕</span>`;
+                        refreshIpNameRequirement(); // ★ 上传后：作品名称改为可选填写
                         // 点击已由初始化时的事件委托统一处理（允许重新选择/更换源文件）
                     })
                     .catch(function(err) {
@@ -67,6 +69,7 @@ export function handleFileSelect(event) {
                         autoFillWorldDesc();
                         area.classList.add("has-file");
                         text.innerHTML = `<span class="file-name">${escapeHtml(file.name)}</span> (${formatFileSize(file.size)}) <span class="file-remove" data-action="clearSourceFile" tabindex="0" role="button" aria-label="移除上传的文件">✕</span>`;
+                        refreshIpNameRequirement(); // ★ 上传后：作品名称改为可选填写
                         // 点击已由初始化时的事件委托统一处理（允许重新选择/更换源文件）
                         showToast("EPUB 解析完成，" + Math.round(extracted.length / 1000) + "K 字符", "success");
                     })
@@ -141,4 +144,5 @@ export function clearSourceFile(e) {
     text.innerHTML = `点击上传 TXT / DOCX 文件`;
     // 文件上传区点击已在初始化时通过事件委托统一绑定
     input.value = "";
+    refreshIpNameRequirement(); // ★ 移除文件后：作品名称恢复为必填
 }

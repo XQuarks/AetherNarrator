@@ -151,7 +151,9 @@ export function calendarLabel(day, mode, monthLen = CALENDAR_MONTH_LEN) {
     return `第${d}天`;
 }
 
-export const MAX_SOURCE_CHARS = 8000;
+// ★ Plan A：全书分块抽取知识库——放宽源文件截断上限。
+// 12M 字符 ≈ 远超 20MB 上传上限可提取的文本量，确保全书原文能进入分块流程（不再只截前 8000 字）。
+export const MAX_SOURCE_CHARS = 12000000;
 
 export const LORE_FULL_THRESHOLD = 12000;
 

@@ -6,7 +6,7 @@ import { DEFAULT_PERIOD_LABELS, getActiveConditionTags } from "./store.js";
 import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, tryRepairJSON } from "./utils.js";
 import { getNextPeriod, getTemperature } from "./theme.js";
 import { getWorldLoreKB, summarizeFactsFromChanges } from "./rag.js";
-import { buildSystemPrompt, buildTurnUserMessage, buildWorldGenerationPrompt, buildAuthorNote, getPositionedLore } from "./prompt.js";
+import { buildSystemPrompt, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, getPositionedLore } from "./prompt.js";
 import { getProvider, readApiInputs } from "./providers.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
 import { processTurn } from "./game.js";
@@ -32,7 +32,7 @@ export function logTurnStats(hit, miss, total, usage) {
     });
 }
 
-export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix) {
+export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap = 8000, loreCountMin = null) {
     const mock = document.getElementById("mockMode").checked;
     if (mock) {
         await sleep(1200);
@@ -44,7 +44,7 @@ export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sou
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
 
-    const prompt = buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix);
+    const prompt = buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap, loreCountMin);
     const url = buildApiUrl(baseUrl, corsProxy);
     const res = await fetch(url, {
         method: "POST",
@@ -68,6 +68,64 @@ export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sou
     const content = data?.choices?.[0]?.message?.content;
     if (!content) throw new Error("API 返回异常：无法获取响应内容");
     return parseResponse(content);
+}
+
+// ★ Plan A：分块抽取单段 lore（与 callWorldGenerationLLM 同构，但只返回 lore_kb）
+export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle) {
+    const mockEl = document.getElementById("mockMode");
+    const mock = mockEl && mockEl.checked;
+    if (mock) {
+        await sleep(150);
+        const titles = ["角色甲", "地点乙", "事件丙", "势力丁"];
+        const cats = ["人物", "地点", "事件", "势力"];
+        const snippets = titles.slice(0, 3).map((t, i) => ({
+            id: "c" + chunkIndex + "_" + i,
+            category: cats[i] || "其他",
+            title: t,
+            content: `（第${chunkIndex}段）关于${t}的设定片段，用于验证分块合并去重。`,
+            keywords: [t],
+            activation_keys: [t],
+            trigger_mode: "keyword",
+            scan_depth: 1,
+            priority: 0
+        }));
+        return { ip: name, snippets };
+    }
+
+    const { baseUrl, corsProxy, apiKey, model } = readApiInputs();
+    if (!baseUrl || !apiKey || !model) {
+        throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
+    }
+
+    const prompt = buildLoreChunkPrompt(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle);
+    const url = buildApiUrl(baseUrl, corsProxy);
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + apiKey
+        },
+        body: JSON.stringify({
+            model,
+            messages: [{ role: "system", content: prompt }],
+            temperature: 0.7,
+            max_tokens: 8192,
+            response_format: { type: "json_object" }
+        })
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error("API 返回异常：无法获取响应内容");
+    const parsed = parseResponse(content);
+    if (!parsed || !parsed.lore_kb || !Array.isArray(parsed.lore_kb.snippets)) {
+        if (parsed && Array.isArray(parsed.snippets)) return { ip: name, snippets: parsed.snippets };
+        throw new Error("分块抽取返回格式异常：缺少 lore_kb.snippets");
+    }
+    return parsed.lore_kb;
 }
 
 export function mockGenerateWorld(name, type, desc, hero, ipName) {
