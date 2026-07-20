@@ -137,3 +137,54 @@ test("知识库注入严格遵守字符预算并保留至少一条摘要", async
     assert.ok(lore.length >= 1);
     assert.ok(used <= 40, `实际使用 ${used} 字符`);
 });
+
+// ============================================================
+// ★ Phase 4 增补：RAG 图遍历召回（relations 实体邻居扩展）
+// 撑过 LORE_FULL_THRESHOLD（12000 字）以触发检索分支（否则小库走全量常驻、不跑图遍历）。
+// ============================================================
+function relationKB(extra = {}) {
+    return {
+        budget_tokens: 8000,
+        ...extra,
+        snippets: [
+            { id: "harry", category: "人物", title: "哈利",
+              content: "哈利波特是故事的主角，拥有闪电形伤疤。".repeat(800), // ~13600 字，撑过阈值
+              trigger_mode: "keyword", activation_keys: ["哈利"],
+              relations: [{ from: "哈利", relation: "敌对", to: "伏地魔" }, { from: "哈利", relation: "校友", to: "赫敏" }] },
+            { id: "voldemort", category: "人物", title: "伏地魔", content: "黑魔王",
+              trigger_mode: "keyword", activation_keys: ["伏地魔"],
+              relations: [{ from: "伏地魔", relation: "领导", to: "食死徒" }] },
+            { id: "death", category: "势力", title: "食死徒", content: "伏地魔的追随者",
+              trigger_mode: "keyword", activation_keys: ["食死徒"] }
+            // 赫敏 为 entity-only（无片段）
+        ]
+    };
+}
+
+test("relations 图遍历召回：命中哈利→经实体中转召回伏地魔与食死徒", async () => {
+    resetRuntime();
+    S.vectorUnavailableWarned = true;
+    S.activeLoreKB = relationKB();
+
+    const result = await retrieve("哈利");
+    const ids = result.map(item => item.id);
+
+    assert.ok(ids.includes("harry"), "seed 哈利 应被召回");
+    assert.ok(ids.includes("voldemort"), "直接关系邻居 伏地魔 应被图遍历召回");
+    assert.ok(ids.includes("death"), "经 伏地魔 中转的 食死徒 应被 2 跳召回");
+    assert.ok(!ids.includes("hermione"), "赫敏 为 entity-only 且无片段，不应注入");
+});
+
+test("relations 图遍历召回：relation_traversal:false 时关闭扩展", async () => {
+    resetRuntime();
+    S.vectorUnavailableWarned = true;
+    S.activeLoreKB = relationKB({ relation_traversal: false });
+
+    const result = await retrieve("哈利");
+    const ids = result.map(item => item.id);
+
+    assert.ok(ids.includes("harry"), "seed 哈利 仍应被召回");
+    assert.ok(!ids.includes("voldemort"), "关闭后伏地魔 不应被扩展召回");
+    assert.ok(!ids.includes("death"), "关闭后食死徒 不应被扩展召回");
+});
+

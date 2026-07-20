@@ -3,29 +3,28 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
-import { analyzeWorldTags, capSource, chunkText, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, mergeLoreSnippets, runPool, sanitizeWorldConfig, validateStateShape } from "./utils.js";
+import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, getWorldLoreKB, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
-import { callLLM, callWorldGenerationLLM, callLoreChunkLLM, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
+import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
 import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded } from "./render.js";
-import { LATEST_SAVE_SCHEMA_VERSION, migrateSaveRecord } from "./migrations.js";
-import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements } from "./worldview.js";
+import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
+import { runWorldCritic, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js"; // ★ Phase 3：审稿人
 import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
 import { applySimulationChanges, createRestEvent, normalizeSimulationState } from "./simulation.js";
-import { getChunkConcurrency } from "./providers.js";
 import { acquireTurn, isSessionContextCurrent, releaseTurn } from "./turn-lifecycle.js";
 
 // 以下函数体已拆分至 save.js / lore-ui.js；此处重新导出以保持 app.js / render.js 的导入不变
 import { abortCurrentRequest, startGame, continueLatestSave, loadSave, deleteSave, deleteWorld, createOrUpdateSave } from "./save.js";
-import { openLoreReview, editWorldLore, editSaveLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreSpoiler } from "./lore-ui.js";
+import { openLoreReview, editWorldLore, editSaveLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreSpoiler, toggleLoreRequireConfirm, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, extractAndMergeSourceLore } from "./lore-ui.js";
 export { abortCurrentRequest, startGame, continueLatestSave, loadSave, deleteSave, deleteWorld, createOrUpdateSave };
-export { openLoreReview, editWorldLore, editSaveLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreSpoiler };
+export { openLoreReview, editWorldLore, editSaveLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreSpoiler, toggleLoreRequireConfirm, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore };
 
 export function goHome() {
     abortCurrentRequest();
@@ -110,69 +109,25 @@ export async function generateWorld() {
         let generated, loreKb;
         if (src.length > CHUNK_SIZE) {
             // ===== Plan A：全书分块多遍抽取，合并去重成覆盖全书的大知识库 =====
-            const chunks = chunkText(src, CHUNK_SIZE);
-            showToast(`本书较大，知识库将分 ${chunks.length} 段生成，可能需要较长时间（数十次 API 调用），请耐心等待。`, "warn");
+            // 分块/并发/合并/重排id/改写links 的逻辑已抽到 llm.js 的 extractLoreFromSource（含 relations 三元组）。
+            const chunkCount = Math.max(1, Math.ceil(src.length / CHUNK_SIZE));
+            showToast(`本书较大，知识库将分 ${chunkCount} 段生成，可能需要较长时间（数十次 API 调用），请耐心等待。`, "warn");
             // ① 基础世界配置（结构/开场）由首段生成
-            generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, chunks[0], styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT));
-            // ② 逐段抽取 lore 并合并（覆盖全书，同名条目汇总）
-      // ★ 提速：并发抽取（不再串行一个个等）。并发数由设置读取（默认 100 路）；
-      //    DeepSeek 限速是「并发额度」模型（非 TPM）：deepseek-v4-flash 账号级并发额度 2500，
-      //    100 路仍远低于上限，不会因并发触发 429。runPool 自带 429 退避兜底，极端超额也不丢块。
-      const CONCURRENCY = getChunkConcurrency();
-            const chunkResults = await runPool(chunks, CONCURRENCY,
-                (content, idx) => callLoreChunkLLM(name, ipName, content, idx + 1, chunks.length, COUNT_HINT, styleRef, customStyle),
-                {
-                    retries: 4,
-                    isRetryable: (e) => /429|timeout|network|fetch|abort|ECONN|ETIMEDOUT|无法修复|JSON 解析失败|截断|结构损坏/i.test(String((e && e.message) || "")),
-                    onRetry: (idx, n, err) => {
-                        const isJson = err && /无法修复|JSON 解析失败|截断|结构损坏/i.test(String((err && err.message) || ""));
-                        showToast(`第 ${idx}/${chunks.length} 段${isJson ? "生成结果损坏" : "被限流"}，自动重试(${n})...`, "warn");
-                    },
-                    onProgress: (done, total) => { btn.textContent = `生成中 (已完成 ${done}/${total})...`; },
-                    onError: (idx, err) => {
-                        showToast(`第 ${idx}/${chunks.length} 段知识库生成失败，已跳过：${err.message}`, "error");
-                        console.warn(err);
-                        // ★ 日志增强：区块失败原因写入可导出日志（含 AI 原始返回片段，见 parseResponse 报错）
-                        if (S.debugLog && S.debugLog.chunkErrors) {
-                            S.debugLog.chunkErrors.push({
-                                time: new Date().toISOString(),
-                                chunkIndex: idx,
-                                total: chunks.length,
-                                errorMessage: err && err.message
-                            });
-                        }
+            const firstChunk = src.slice(0, CHUNK_SIZE);
+            generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT));
+            // ② 逐段抽取 lore 并合并（覆盖全书，同名条目汇总；含 relations 三元组）
+            const extracted = await extractLoreFromSource(src, name, ipName, styleRef, customStyle, {
+                onRetry: (idx, total, kind, n) => showToast(`第 ${idx}/${total} 段${kind === "生成结果损坏" ? "生成结果损坏" : "被限流"}，自动重试(${n})...`, "warn"),
+                onProgress: (done, total) => { btn.textContent = `生成中 (已完成 ${done}/${total})...`; },
+                onChunkError: (idx, err) => {
+                    showToast(`第 ${idx}/${chunkCount} 段知识库生成失败，已跳过：${err.message}`, "error");
+                    console.warn(err);
+                    if (S.debugLog && S.debugLog.chunkErrors) {
+                        S.debugLog.chunkErrors.push({ time: new Date().toISOString(), chunkIndex: idx, total: chunkCount, errorMessage: err && err.message });
                     }
                 }
-            );
-            // 统一合并各段结果（同名条目汇总加长，顺序无关；失败段为 __error 占位、跳过）
-            let allSnippets = [];
-            for (const r of chunkResults) {
-                if (r && !r.__error) allSnippets = mergeLoreSnippets(allSnippets, (r.snippets) || []);
-            }
-            // 重排唯一 id，避免各段 id 冲突；同时改写 links.target 跟随新 id。
-            // AI 给的 target 可能是「带前缀 id」（新提示词要求）或「标题」（旧/兼容），
-            // 两者都尝试解析；指向不存在目标的悬空链接丢弃（AI 幻觉或未合并项）。
-            const idRemap = new Map();
-            const titleToId = new Map();
-            allSnippets.forEach((s, i) => {
-                const nid = "m" + (i + 1);
-                idRemap.set(s.id, nid);
-                if (s.title) titleToId.set(s.title.trim().toLowerCase(), nid);
-                s.id = nid;
             });
-            for (const s of allSnippets) {
-                if (Array.isArray(s.links) && s.links.length) {
-                    s.links = s.links
-                        .map(l => {
-                            const t = typeof l.target === "string" ? l.target.trim() : "";
-                            const resolved = idRemap.get(t) || titleToId.get(t.toLowerCase()) || "";
-                            return { target: resolved, relation: l.relation || "related" };
-                        })
-                        .filter(l => l.target && l.target !== s.id)
-                        .slice(0, 8);
-                }
-            }
-            loreKb = { ip: name, snippets: allSnippets };
+            loreKb = { ip: name, snippets: extracted.snippets };
             try { await ensureLoreEmbeddings(loreKb, (done, total) => { btn.textContent = `生成中 (向量化 ${done}/${total})...`; }); }
             catch (e) { console.warn("知识库向量预计算失败，将降级为关键词检索:", e.message); }
         } else {
@@ -204,10 +159,13 @@ export async function generateWorld() {
             style_ref: styleRef,
             custom_style: customStyle,
             plot_freedom: plotFreedom,
-            custom_prefix: customPrefix
+            custom_prefix: customPrefix,
+            rules: [] // ★ Phase 2：规则 DSL（创作者界面配置，见 docs/Phase2改造方案.md）
         };
         S.worlds.unshift(world);
         saveWorlds();
+        // ★ Phase 3：生成后自动审稿（fire-and-forget，不阻塞"世界已创建"提示）
+        runWorldCritic(world).catch(e => console.warn("自动审稿失败：", e && e.message));
         // 调试日志：记录世界创建
         S.debugLog.worldCreations.push({
             time: new Date().toISOString(),
@@ -713,6 +671,27 @@ export async function processTurn(input) {
         } else {
             // ✅ 正常故事内容
             applyStateChanges(resp.state_changes);
+
+            // ★ Phase 2：规则 DSL 解释执行（用户配置的世界规则）
+            //   - tag 类动作：写回 gameState.tags（在 A2 守卫之前，使本回合新标签可影响禁律判定）
+            //   - ending 类动作：触发结局弹窗（复用现有 showGameOver）
+            {
+                const evaluated = evaluateRules(S.currentWorld, S.gameState, resp.narrative);
+                if (Array.isArray(evaluated.tagOps) && evaluated.tagOps.length) {
+                    if (!Array.isArray(S.gameState.tags)) S.gameState.tags = [];
+                    for (const op of evaluated.tagOps) {
+                        if (op.op === "add") {
+                            if (!S.gameState.tags.includes(op.tag)) S.gameState.tags.push(op.tag);
+                        } else if (op.op === "remove") {
+                            const i = S.gameState.tags.indexOf(op.tag);
+                            if (i >= 0) S.gameState.tags.splice(i, 1);
+                        }
+                    }
+                }
+                if (Array.isArray(evaluated.endings) && evaluated.endings.length) {
+                    showGameOver(evaluated.endings[0].reason);
+                }
+            }
 
             // ★ A2 生成后世界观合规守卫（柔和提醒，不阻断回合）
             const localViolations = findWorldviewViolations(resp.narrative, getBannedConceptRules(), getActiveConditionTags());

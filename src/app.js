@@ -4,13 +4,13 @@
 import { S } from "./store.js";
 import { STORAGE_KEYS } from "./store.js";
 import { warmupEmbeddingWorker } from "./rag.js";
-import { deepClone, migrateGameState } from "./utils.js";
+import { deepClone } from "./utils.js";
 import { applyFontSize, applyTheme, changeFontSize, toggleTheme, updateTempLabel } from "./theme.js";
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, cwNext, cwPrev } from "./render.js";
-import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, togglePinMemory, triggerMemoryPackImport } from "./game.js";
+import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreRequireConfirm, togglePinMemory, triggerMemoryPackImport, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore } from "./game.js";
 
 async function init() {
     applyTheme();
@@ -41,7 +41,7 @@ async function init() {
         const state = await res.json();
         const saved = await idbGet(STORAGE_KEYS.state);
         if (saved) {
-            try { S.gameState = JSON.parse(saved); migrateGameState(S.gameState); } catch (e) { S.gameState = deepClone(state); }
+            try { S.gameState = JSON.parse(saved); } catch (e) { S.gameState = deepClone(state); }
         } else {
             S.gameState = deepClone(state);
         }
@@ -194,7 +194,20 @@ const ACTIONS = {
     confirmLoreRevision: () => confirmLoreRevision(),
     rejectLoreRevision: () => rejectLoreRevision(),
     toggleLoreSpoiler: () => toggleLoreSpoiler(),
+    toggleLoreRequireConfirm: (el) => toggleLoreRequireConfirm(el),
     toggleAIEnhanced: () => toggleAIEnhanced(),
+    // ★ Phase 3：AI 审稿人（criticModal）
+    triggerWorldCritic: () => triggerWorldCritic(S.currentWorld && S.currentWorld.id),
+    extractAndMergeSourceLore: () => extractAndMergeSourceLore(S.currentWorld && S.currentWorld.id),
+    confirmCriticRevision: () => confirmCriticRevision(),
+    rejectCriticRevision: () => rejectCriticRevision(),
+    // ★ Phase 2：世界规则 DSL 编辑器
+    openRuleEditor: (el) => openRuleEditor(el.dataset.id),
+    addRule: () => addRule(),
+    deleteRule: (el) => deleteRule(el.dataset.idx),
+    ruleTypeChange: (el) => ruleTypeChange(el),
+    importBannedAsRules: () => importBannedAsRules(),
+    saveRuleReview: () => saveRuleReview(),
 };
 
 document.addEventListener("keydown", (e) => {

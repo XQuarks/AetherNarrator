@@ -9,20 +9,7 @@ export function deepClone(obj) {
     return typeof structuredClone !== "undefined" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj));
 }
 
-export function migrateGameState(gs) {
-    if (!gs || typeof gs !== "object") return;
-    if (gs.active_event === undefined) gs.active_event = null;
-    if (!Array.isArray(gs.completed_events)) gs.completed_events = [];
-    if (typeof gs.story_progress !== "number" || gs.story_progress < 1) gs.story_progress = 1; // ★ 时间线进度指针兜底（老存档补 1）
-    if (Array.isArray(gs.goals)) {
-        gs.goals.forEach(g => {
-            if (!g) return;
-            if (!g.status) g.status = "active";
-            if (g.visible === undefined) g.visible = true;
-            if (g.deadline === undefined) g.deadline = null;
-        });
-    }
-}
+// migrateGameState 已移除（Phase 0：不兼容旧存档/世界；gameState 形状由 initial_state.json / saveState 保证）
 
 export function buildApiUrl(baseUrl, corsProxy) {
     const apiPath = baseUrl.replace(/\/$/, "") + "/chat/completions";
@@ -337,6 +324,16 @@ export function mergeLoreSnippets(existing, incoming) {
         }
         return res;
     };
+    const dedupeRelations = (arr) => {
+        const seen = new Set();
+        const res = [];
+        for (const r of (arr || [])) {
+            if (!r || !r.from || !r.to) continue;
+            const k = String(r.from) + "|" + String(r.relation || "related") + "|" + String(r.to);
+            if (!seen.has(k)) { seen.add(k); res.push(r); }
+        }
+        return res;
+    };
     const normSnippet = (s) => ({
         id: typeof s.id === "string" ? s.id : "",
         category: (typeof s.category === "string" && s.category) ? s.category.slice(0, 50) : "其他",
@@ -351,6 +348,11 @@ export function mergeLoreSnippets(existing, incoming) {
             target: typeof l.target === "string" ? l.target.slice(0, 50) : "",
             relation: (typeof l.relation === "string") ? l.relation : "related"
         })).filter((l) => l.target) : [],
+        relations: Array.isArray(s.relations) ? s.relations.slice(0, 8).map((r) => ({
+            from: typeof r.from === "string" ? r.from.slice(0, 50) : "",
+            relation: (typeof r.relation === "string" && r.relation) ? r.relation.slice(0, 20) : "related",
+            to: typeof r.to === "string" ? r.to.slice(0, 50) : ""
+        })).filter((r) => r.from && r.to) : [],
         timeline: (Array.isArray(s.timeline) ? s.timeline.slice(0, 12).map((t, i) => ({
             order: (typeof t.order === "number" && t.order > 0) ? Math.floor(t.order) : (i + 1), // 时间线顺序号（单向排序/门禁用；缺失按数组序兜底）
             phase: typeof t.phase === "string" ? t.phase.slice(0, 60) : "",
@@ -374,6 +376,7 @@ export function mergeLoreSnippets(existing, incoming) {
             cur.keywords = dedupe([...cur.keywords, ...s.keywords]).slice(0, 20);
             cur.activation_keys = dedupe([...cur.activation_keys, ...s.activation_keys]).slice(0, 20);
             cur.links = dedupeLinks([...cur.links, ...s.links]).slice(0, 8);
+            cur.relations = dedupeRelations([...cur.relations, ...s.relations]).slice(0, 8);
             // 合并 timeline：按 order（顺序号）去重合并，同序 summary 拼接、缺失 location/phase 补全，最后按 order 升序排列
             if (Array.isArray(s.timeline) && s.timeline.length) {
                 for (const t of s.timeline) {

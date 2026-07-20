@@ -3,6 +3,8 @@
 // ============================================================
 
 // 全局可变状态容器（跨模块共享，读写均用 S.xxx）
+// ★ node 环境（如 npm test）无 localStorage，顶层读取需守卫，避免模块加载即崩
+const _lsGet = (k, d) => (typeof localStorage !== "undefined" ? (localStorage.getItem(k) ?? d) : d);
 export const S = {
   gameState: null,
   loreKB: null,
@@ -23,7 +25,7 @@ export const S = {
   saves: [],
   currentStatusTab: "profile",
   sourceFileContent: "",
-  currentTheme: localStorage.getItem("aigame_theme") || "dark",
+  currentTheme: _lsGet("aigame_theme", "dark"),
   currentSession: { epoch: 0, worldId: null },
   currentAbortController: null,
   auxiliaryControllers: new Set(),
@@ -33,8 +35,8 @@ export const S = {
   themeClickCount: 0,
   themeClickTimer: null,
   lastFocusedBeforeModal: null,
-  fontSizeSetting: localStorage.getItem("aigame_fontsize") || "normal",
-  temperatureSetting: parseFloat(localStorage.getItem("aigame_temperature") || "0.5"),
+  fontSizeSetting: _lsGet("aigame_fontsize", "normal"),
+  temperatureSetting: parseFloat(_lsGet("aigame_temperature", "0.5")),
   renderedEntryCount: 0,
   typingTimer: null,
   typingIndex: -1,
@@ -50,7 +52,11 @@ export const S = {
   _loreRevisionBuffer: null, // ★ B5：AI 修订后待审阅的知识库条目缓冲
   lastLoreReviewMsgCount: 0,  // ★ B5：上次回写时的对话条数，用于触发阈值判断
   loreSpoilerHidden: true,     // ★ B8：知识库防剧透——默认隐藏正文，玩家手动解除
+  loreRequireConfirm: _lsGet("aigame_lore_confirm", "false") === "true", // ★ 知识晋升确认开关：默认关=自动同意+提示；开=弹窗手动确认
 };
+
+// Phase 2：规则 DSL 解释器（纯函数，无 store 反向依赖，避免循环引用）
+import { evaluateRules, legacyBanEntry } from "./worldview.js";
 
 export const MAX_CHAT_MESSAGES = 40;
 
@@ -268,12 +274,26 @@ export function getBannedConcepts() {
     return banned;
 }
 
-// 返回当前世界的原始结构化规则；过滤与解释由 worldview.js 统一完成。
+// 返回当前世界「仍被禁用」的概念规则数组（喂给 worldview 守卫）。
+// - 自由度 4–5 级：设计允许自由发挥，返回空（守卫放宽）
+// - 旧版 bannedConcepts 优先（与旧行为一致），DSL 里的 ban 规则叠加其上
+// - 既无 bannedConcepts 又无 DSL ban 规则时，用默认词表
+// - 解释执行由 worldview.evaluateRules 统一完成
 export function getBannedConceptRules() {
     const w = S.currentWorld;
-    const freedom = (w && typeof w.plot_freedom === "number") ? w.plot_freedom : 3;
+    if (!w) return [];
+    const freedom = (typeof w.plot_freedom === "number") ? w.plot_freedom : 3;
     if (freedom >= 4) return [];
-    return (w && Array.isArray(w.bannedConcepts) && w.bannedConcepts.length)
-        ? w.bannedConcepts
-        : DEFAULT_BANNED_CONCEPTS;
+    const ev = evaluateRules(w, S.gameState);
+    if (Array.isArray(w.bannedConcepts) && w.bannedConcepts.length) {
+        const banned = [];
+        for (const e of w.bannedConcepts) {
+            const b = legacyBanEntry(e);
+            if (b) banned.push(b);
+        }
+        for (const b of ev.bannedConcepts) banned.push(b); // DSL ban 规则叠加
+        return banned;
+    }
+    if (ev.bannedConcepts.length) return ev.bannedConcepts;
+    return DEFAULT_BANNED_CONCEPTS.slice();
 }

@@ -9,6 +9,8 @@ import { getEmbedConcurrency } from "./providers.js";
 import { getPeriodLabel } from "./theme.js";
 import { buildTurnUserMessage, isLoreFullInSystem } from "./prompt.js";
 import { showToast } from "./render.js";
+import { getLoreAnnIndex, embeddingRetrieveBruteforce } from "./ann-index.js";
+import { expandRelationNeighbors } from "./kg-graph.js"; // ★ Phase 4 增补：relations 实体图遍历召回（纯函数）
 
 // ★ P0-3-A：中文 embedding 模型（替代英文 all-MiniLM，中文语义召回更强）。维度由模型固定为 512。
 export const EMBED_MODEL = "Xenova/bge-small-zh-v1.5";
@@ -144,11 +146,16 @@ export async function embeddingRetrieve(input, topK = 5) {
         console.warn("查询向量计算失败", e);
         return [];
     }
-    const scored = embeddedSnippets.map(s => {
-        const sim = cosineSimilarity(qVec, s.embedding);
-        return { snippet: s, embScore: sim };
-    }).sort((a, b) => b.embScore - a.embScore).slice(0, topK);
-    return scored;
+    // ★ Phase 1：优先走 ANN 索引（O(log n)）；任何失败回落 O(n) 兜底（行为完全一致）
+    const worldId = (S.currentWorld && S.currentWorld.id) || "default";
+    let scored;
+    try {
+        const idx = await getLoreAnnIndex(kb, worldId, { dim: EMBED_DIM });
+        scored = idx.search(qVec, topK * 2); // 多取一些，后续加权/门禁再筛
+    } catch (e) {
+        scored = embeddingRetrieveBruteforce(embeddedSnippets, qVec, topK);
+    }
+    return scored.slice(0, topK);
 }
 
 export async function computeEmbedding(text, isQuery = false) {
@@ -417,6 +424,27 @@ export async function retrieve(input) {
             for (const id of linkedIds) {
                 const snip = idMap.get(id);
                 if (snip) merged.set(id, { snippet: snip, kw: 0.3, emb: 0 }); // 图谱链接给最低基础分，避免喧宾夺主
+            }
+
+            // ★ Phase 4 增补：relations 实体三元组遍历——已触发片段沿 relations 摸到相关实体/片段，
+            //   与上方链接跟随互补（那路走片段 ID 链接，这路走实体名关系）。默认开；
+            //   _kb.relation_traversal === false 时关闭。邻居以低分保底，受后续 token 预算裁剪，无溢出风险。
+            if (_kb.relation_traversal !== false) {
+                try {
+                    const seedIds = [];
+                    for (const [key] of merged.entries()) {
+                        if (String(key).startsWith("behavior_")) continue;
+                        seedIds.push(String(key));
+                    }
+                    const extra = expandRelationNeighbors(seedIds, _kb.snippets, { maxDepth: 2 });
+                    for (const id of extra) {
+                        if (!merged.has(id) && idMap.has(id)) {
+                            merged.set(id, { snippet: idMap.get(id), kw: 0.3, emb: 0 }); // 关系邻居与链接邻居同分保底
+                        }
+                    }
+                } catch (e) {
+                    console.warn("relations 图遍历召回失败，跳过：", e && e.message);
+                }
             }
         }
     }

@@ -693,18 +693,31 @@
 
         /* ★ B3：知识库编辑面板 */
         .modal.modal-wide { max-width: 680px; }
+        /* ★ 知识晋升确认开关：轻量确认弹窗摘要 */
+        #loreRevisionSummary .lore-rev-summary {
+            margin: 0;
+            padding-left: 18px;
+            line-height: 1.9;
+            font-size: 14px;
+        }
+        #loreRevisionSummary .lore-rev-summary b { color: var(--primary); }
         .lore-warn {
             background: rgba(201, 168, 124, 0.10);
             border: 1px solid var(--card-border);
             border-radius: var(--radius-m, 10px);
-            padding: 10px 14px;
             margin-bottom: 14px;
             font-size: 13px;
             color: var(--text-secondary);
         }
-        .lore-warn strong { color: var(--primary); display: block; margin-bottom: 6px; }
-        .lore-warn ul { margin: 0; padding-left: 18px; }
-        .lore-warn li { margin: 2px 0; }
+        .lore-warn > summary {
+            cursor: pointer; padding: 10px 14px; font-weight: 600; color: var(--text);
+            list-style: none; user-select: none;
+        }
+        .lore-warn > summary::-webkit-details-marker { display: none; }
+        .lore-warn > summary::before { content: "▸ "; color: var(--primary); }
+        .lore-warn[open] > summary::before { content: "▾ "; }
+        .lore-warn > ul { margin: 0 14px 12px; padding-left: 18px; }
+        .lore-warn li { margin: 3px 0; }
         .lore-ok { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
         .lore-row {
             border: 1px solid var(--card-border);
@@ -1545,8 +1558,24 @@
 .lore-search:focus { outline: none; border-color: var(--primary); }
 .btn-secondary-sm { background: var(--bg-panel); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 8px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .btn-secondary-sm:hover { border-color: var(--primary); color: var(--primary); }
+.btn-secondary-sm.danger { color: var(--danger); border-color: var(--danger); }
+
+/* ===== Phase 2：世界规则 DSL 编辑器样式 ===== */
+.rule-import-banner { background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rule-card { border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--bg-panel); }
+.rule-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.rule-name { flex: 1; background: var(--bg-input); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 6px 10px; font-size: 14px; }
+.rule-enabled { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.rule-summary { font-size: 13px; color: var(--primary); margin: 2px 0 8px; }
+.rule-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.rule-label { font-weight: 600; color: var(--text-secondary); min-width: 28px; }
+.rule-sub { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+.rule-sub input { background: var(--bg-input); border: 1px solid var(--card-border); border-radius: 6px; color: var(--text); padding: 4px 6px; }
+.muted { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 
 .lore-obs-cols { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.lore-col-aside { display: contents; }
+.lore-col-aside > summary { display: none; }
 .lore-tree { width: 230px; flex: 0 0 230px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 10px; padding: 8px; background: var(--bg-sidebar); }
 .lore-tree-empty { color: var(--text-secondary); font-size: 13px; padding: 12px; }
 .lore-tree-group { margin-bottom: 10px; }
@@ -1610,9 +1639,24 @@
 .lore-back-empty { font-size: 12px; color: var(--text-secondary); padding: 4px 2px; }
 .lore-empty { color: var(--text-secondary); font-size: 14px; padding: 30px 10px; text-align: center; }
 
+.lore-col-aside > summary::-webkit-details-marker { display: none; }
+.lore-col-aside > summary::before { content: "▸ "; color: var(--primary); }
+.lore-col-aside[open] > summary::before { content: "▾ "; }
+
 @media (max-width: 720px) {
-  .lore-obs-cols { flex-direction: column; max-height: none; }
-  .lore-tree, .lore-backlinks { width: auto; flex: none; max-height: 180px; }
+  .lore-obs-cols { flex-direction: column; max-height: none; gap: 8px; }
+  .lore-col-aside { display: block; }
+  .lore-col-aside > summary {
+    display: flex; align-items: center; gap: 6px; padding: 9px 12px;
+    background: var(--bg-sidebar); border: 1px solid var(--card-border);
+    border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text);
+    list-style: none;
+  }
+  .lore-col-aside:not([open]) > .lore-tree,
+  .lore-col-aside:not([open]) > .lore-backlinks { display: none; }
+  .lore-tree { width: auto; flex: none; max-height: 44vh; }
+  .lore-backlinks { width: auto; flex: none; max-height: 44vh; }
+  .lore-note { max-height: none; min-height: 54vh; }
 }
 
 /* ===== 知识库弹窗：视图切换（知识库 / 图谱 / 时间体系） ===== */
@@ -1634,6 +1678,8 @@
   radial-gradient(circle at 50% 40%, rgba(201,168,124,0.08), transparent 70%),
   var(--bg-panel); }
 #loreGraphCanvas { display: block; width: 100%; height: 100%; cursor: grab; }
+#loreGraph { width: 100%; height: 100%; }
+#loreGraph canvas { display: block; }
 .btn-icon { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--card-border);
   background: var(--bg-panel); color: var(--text); font-size: 20px; line-height: 1; cursor: pointer; flex: none;
   display: inline-flex; align-items: center; justify-content: center; transition: border-color .15s, background .15s; }
@@ -1669,6 +1715,16 @@
 .graph-preview-foot { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); }
 .graph-preview-edit { font-size: 12px; padding: 4px 12px; margin-left: auto; }
 .lore-time-pane { max-height: 70vh; overflow: auto; }
+
+/* ★ Phase 4：知识图谱图例分组标题 + 实体关系只读预览卡 */
+.legend-title { font-size: 11px; color: var(--text-secondary); width: 100%; margin-bottom: 2px; }
+.kg-entity-note { color: var(--text-secondary); font-size: 12px; }
+.kg-rel-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.kg-rel-row { font-size: 13px; line-height: 1.5; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.kg-rel-name { font-weight: 600; color: var(--text); }
+.kg-rel-arrow { color: var(--primary); font-weight: 600; }
+.kg-rel-via { color: var(--text-secondary); font-size: 11px; }
+.kg-rel-empty { color: var(--text-secondary); font-size: 12px; font-style: italic; }
 
 @media (max-width: 720px) {
   .graph-legend { max-width: 60%; font-size: 11px; }

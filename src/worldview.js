@@ -74,3 +74,123 @@ export function isEnhancementContextCurrent(expected, current) {
         && expected.epoch === current.epoch
         && expected.turnId === current.turnId;
 }
+
+// ===== Phase 2：规则 DSL 解释器 =====
+// 一条规则 = { id, name, enabled=true, when:{type,...}, then:{type,...} }
+//   when.type: "always"(或省略) | "concept" | "state" | "tag"
+//   then.type: "ban" | "tag" | "ending"
+// 详情见 docs/Phase2改造方案.md。
+// evaluateRules 为纯函数，不依赖 S / DOM，便于 node 测试。
+
+// 从 gameState 派生「活跃条件标签」集合（与 store.getActiveConditionTags 同口径）
+function getTagsFromState(gs) {
+    const tags = new Set();
+    if (!gs || typeof gs !== "object") return tags;
+    if (Array.isArray(gs.tags)) gs.tags.forEach(t => tags.add(t));
+    if (Array.isArray(gs.inventory)) {
+        for (const it of gs.inventory) {
+            if (it && Array.isArray(it.tags)) it.tags.forEach(t => tags.add(t));
+        }
+    }
+    if (Array.isArray(gs.present_npcs)) {
+        for (const n of gs.present_npcs) if (n) tags.add("char:" + n);
+    }
+    return tags;
+}
+
+function compareState(field, op, target, gs) {
+    if (!gs || !gs.state || typeof gs.state !== "object") return false;
+    const val = gs.state[field];
+    if (val === undefined || val === null) return false;
+    const a = Number(val), b = Number(target);
+    switch (op) {
+        case "<": return a < b;
+        case "<=": return a <= b;
+        case ">": return a > b;
+        case ">=": return a >= b;
+        case "==": return String(val) === String(target);
+        case "!=": return String(val) !== String(target);
+        default: return false;
+    }
+}
+
+function evalWhen(when, ctx) {
+    if (!when || typeof when !== "object") return true; // 无 when = 常驻规则
+    switch (when.type) {
+        case "always":
+            return true;
+        case "concept": {
+            const term = String(when.term || "").trim().toLowerCase();
+            if (!term) return false;
+            return ctx.text != null && String(ctx.text).toLowerCase().includes(term);
+        }
+        case "state":
+            return compareState(when.field, when.op || "==", when.value, ctx.gameState);
+        case "tag":
+            return when.tag != null && ctx.activeTags.has(when.tag);
+        default:
+            return false;
+    }
+}
+
+function normalizeBan(then) {
+    return {
+        concept: String(then.concept || "").trim(),
+        aliases: Array.isArray(then.aliases) ? then.aliases.map(String) : [],
+        severity: then.severity === "hard" ? "hard" : "soft",
+        unlockTags: Array.isArray(then.unlessTags) ? then.unlessTags.map(String) : []
+    };
+}
+
+export function legacyBanEntry(entry) {
+    if (typeof entry === "string") {
+        return { concept: entry, aliases: [], severity: "soft", unlockTags: [] };
+    }
+    if (!entry || !entry.concept) return null;
+    return {
+        concept: String(entry.concept).trim(),
+        aliases: Array.isArray(entry.aliases) ? entry.aliases.map(String) : [],
+        severity: entry.severity === "hard" ? "hard" : "soft",
+        unlockTags: Array.isArray(entry.unlockTags) ? entry.unlockTags.map(String) : []
+    };
+}
+
+// 解释执行世界规则，返回归一化约束：
+//   { bannedConcepts:[{concept,aliases,severity,unlockTags}], tagOps:[{op,tag}], endings:[{reason,ruleId}] }
+// - world.rules 存在且非空：按 DSL 解释（ban 规则并入 bannedConcepts，与现有守卫完全兼容）
+// - 否则回退：仅取 world.bannedConcepts（默认词表由 store.getBannedConceptRules 补）
+// - text（可选）：本轮叙事文本，供 when.type==="concept" 触发条件匹配（如"输出出现某词→触发结局"）
+export function evaluateRules(world, gs, text) {
+    const result = { bannedConcepts: [], tagOps: [], endings: [] };
+    if (!world || typeof world !== "object") return result;
+    const rules = Array.isArray(world.rules) ? world.rules : null;
+    if (rules && rules.length) {
+        const activeTags = getTagsFromState(gs);
+        const ctx = { text: text != null ? String(text) : null, gameState: gs, activeTags };
+        for (const rule of rules) {
+            if (!rule || rule.enabled === false) continue;
+            if (!evalWhen(rule.when, ctx)) continue;
+            const then = rule.then;
+            if (!then || typeof then !== "object") continue;
+            if (then.type === "ban") {
+                const b = normalizeBan(then);
+                if (b.concept) result.bannedConcepts.push(b);
+            } else if (then.type === "tag") {
+                if (then.tag) result.tagOps.push({ op: then.op === "remove" ? "remove" : "add", tag: String(then.tag) });
+            } else if (then.type === "ending") {
+                result.endings.push({
+                    reason: String(then.reason || "规则触发：世界结束"),
+                    ruleId: rule.id || null
+                });
+            }
+        }
+        return result;
+    }
+    // 回退：旧版 bannedConcepts（仅 ban 概念，无 tag/ending）
+    const legacy = Array.isArray(world.bannedConcepts) ? world.bannedConcepts : [];
+    for (const entry of legacy) {
+        const b = legacyBanEntry(entry);
+        if (b) result.bannedConcepts.push(b);
+    }
+    return result;
+}

@@ -12,7 +12,7 @@
       若需在受控环境彻底去掉 'unsafe-inline'，请先迁移所有静态 HTML onclick 为事件委托，
       再运行 tools/recompute-csp-hash.js 生成 hash-source 版 CSP。
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
     <title>以太叙事 · AetherNarrator</title>
     <!-- ★ P1.2.3: transformers.js 为单文件 ESM，必须以 module 方式加载；经典 script 会因 export 语法报错且全局 transformers 永不定义，向量 RAG 永远降级为关键词 -->
     <!-- ★ P0-3-E 内置化：transformers 运行时与中文模型随项目发布，不再从 jsdelivr 加载 -->
@@ -33,6 +33,7 @@
     <!-- ★ 步骤 B：Obsidian 风 markdown 渲染（离线内置，UMD 全局 markdownit / DOMPurify；CSP 'self' 已放行 vendor/） -->
     <script src="./vendor/markdown-it.min.js"></script>
     <script src="./vendor/dompurify.min.js"></script>
+    <script src="./vendor/force-graph/force-graph.min.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -103,10 +104,35 @@
                 <input type="range" id="temperatureSlider" min="0" max="1" step="0.1" value="0.5" data-action="updateTempLabel" data-event="input">
                 <div class="hint" id="tempLabel">0.5 — 剧情模式（稳定连贯）</div>
             </div>
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="loreRequireConfirm" data-action="toggleLoreRequireConfirm" data-event="change" style="width:auto;">
+                    <span>知识库修订需我手动确认</span>
+                </label>
+                <div class="hint">开启后，AI 回写知识库（含记忆晋升）会弹窗让你确认应用或忽略；关闭时自动同意并提示「知识库已更新」。</div>
+            </div>
         </div>
         <div class="modal-footer">
             <button class="btn" data-action="exportDebugLog" style="flex:1">导出调试日志</button>
             <button class="btn primary full-width" data-action="closeModal" data-modal="settingsModal">完成</button>
+        </div>
+    </div>
+</div>
+
+<!-- ★ 知识晋升确认开关：轻量确认弹窗 -->
+<div class="modal-overlay" id="loreRevisionModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="loreRevisionModalTitle">
+        <div class="modal-header">
+            <h2 id="loreRevisionModalTitle">知识库修订建议</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="loreRevisionModal">×</button>
+        </div>
+        <div class="modal-body">
+            <p class="muted" style="font-size:13px;margin:0 0 10px;">AI 根据近期游玩，建议更新你的世界知识库。你可应用，或忽略本次建议。</p>
+            <div id="loreRevisionSummary"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="rejectLoreRevision">忽略</button>
+            <button class="btn primary" data-action="confirmLoreRevision">应用修订</button>
         </div>
     </div>
 </div>
@@ -559,8 +585,41 @@
         <div class="modal-body" id="loreReviewBody"></div>
         <div class="modal-footer">
             <button class="btn secondary" data-action="addLoreEntry">＋ 添加条目</button>
+            <button class="btn secondary" id="extractSourceBtn" data-action="extractAndMergeSourceLore">📥 从源文档补抽</button>
+            <button class="btn secondary" data-action="triggerWorldCritic">🤖 审稿检查</button>
             <button class="btn secondary" data-action="closeModal" data-modal="loreReviewModal">取消</button>
             <button class="btn primary" data-action="saveLoreReview">保存知识库</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= AI 审稿结果弹窗（Phase 3 · Critic） ================= -->
+<div class="modal-overlay" id="criticModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="criticModalTitle">
+        <div class="modal-header">
+            <h2 id="criticModalTitle">🤖 AI 审稿结果</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="criticModal">×</button>
+        </div>
+        <div class="modal-body" id="criticModalBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="rejectCriticRevision">忽略</button>
+            <button class="btn primary" data-action="confirmCriticRevision">采纳修订</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 世界规则 DSL 编辑器（Phase 2） ================= -->
+<div class="modal-overlay" id="ruleEditorModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="ruleEditorTitle">
+        <div class="modal-header">
+            <h2 id="ruleEditorTitle">世界规则（不碰代码配世界）</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="ruleEditorModal">×</button>
+        </div>
+        <div class="modal-body" id="ruleEditorBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="addRule">＋ 添加规则</button>
+            <button class="btn secondary" data-action="closeModal" data-modal="ruleEditorModal">取消</button>
+            <button class="btn primary" data-action="saveRuleReview">保存规则</button>
         </div>
     </div>
 </div>

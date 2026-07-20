@@ -15,7 +15,8 @@ import { normalizeSimulationState } from "./simulation.js";
 import { deepClone, defaultInitialState } from "./utils.js";
 import { invalidateSystemPromptCache, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
 import { formatWorldTime } from "./theme.js";
-import { LATEST_SAVE_SCHEMA_VERSION, migrateSaveRecord } from "./migrations.js";
+import { LATEST_SAVE_SCHEMA_VERSION } from "./migrations.js";
+import { invalidateAllLoreAnn } from "./ann-index.js";
 
 export function abortCurrentRequest() {
     if (S.currentAbortController) {
@@ -31,6 +32,7 @@ export function abortCurrentRequest() {
 
 export async function startGame(opts = {}) {
     abortCurrentRequest(); // ★ P0: 失效在途请求，避免旧响应串入新周目
+    invalidateAllLoreAnn(); // ★ Phase 1：切换/重开世界，释放旧 ANN 索引
     closeModal("worldDetailModal");
     if (!S.currentWorld) return;
     stopTypewriter();
@@ -103,6 +105,7 @@ export function continueLatestSave(worldId) {
 // loadSave 与「存档详情-存档知识库」编辑共用，保证进入游戏前/知识库编辑前状态一致。
 export function prepareSessionFromSave(save) {
     abortCurrentRequest(); // ★ P0: 失效在途请求
+    invalidateAllLoreAnn(); // ★ Phase 1：载入存档/切换世界，释放旧 ANN 索引
     stopTypewriter();
     S.currentWorld = S.worlds.find(w => w.id === save.worldId);
     S.currentSession.worldId = save.worldId;
@@ -121,7 +124,7 @@ export function prepareSessionFromSave(save) {
 
 export function loadSave(saveId) {
     const stored = S.saves.find(s => s.id === saveId);
-    const save = stored ? migrateSaveRecord(stored, S.worlds.find(w => w.id === stored.worldId)) : null;
+    const save = stored || null;
     if (!save) return;
     prepareSessionFromSave(save);
     showToast(`加载存档：${save.worldName}`, "success");

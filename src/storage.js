@@ -5,7 +5,7 @@ import { S } from "./store.js";
 import { STORAGE_KEYS } from "./store.js";
 import { deepClone, defaultWorldSchema } from "./utils.js";
 import { closeModal, showToast } from "./render.js";
-import { migrateSaveRecord, migrateWorldRecord, parseStoredArray, parseStoredObject } from "./migrations.js";
+import { parseStoredArray, parseStoredObject } from "./migrations.js";
 import { idbGet, idbSet, idbDel } from "./idb.js";
 import { PROVIDERS, detectProvider } from "./providers.js";
 import { EMBED_MODEL, EMBED_DIM } from "./rag.js";
@@ -38,7 +38,12 @@ export async function loadWorlds() {
     ];
     const parsed = parseStoredArray(data, defaults);
     if (!parsed.ok) console.warn("世界数据损坏，已使用安全默认值；原 localStorage 未覆盖", parsed.error);
-    S.worlds = parsed.value.map(migrateWorldRecord);
+    // ★ Phase 0：移除 migrateWorldRecord（不兼容旧存档/世界）。仅保留最小形状兜底，读取点已有 undefined 兜底。
+    S.worlds = parsed.value.map(w => {
+        const out = (w && typeof w === "object") ? w : {};
+        if (!Array.isArray(out.behavior_records)) out.behavior_records = [];
+        return out;
+    });
     // 迁移：旧世界的清理与新的 demo 注入
     let changed = false;
     // 删除旧的蒸汽与魔法 demo
@@ -204,7 +209,8 @@ export function createHongLouMengWorld() {
         style_ref: "original",
         custom_style: "",
         plot_freedom: 2,
-        custom_prefix: ""
+        custom_prefix: "",
+        rules: []
     };
 }
 
@@ -327,7 +333,8 @@ export function createMagicAcademyWorld() {
         style_ref: "none",
         custom_style: "",
         plot_freedom: 4,
-        custom_prefix: ""
+        custom_prefix: "",
+        rules: []
     };
 }
 
@@ -336,11 +343,8 @@ export async function loadSaves() {
     const parsed = parseStoredArray(data, []);
     if (!parsed.ok) console.warn("存档数据损坏，已进入空列表兼容模式；原 localStorage 未覆盖", parsed.error);
     const raw = parsed.value;
-    S.saves = raw.map(save => migrateSaveRecord(
-        save,
-        S.worlds.find(world => world.id === save.worldId) || null
-    ));
-    if (parsed.ok && data && JSON.stringify(raw) !== JSON.stringify(S.saves)) saveSaves().catch(() => {});
+    // ★ Phase 0：移除 migrateSaveRecord（不兼容旧存档/世界）；prepareSessionFromSave 已对所有字段做 undefined 兜底。
+    S.saves = raw;
 }
 
 export async function saveWorlds() {

@@ -7,7 +7,6 @@ import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, get
 import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, updateFontSizeButtons, updateTempLabel } from "./theme.js";
 import { abortCurrentRequest, chooseOption, confirmRestart, continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./game.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
-import { migrateSaveRecord } from "./migrations.js";
 
 export function showScreen(id) {
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -59,6 +58,8 @@ export function showSettingsModal() {
     updateFontSizeButtons();
     document.getElementById("temperatureSlider").value = S.temperatureSetting;
     updateTempLabel();
+    const lrc = document.getElementById("loreRequireConfirm");
+    if (lrc) lrc.checked = S.loreRequireConfirm;
 }
 
 let cwStep = 1;
@@ -387,6 +388,7 @@ export function showWorldDetail(worldId) {
         footer.innerHTML = `
             <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
             <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">默认知识库</button>
+            <button class="btn secondary" data-action="openRuleEditor" data-id="${S.currentWorld.id}">世界规则</button>
             <button class="btn secondary" data-action="showExportWorldChoice" data-id="${S.currentWorld.id}">导出世界</button>
             <button class="btn primary" data-action="continueLatestSave" data-id="${S.currentWorld.id}">继续游戏</button>
             <button class="btn secondary" data-action="confirmRestart" data-id="${S.currentWorld.id}">重新开始</button>`;
@@ -394,6 +396,7 @@ export function showWorldDetail(worldId) {
         footer.innerHTML = `
             <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
             <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">默认知识库</button>
+            <button class="btn secondary" data-action="openRuleEditor" data-id="${S.currentWorld.id}">世界规则</button>
             <button class="btn secondary" data-action="showExportWorldChoice" data-id="${S.currentWorld.id}">导出世界</button>
             <button class="btn primary" data-action="startGame" data-opts='{"resetBehavior":true}'>开始游玩</button>`;
     }
@@ -404,7 +407,7 @@ export function showWorldDetail(worldId) {
 // ★ 存档详情二级界面（镜像世界详情，底部按钮改为 返回/存档知识库/导出世界/继续游戏）
 export function renderSaveDetail(saveId) {
     const stored = S.saves.find(s => s.id === saveId);
-    const save = stored ? migrateSaveRecord(stored, S.worlds.find(w => w.id === stored.worldId)) : null;
+    const save = stored || null;
     if (!save) { showToast("未找到该存档", "error"); return; }
     const world = S.worlds.find(w => w.id === save.worldId);
     S.currentWorld = world || S.currentWorld; // 供导出世界等依赖 world 的逻辑兜底

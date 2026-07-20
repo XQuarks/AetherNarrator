@@ -5,17 +5,19 @@
 // 不反向依赖 game.js，避免循环引用。
 // ============================================================
 import { S, LINK_RELATION_LABELS, DEFAULT_TIME_CONFIG, normalizeTimeConfig } from "./store.js";
-import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema } from "./utils.js";
-import { showModal, closeModal, showToast } from "./render.js";
+import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets } from "./utils.js";
+import { showModal, closeModal, showToast, getSelectedStyleRef } from "./render.js";
 import { getWorldLoreKB, ensureLoreEmbeddings } from "./rag.js";
 import { createOrUpdateSave, prepareSessionFromSave } from "./save.js";
-import { migrateSaveRecord } from "./migrations.js";
 import { saveWorlds } from "./storage.js";
 import { isEnhancementContextCurrent } from "./worldview.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
-import { callLoreRevisionLLM } from "./llm.js";
+import { markPromotedRecords } from "./promotion.js"; // ★ B6：晋升后标记原记忆 promoted
+import { callLoreRevisionLLM, extractLoreFromSource } from "./llm.js";
 import { invalidateSystemPromptCache } from "./prompt.js";
+import { invalidateLoreAnn } from "./ann-index.js";
 import { renderLoreMarkdown } from "./markdown.js"; // ★ 步骤 B：Obsidian 风 markdown 渲染封装
+import { REL_COLORS, ENTITY_COLOR, buildGraphModel } from "./kg-graph.js"; // ★ Phase 4：知识图谱模型（纯函数）
 
 // ★ B3：知识库初览与编辑面板 ------------------------------------------------
 
@@ -64,8 +66,14 @@ function checkLoreQuality(list) {
             if (kk) keyCount[kk] = (keyCount[kk] || 0) + 1;
         });
     });
-    for (const [k, n] of Object.entries(keyCount)) {
-        if (n > 1) warns.push(`触发词「${k}」在 ${n} 条里重复，可能导致过度触发`);
+    // 合并重复触发词：汇总为一条高频词提示（保留前若干高频词），避免海量重复刷屏
+    const dupKeys = Object.entries(keyCount).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]);
+    if (dupKeys.length) {
+        const SHOW = 12;
+        const top = dupKeys.slice(0, SHOW).map(([k, n]) => `${k}(${n})`);
+        let line = `触发词重复：以下词在多条例目出现，可能过度触发（共 ${dupKeys.length} 个，显示前 ${top.length}）：${top.join("、")}`;
+        if (dupKeys.length > SHOW) line += " …";
+        warns.push(line);
     }
     return warns;
 }
@@ -232,7 +240,7 @@ function renderKBPane(list) {
         : "";
     const warns = checkLoreQuality(list);
     const warnHtml = warns.length
-        ? `<div class="lore-warn"><strong>⚠ 质量提示（${warns.length}）</strong><ul>${warns.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>`
+        ? `<details class="lore-warn"><summary>⚠ 质量提示（${warns.length}）— 点击展开/收起</summary><ul>${warns.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul></details>`
         : `<div class="lore-ok">✓ 未发现明显质量问题</div>`;
     const spoilerBtn = `<div class="spoiler-toggle" data-action="toggleLoreSpoiler">${S.loreSpoilerHidden ? "🔒 内容已隐藏（点击查看）" : "🔓 已显示全部"}</div>`;
     const spoilerClass = S.loreSpoilerHidden ? " lore-spoiler" : "";
@@ -252,9 +260,15 @@ function renderKBPane(list) {
         ${revisionHint}
         ${warnHtml}
         <div class="lore-obs-cols">
-            <aside class="lore-tree">${tree}</aside>
+            <details class="lore-col-aside lore-tree-wrap" open>
+                <summary>📂 文件树（${list.length} 条）</summary>
+                <aside class="lore-tree">${tree}</aside>
+            </details>
             <section class="lore-note">${noteHtml}</section>
-            <aside class="lore-backlinks">${backHtml}</aside>
+            <details class="lore-col-aside lore-backlinks-wrap"${note ? " open" : ""}>
+                <summary>🔗 关联（出链 ${(note && note.links ? note.links.length : 0)} · 入链 ${list.filter(s => (s.links || []).some(l => note && l.target === note.id)).length}）</summary>
+                <aside class="lore-backlinks">${backHtml}</aside>
+            </details>
         </div>
       </div>`;
 }
@@ -270,7 +284,7 @@ function renderGraphPane() {
             <span id="graphStats" class="graph-stats"></span>
         </div>
         <div class="lore-graph-canvas-wrap">
-            <canvas id="loreGraphCanvas"></canvas>
+            <div id="loreGraph"></div>
             <div id="graphLegend" class="graph-legend"></div>
             <div id="graphInfo" class="graph-info"></div>
             <div id="graphPreview" class="graph-preview" hidden></div>
@@ -433,6 +447,9 @@ export function openLoreReview(mode = "save", focusId = null) {
     S._loreSearchTerm = "";
     bindLoreBodyDelegation();
     renderLoreReviewBody();
+    // ★ Phase 3：无源文档时禁用「从源文档补抽」按钮
+    const exBtn = document.getElementById("extractSourceBtn");
+    if (exBtn) exBtn.disabled = !(S.currentWorld && S.currentWorld.source_content);
     showModal("loreReviewModal");
 }
 
@@ -450,7 +467,7 @@ export function editWorldLore(worldId) {
 // 保存走既有 saveLoreReview → createOrUpdateSave，自动写回该存档独立副本
 export function editSaveLore(saveId) {
     const stored = S.saves.find(s => s.id === saveId);
-    const save = stored ? migrateSaveRecord(stored, S.worlds.find(w => w.id === stored.worldId)) : null;
+    const save = stored || null;
     if (!save) { showToast("未找到该存档", "error"); return; }
     prepareSessionFromSave(save); // 灌入运行时（含 S.activeLoreKB = 存档知识库副本）
     closeModal("saveDetailModal");
@@ -531,6 +548,7 @@ export async function saveLoreReview() {
     }
     S._loreEdit = null;
     S._loreEditingWorldDefault = false;
+    invalidateLoreAnn(S.currentWorld.id); // ★ Phase 1：知识库已变更，失效 ANN 索引，下次检索懒重建
     closeModal("loreReviewModal");
     showToast(`知识库已保存（${list.length} 条）`, "success");
 }
@@ -556,7 +574,14 @@ export async function triggerLoreRevision(msgCount) {
         if (diff && count) {
             S._loreRevisionBuffer = diff;
             createOrUpdateSave();
-            showToast("知识库已可修订——AI 建议调整 " + count + " 条条目。进入知识库编辑面板查看。", "success", 5000);
+            if (shouldAutoApplyLoreRevision()) {
+                // 模式一（默认·关闭）：自动同意，不打断游戏，仅给小提示「知识库已更新」
+                confirmLoreRevision();
+            } else {
+                // 模式二（开启）：弹轻量确认弹窗，由玩家点「应用/忽略」
+                renderLoreRevisionModal();
+                showModal("loreRevisionModal");
+            }
         }
     }).catch(() => {});
 }
@@ -571,9 +596,11 @@ export async function confirmLoreRevision() {
     const current = { worldId: S.currentWorld?.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
     if (!isEnhancementContextCurrent(context, current)) { showToast("会话已切换，本次修订已取消", "warn"); return; }
     S.activeLoreKB = candidateKB;
+    S.activeBehaviorRecords = markPromotedRecords(S.activeBehaviorRecords, S._loreRevisionBuffer);
     S._loreRevisionBuffer = null;
     createOrUpdateSave();
     closeModal("loreReviewModal");
+    closeModal("loreRevisionModal"); // ★ 知识晋升确认开关：若从确认弹窗进入，一并关闭
     invalidateSystemPromptCache();
     showToast("知识库已更新！", "success");
 }
@@ -582,7 +609,73 @@ export async function confirmLoreRevision() {
 export function rejectLoreRevision() {
     S._loreRevisionBuffer = null;
     createOrUpdateSave();
+    closeModal("loreRevisionModal"); // ★ 知识晋升确认开关：关闭确认弹窗
     showToast("已丢弃本次 AI 修订建议", "success");
+}
+
+// ★ 知识晋升确认开关：是否自动应用修订（默认关=自动同意；开=弹窗待确认）
+export function shouldAutoApplyLoreRevision() {
+    return !S.loreRequireConfirm;
+}
+
+// ★ 知识晋升确认开关：根据 diff 缓冲生成摘要 HTML（纯函数，供弹窗与测试复用）
+export function buildLoreRevisionSummaryHTML(buf) {
+    const updates = buf && Array.isArray(buf.updates) ? buf.updates : [];
+    const additions = buf && Array.isArray(buf.additions) ? buf.additions : [];
+    if (!buf || (updates.length === 0 && additions.length === 0)) return '<div class="muted">暂无待确认的修订。</div>';
+    const promotions = additions.filter(a => a && typeof a.id === "string" && a.id.startsWith("promote_")).length;
+    const items = [
+        `更新 <b>${updates.length}</b> 条已有知识`,
+        `新增 <b>${additions.length}</b> 条知识`
+    ];
+    if (promotions) items.push(`其中 <b>${promotions}</b> 条为记忆晋升`);
+    return `<ul class="lore-rev-summary">${items.map(t => `<li>${t}</li>`).join("")}</ul>`;
+}
+
+// ★ 知识晋升确认开关：渲染轻量确认弹窗摘要并打开弹窗
+export function renderLoreRevisionModal() {
+    const el = document.getElementById("loreRevisionSummary");
+    if (el) el.innerHTML = buildLoreRevisionSummaryHTML(S._loreRevisionBuffer);
+}
+
+// ★ 知识晋升确认开关：切换并持久化到 localStorage（全局偏好，跨存档记忆）
+export function toggleLoreRequireConfirm(el) {
+    S.loreRequireConfirm = !!(el && (el.checked !== undefined ? el.checked : !S.loreRequireConfirm));
+    try { localStorage.setItem("aigame_lore_confirm", S.loreRequireConfirm ? "true" : "false"); } catch (e) {}
+    showToast(S.loreRequireConfirm ? "已开启：知识库修订将弹窗让你确认" : "已关闭：知识库修订自动同意并提示", "success", 3000);
+}
+
+// ★ Phase 3 · 已有世界「从源文档补抽」知识库（复用 llm.js 的 extractLoreFromSource）
+export async function extractAndMergeSourceLore(worldId) {
+    const world = (S.worlds || []).find(w => w.id === worldId)
+        || (S.currentWorld && S.currentWorld.id === worldId ? S.currentWorld : null);
+    if (!world) { showToast("未找到对应世界", "error"); return; }
+    const src = (world.source_content || S.sourceFileContent || "").trim();
+    if (!src) { showToast("该世界没有上传的源文档，无法补抽（可在创建世界时上传 TXT/DOCX/EPUB）", "warn"); return; }
+    const btn = document.getElementById("extractSourceBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "补抽中..."; }
+    try {
+        const extracted = await extractLoreFromSource(src, world.name, world.ip_name, getSelectedStyleRef(), world.custom_style, {
+            onProgress: (done, total) => { if (btn) btn.textContent = `补抽中 (${done}/${total})...`; },
+            onRetry: (idx, total, kind, n) => showToast(`第 ${idx}/${total} 段${kind === "生成结果损坏" ? "生成结果损坏" : "被限流"}，自动重试(${n})...`, "warn"),
+            onChunkError: (idx, err) => showToast(`第 ${idx} 段补抽失败，已跳过：${err.message}`, "error")
+        });
+        const currentKB = (world.lore_kb && Array.isArray(world.lore_kb.snippets)) ? world.lore_kb : { ip: world.name, snippets: [] };
+        const merged = mergeLoreSnippets(currentKB.snippets, extracted.snippets);
+        const newKB = { ip: world.name, snippets: merged };
+        try { await ensureLoreEmbeddings(newKB); }
+        catch (e) { console.warn("补抽后向量重算失败，降级为关键词检索：", e && e.message); }
+        world.lore_kb = newKB;
+        if (S.currentWorld && S.currentWorld.id === world.id) S.activeLoreKB = newKB;
+        invalidateLoreAnn(world.id);
+        saveWorlds();
+        showToast(`📥 已从源文档补抽 ${extracted.snippets.length} 条，合并后共 ${merged.length} 条`, "success");
+        if (document.getElementById("loreReviewModal") && document.getElementById("loreReviewModal").classList.contains("open")) renderLoreReviewBody();
+    } catch (e) {
+        showToast("补抽失败：" + (e && e.message), "error");
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "📥 从源文档补抽"; }
+    }
 }
 
 // ★ B8：防剧透遮罩开关
@@ -593,12 +686,8 @@ export function toggleLoreSpoiler() {
 
 // ★ C：世界观图谱总览（力导向布局 canvas，布局/绘制分离 + 缩放平移 + 类别着色 + 点击开笔记）
 // 颜色：节点按类别着色，边按关系着色（与 store.js 的 LINK_RELATION_LABELS 对齐）
-const LORE_CATEGORY_COLORS = {
-    "规则": "#e0584f", "世界观": "#5b86e0", "地点": "#3fb98f", "人物": "#b96fd6",
-    "事件": "#e0a93f", "物品": "#3fb6e0", "势力": "#e06fa0", "冲突": "#e07a4f", "补充": "#9aa0a6"
-};
-const FALLBACK_CAT_COLOR = "#9aa0a6";
-const REL_COLORS = { causal: "#ff6464", related: "#6496ff", explains: "#64c864", contains: "#c8b464" };
+// 注：LORE_CATEGORY_COLORS / FALLBACK_CAT_COLOR / REL_COLORS / ENTITY_COLOR / KG_REL_PALETTE
+// 已迁至 src/kg-graph.js（纯函数模块），本文件从那里 import。
 
 let G = null;            // 当前图谱状态（节点/边/视图变换/交互）
 let graphUIBound = false;
@@ -615,8 +704,61 @@ function mountGraphNow() {
         if (stats) stats.textContent = "知识库为空，无可绘制条目";
         return;
     }
-    bindGraphUI(); // canvas 每次重建，需重新绑定事件
-    buildGraph(snippets);
+    bindGraphPreviewDelegate(); // 预览卡按钮委托（force-graph 路径不调 bindGraphUI，需单独绑定）
+    const el = document.getElementById("loreGraph");
+    if (!el) return;
+    // 清理旧实例，避免反复打开图谱时堆叠多个 canvas
+    if (S._fg && typeof S._fg._destructor === "function") { try { S._fg._destructor(); } catch (_) {} }
+    el.innerHTML = "";
+
+    const FG = window.ForceGraph && (window.ForceGraph.default || window.ForceGraph);
+    if (typeof FG !== "function") {
+        // 兜底：库未加载时退回手写 canvas 力导向
+        if (!document.getElementById("loreGraphCanvas")) {
+            const c = document.createElement("canvas");
+            c.id = "loreGraphCanvas";
+            el.appendChild(c);
+        }
+        bindGraphUI();
+        buildGraph(snippets);
+        return;
+    }
+
+    const model = buildGraphModel(snippets);
+    const nodes = model.nodes;
+    const links = [...model.linkEdges, ...model.relEdges];
+    buildLegend(nodes, model);
+    document.getElementById("graphStats").textContent = `${nodes.length} 节点（含 ${model.entityCount} 实体）· ${model.linkEdges.length} 关联 · ${model.relEdges.length} 关系`;
+    const infoEl = document.getElementById("graphInfo");
+    if (infoEl) infoEl.textContent = "";
+
+    const wrap = el.parentElement;
+    const W = wrap.clientWidth || 680, H = wrap.clientHeight || 460;
+    const Graph = FG()(el)
+        .graphData({ nodes, links })
+        .nodeId("id")
+        .nodeLabel(d => `【${d.category}】${escapeHtml(d.label)}`)
+        .nodeColor("color")
+        .nodeVal(d => 1 + Math.min(8, d.degree))
+        .nodeRelSize(4)
+        .linkColor(d => d.kind === "relation" ? (model.relationColorMap[d.relation] || "#bbb") : (REL_COLORS[d.relation] || "#888"))
+        .linkWidth(0.6)
+        .linkLineDash(d => d.kind === "relation" ? [4, 2] : [])
+        .cooldownTicks(200)
+        .onNodeClick(node => { if (node.kind === "entity") focusLoreEntity(node.label); else focusLoreSnippet(node.id); })
+        .onNodeHover(node => { if (infoEl) infoEl.textContent = node ? `【${node.category}】${node.label}` : ""; })
+        .width(W).height(H);
+    Graph.onEngineStop(() => { try { Graph.zoomToFit(400, 40); } catch (_) {} });
+
+    document.querySelectorAll("[data-graph]").forEach(btn => {
+        btn.onclick = () => {
+            const k = btn.dataset.graph;
+            if (k === "zoom-in") Graph.zoom(Graph.zoom() * 1.25);
+            else if (k === "zoom-out") Graph.zoom(Graph.zoom() / 1.25);
+            else if (k === "reset") { try { Graph.zoomToFit(400, 40); } catch (_) {} }
+        };
+    });
+    S._fg = Graph;
 }
 
 function buildGraph(snippets) {
@@ -627,35 +769,21 @@ function buildGraph(snippets) {
     const W = rect.width || 680, H = rect.height || 460;
     canvas.width = W * dpr; canvas.height = H * dpr;
 
-    const snippetById = {};
-    const nodes = snippets.map((s, i) => {
-        snippetById[s.id] = s;
-        const angle = (i / snippets.length) * Math.PI * 2;
-        const r = Math.min(W, H) * 0.32;
-        return {
-            id: s.id,
-            label: s.title || s.id,
-            category: s.category || "补充",
-            color: LORE_CATEGORY_COLORS[s.category] || FALLBACK_CAT_COLOR,
-            x: Math.cos(angle) * r + (Math.random() - 0.5) * 20,
-            y: Math.sin(angle) * r + (Math.random() - 0.5) * 20,
-            vx: 0, vy: 0, degree: 0
-        };
-    });
+    const model = buildGraphModel(snippets);
+    const nodes = model.nodes;
     const idIndex = {};
     nodes.forEach((n, i) => idIndex[n.id] = i);
-
-    const edges = [];
-    for (const s of snippets) {
-        if (!s.links || !s.links.length) continue;
-        for (const l of s.links) {
-            if (l.target in idIndex) {
-                const ai = idIndex[s.id], bi = idIndex[l.target];
-                edges.push({ ai, bi, relation: l.relation || "related" });
-                nodes[ai].degree++; nodes[bi].degree++;
-            }
-        }
-    }
+    // 初始环形布局（实体节点也参与，保持与原布局一致的手写兜底体验）
+    const baseR = Math.min(W, H) * 0.32;
+    nodes.forEach((n, i) => {
+        const angle = (i / Math.max(1, nodes.length)) * Math.PI * 2;
+        n.x = Math.cos(angle) * baseR + (Math.random() - 0.5) * 20;
+        n.y = Math.sin(angle) * baseR + (Math.random() - 0.5) * 20;
+        n.vx = 0; n.vy = 0;
+    });
+    const edges = [...model.linkEdges, ...model.relEdges].map(e => ({
+        ai: idIndex[e.source], bi: idIndex[e.target], kind: e.kind, relation: e.relation
+    }));
     // 邻接表（悬停高亮用）
     const adj = nodes.map(() => new Set());
     edges.forEach(e => { adj[e.ai].add(e.bi); adj[e.bi].add(e.ai); });
@@ -663,26 +791,33 @@ function buildGraph(snippets) {
     G = {
         canvas, ctx: canvas.getContext("2d"), dpr, W, H,
         cx: W / 2, cy: H / 2,
-        nodes, edges, adj, snippetById, idIndex,
+        nodes, edges, adj, idIndex, relationColorMap: model.relationColorMap,
         view: { scale: 1, offsetX: 0, offsetY: 0 },
         hover: null, dragNode: null, panning: false,
         grabWX: 0, grabWY: 0, downX: 0, downY: 0, moved: false,
         running: true, rafId: null, tick: 0, MAX_TICK: 360
     };
-    buildLegend(nodes);
-    document.getElementById("graphStats").textContent = `${nodes.length} 节点 · ${edges.length} 关联`;
+    buildLegend(nodes, model);
+    document.getElementById("graphStats").textContent = `${nodes.length} 节点（含 ${model.entityCount} 实体）· ${model.linkEdges.length} 关联 · ${model.relEdges.length} 关系`;
     document.getElementById("graphInfo").textContent = "";
     startSim();
 }
 
-function buildLegend(nodes) {
+function buildLegend(nodes, model) {
     const cats = {};
     nodes.forEach(n => { cats[n.category] = n.color; });
     const catHtml = Object.entries(cats).map(([c, col]) =>
         `<span class="legend-item"><i class="legend-dot" style="background:${col}"></i>${escapeHtml(c)}</span>`).join("");
-    const relHtml = Object.entries(REL_COLORS).map(([r, col]) =>
+    const linkRelHtml = Object.entries(REL_COLORS).map(([r, col]) =>
         `<span class="legend-item"><i class="legend-line" style="background:${col}"></i>${LINK_RELATION_LABELS[r] || r}</span>`).join("");
-    document.getElementById("graphLegend").innerHTML = `<div class="legend-group">${catHtml}</div><div class="legend-group">${relHtml}</div>`;
+    const relMap = (model && model.relationColorMap) || {};
+    const kgRelHtml = Object.entries(relMap).map(([r, col]) =>
+        `<span class="legend-item"><i class="legend-line" style="background:repeating-linear-gradient(90deg, ${col} 0 4px, transparent 4px 8px)"></i>${escapeHtml(r)}</span>`).join("");
+    const groups = [`<div class="legend-group">${catHtml}</div>`];
+    if (linkRelHtml) groups.push(`<div class="legend-group"><span class="legend-title">链接</span>${linkRelHtml}</div>`);
+    if (kgRelHtml) groups.push(`<div class="legend-group"><span class="legend-title">抽取关系</span>${kgRelHtml}</div>`);
+    const el = document.getElementById("graphLegend");
+    if (el) el.innerHTML = groups.join("");
 }
 
 // 力导向：每帧只 tick 一次，跑完即停（不再同步 200 帧、不再拖拽重跑）
@@ -753,12 +888,15 @@ function drawGraph() {
     for (const e of G.edges) {
         const u = G.nodes[e.ai], v = G.nodes[e.bi];
         const active = hoverId != null && (u.id === hoverId || v.id === hoverId);
+        const isRel = e.kind === "relation";
         ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(v.x, v.y);
-        ctx.strokeStyle = REL_COLORS[e.relation] || "#888";
-        ctx.globalAlpha = hoverId == null ? 0.55 : (active ? 0.95 : 0.12);
+        ctx.strokeStyle = isRel ? ((G.relationColorMap && G.relationColorMap[e.relation]) || "#bbb") : (REL_COLORS[e.relation] || "#888");
+        ctx.globalAlpha = hoverId == null ? (isRel ? 0.5 : 0.55) : (active ? 0.95 : 0.12);
         ctx.lineWidth = active ? 2 : 1;
+        ctx.setLineDash(isRel ? [4, 2] : []);
         ctx.stroke();
     }
+    ctx.setLineDash([]);
     ctx.globalAlpha = 1;
 
     // 节点
@@ -772,6 +910,7 @@ function drawGraph() {
         ctx.fill();
         ctx.globalAlpha = 1;
         if (isHover) { ctx.lineWidth = 2.5; ctx.strokeStyle = "#fff"; ctx.stroke(); }
+        if (n.kind === "entity") { ctx.setLineDash([3, 2]); ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.stroke(); ctx.setLineDash([]); }
         // 标签：放大或悬停/邻居时显示
         if (view.scale > 0.55 || isHover || isNeighbor) {
             ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--text") || "#222";
@@ -781,6 +920,17 @@ function drawGraph() {
         }
     }
     ctx.restore();
+}
+
+function bindGraphPreviewDelegate() {
+    if (bindGraphPreviewDelegate._bound) return;
+    bindGraphPreviewDelegate._bound = true;
+    document.addEventListener("click", e => {
+        const closeBtn = e.target.closest("[data-graph-close]");
+        if (closeBtn) { const pc = document.getElementById("graphPreview"); if (pc) pc.hidden = true; return; }
+        const openBtn = e.target.closest("[data-graph-open]");
+        if (openBtn) { openNodeInKB(openBtn.dataset.graphOpen); }
+    });
 }
 
 function bindGraphUI() {
@@ -827,7 +977,7 @@ function bindGraphUI() {
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
         const dist = Math.hypot(mx - G.downX, my - G.downY);
-        if (G.dragNode && !G.moved && dist < 5) focusLoreSnippet(G.dragNode.id); // 单击节点 → 打开笔记
+        if (G.dragNode && !G.moved && dist < 5) { if (G.dragNode.kind === "entity") focusLoreEntity(G.dragNode.label); else focusLoreSnippet(G.dragNode.id); } // 单击节点：实体看只读卡，片段开笔记
         G.dragNode = null; G.panning = false; canvas.style.cursor = "grab";
     };
     canvas.addEventListener("mouseup", endDrag);
@@ -859,16 +1009,8 @@ function bindGraphUI() {
         });
     });
 
-    // 预览卡交互（document 委托，兼容图谱 tab 反复重建）
-    if (!bindGraphUI._previewBound) {
-        bindGraphUI._previewBound = true;
-        document.addEventListener("click", e => {
-            const closeBtn = e.target.closest("[data-graph-close]");
-            if (closeBtn) { const pc = document.getElementById("graphPreview"); if (pc) pc.hidden = true; return; }
-            const openBtn = e.target.closest("[data-graph-open]");
-            if (openBtn) { openNodeInKB(openBtn.dataset.graphOpen); }
-        });
-    }
+    // 预览卡交互（document 委托，抽成独立函数，兼容图谱 tab 反复重建）
+    bindGraphPreviewDelegate();
 }
 
 function zoomBy(factor) {
@@ -936,4 +1078,301 @@ function openNodeInKB(id) {
     const reviewOpen = document.getElementById("loreReviewModal") && document.getElementById("loreReviewModal").classList.contains("open");
     if (reviewOpen) renderLoreReviewBody();
     else openLoreReview(S._loreEditingWorldDefault ? "world" : "save", id);
+}
+
+// ★ Phase 4：点击实体节点 → 只读预览卡（实体未收录为独立片段，列出其抽取关系）
+function focusLoreEntity(name) {
+    const kb = (S.activeLoreKB && Array.isArray(S.activeLoreKB.snippets) && S.activeLoreKB.snippets.length)
+        ? S.activeLoreKB : getWorldLoreKB();
+    const snippets = (kb && kb.snippets) || [];
+    const raw = String(name || "").trim();
+    const rels = [];
+    for (const s of snippets) {
+        if (!Array.isArray(s.relations)) continue;
+        for (const r of s.relations) {
+            const from = (r.from || "").trim(), to = (r.to || "").trim();
+            if (from === raw || to === raw) {
+                rels.push({ from, to, relation: r.relation || "related", via: s.title || s.id });
+            }
+        }
+    }
+    const card = document.getElementById("graphPreview");
+    if (!card) return;
+    const relHtml = rels.length
+        ? rels.map(r => `<div class="kg-rel-row"><span class="kg-rel-name">${escapeHtml(r.from)}</span><span class="kg-rel-arrow">—[${escapeHtml(r.relation)}]→</span><span class="kg-rel-name">${escapeHtml(r.to)}</span><span class="kg-rel-via">（出自：${escapeHtml(r.via)}）</span></div>`).join("")
+        : `<div class="kg-rel-empty">暂未检索到该实体的抽取关系</div>`;
+    card.innerHTML = `
+        <div class="graph-preview-head">
+            <span class="graph-preview-cat" style="--c:${ENTITY_COLOR}">实体</span>
+            <span class="graph-preview-title">${escapeHtml(raw)}</span>
+            <button class="graph-preview-close" data-graph-close title="收起">×</button>
+        </div>
+        <div class="graph-preview-summary kg-entity-note">该实体尚未收录为独立知识条目，以下是从知识库中抽取到的它与其它实体的关系：</div>
+        <div class="kg-rel-list">${relHtml}</div>`;
+    card.hidden = false;
+    const info = document.getElementById("graphInfo");
+    if (info) info.style.display = "none";
+}
+
+// ===== Phase 2：世界规则 DSL 编辑器 =====
+// 与知识库编辑器同模式：S._ruleEdit 草稿缓冲，取消不影响原数据；保存才写回 world.rules。
+// 规则结构见 docs/Phase2改造方案.md：{ id, name, enabled, when:{type,...}, then:{type,...} }
+
+function defaultRule() {
+    return {
+        id: "r" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
+        name: "",
+        enabled: true,
+        when: { type: "always" },
+        then: { type: "ban", concept: "", aliases: [], severity: "soft", unlessTags: [] }
+    };
+}
+
+function syncRuleEditFromDOM() {
+    if (!Array.isArray(S._ruleEdit)) return;
+    S._ruleEdit.forEach((r, i) => {
+        const g = (p) => document.getElementById(p + i);
+        const name = g("ru_name_");
+        if (name) r.name = name.value;
+        const en = g("ru_enabled_");
+        if (en) r.enabled = en.checked;
+        const wt = g("ru_when_");
+        if (wt) {
+            const type = wt.value;
+            r.when = { type };
+            if (type === "concept") {
+                const t = g("ru_when_term_"); if (t) r.when.term = t.value.trim();
+                const tg = g("ru_when_tags_"); if (tg) r.when.unlessTags = tg.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean);
+            } else if (type === "state") {
+                const f = g("ru_when_field_"); if (f) r.when.field = f.value.trim();
+                const op = g("ru_when_op_"); if (op) r.when.op = op.value;
+                const v = g("ru_when_val_"); if (v) r.when.value = v.value.trim();
+            } else if (type === "tag") {
+                const tg = g("ru_when_tagtag_"); if (tg) r.when.tag = tg.value.trim();
+            }
+        }
+        const tt = g("ru_then_");
+        if (tt) {
+            const type = tt.value;
+            if (type === "ban") {
+                const c = g("ru_ban_concept_"), a = g("ru_ban_aliases_"), s = g("ru_ban_sev_"), tg = g("ru_ban_tags_");
+                r.then = {
+                    type: "ban",
+                    concept: c ? c.value.trim() : "",
+                    aliases: a ? a.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean) : [],
+                    severity: s ? s.value : "soft",
+                    unlessTags: tg ? tg.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean) : []
+                };
+            } else if (type === "tag") {
+                const op = g("ru_tag_op_"), tg = g("ru_tag_tag_");
+                r.then = { type: "tag", op: op ? op.value : "add", tag: tg ? tg.value.trim() : "" };
+            } else if (type === "ending") {
+                const rs = g("ru_end_reason_");
+                r.then = { type: "ending", reason: rs ? rs.value.trim() : "" };
+            }
+        }
+    });
+}
+
+function ruleSummary(r) {
+    if (!r) return "";
+    const w = r.when || {};
+    const whenTxt = (() => {
+        switch (w.type) {
+            case "concept": return `文本出现「${w.term || "?"}」`;
+            case "state": return `状态 ${w.field || "?"} ${w.op || "=="} ${w.value ?? "?"}`;
+            case "tag": return `标签「${w.tag || "?"}」活跃`;
+            default: return "始终";
+        }
+    })();
+    const t = r.then || {};
+    const thenTxt = (() => {
+        switch (t.type) {
+            case "ban": return `禁止概念「${t.concept || "?"}」`;
+            case "tag": return `${t.op === "remove" ? "移除" : "添加"}标签「${t.tag || "?"}」`;
+            case "ending": return `触发结局（${t.reason || "世界结束"}）`;
+            default: return "?";
+        }
+    })();
+    return `${whenTxt} → ${thenTxt}`;
+}
+
+function renderRuleEditorBody() {
+    const body = document.getElementById("ruleEditorBody");
+    if (!body) return;
+    const w = S.currentWorld;
+    const hasLegacy = !S._ruleImportedLegacy && Array.isArray(w.bannedConcepts) && w.bannedConcepts.length > 0
+        && !(Array.isArray(w.rules) && w.rules.length);
+    let html = "";
+    if (hasLegacy) {
+        html += `<div class="rule-import-banner">该世界还有旧版「禁用词表」${w.bannedConcepts.length} 条，可一键转为可编辑规则：
+            <button class="btn-secondary-sm" data-action="importBannedAsRules">转为规则</button></div>`;
+    }
+    const list = S._ruleEdit || [];
+    if (!list.length) {
+        html += `<p class="muted">还没有规则。点下方「＋ 添加规则」来配置世界逻辑，例如「金币 &lt; 0 → 触发结局」「禁止出现『核弹』」。</p>`;
+    }
+    const whenLabels = { always: "始终", concept: "文本出现词", state: "状态数值", tag: "标签活跃" };
+    const thenLabels = { ban: "禁止概念", tag: "设置标签", ending: "触发结局" };
+    list.forEach((r, i) => {
+        const when = r.when || {};
+        const then = r.then || {};
+        const whenType = when.type || "always";
+        const thenType = then.type || "ban";
+        html += `<div class="rule-card">
+            <div class="rule-card-head">
+                <input id="ru_name_${i}" class="rule-name" placeholder="规则名称（如：破产结局）" value="${escapeHtml(r.name || "")}">
+                <label class="rule-enabled"><input type="checkbox" id="ru_enabled_${i}" ${r.enabled !== false ? "checked" : ""}> 启用</label>
+                <button class="btn-secondary-sm danger" data-action="deleteRule" data-idx="${i}">删除</button>
+            </div>
+            <div class="rule-summary">${escapeHtml(ruleSummary(r))}</div>
+            <div class="rule-row">
+                <span class="rule-label">如果</span>
+                <select id="ru_when_${i}" data-action="ruleTypeChange" data-kind="when" data-idx="${i}">
+                    ${["always", "concept", "state", "tag"].map(t => `<option value="${t}" ${whenType === t ? "selected" : ""}>${whenLabels[t]}</option>`).join("")}
+                </select>
+                <span class="rule-sub" style="display:${whenType === "concept" ? "inline" : "none"}">
+                    词<input id="ru_when_term_${i}" value="${escapeHtml(when.term || "")}" size="10">解锁标签<input id="ru_when_tags_${i}" value="${escapeHtml((when.unlessTags || []).join(" "))}" size="12" placeholder="空格分隔">
+                </span>
+                <span class="rule-sub" style="display:${whenType === "state" ? "inline" : "none"}">
+                    字段<input id="ru_when_field_${i}" value="${escapeHtml(when.field || "")}" size="8" placeholder="如 gold">
+                    <select id="ru_when_op_${i}">${["<", "<=", "==", ">=", ">", "!="].map(o => `<option value="${o}" ${when.op === o ? "selected" : ""}>${o}</option>`).join("")}</select>
+                    值<input id="ru_when_val_${i}" value="${escapeHtml(String(when.value ?? ""))}" size="6">
+                </span>
+                <span class="rule-sub" style="display:${whenType === "tag" ? "inline" : "none"}">
+                    标签<input id="ru_when_tagtag_${i}" value="${escapeHtml(when.tag || "")}" size="12">
+                </span>
+            </div>
+            <div class="rule-row">
+                <span class="rule-label">就</span>
+                <select id="ru_then_${i}" data-action="ruleTypeChange" data-kind="then" data-idx="${i}">
+                    ${["ban", "tag", "ending"].map(t => `<option value="${t}" ${thenType === t ? "selected" : ""}>${thenLabels[t]}</option>`).join("")}
+                </select>
+                <span class="rule-sub" style="display:${thenType === "ban" ? "inline" : "none"}">
+                    概念<input id="ru_ban_concept_${i}" value="${escapeHtml(then.concept || "")}" size="10">别名<input id="ru_ban_aliases_${i}" value="${escapeHtml((then.aliases || []).join(" "))}" size="12" placeholder="空格分隔">
+                    强度<select id="ru_ban_sev_${i}"><option value="soft" ${then.severity !== "hard" ? "selected" : ""}>软(提示)</option><option value="hard" ${then.severity === "hard" ? "selected" : ""}>硬(拦截)</option></select>
+                    解锁标签<input id="ru_ban_tags_${i}" value="${escapeHtml((then.unlessTags || []).join(" "))}" size="12" placeholder="空格分隔">
+                </span>
+                <span class="rule-sub" style="display:${thenType === "tag" ? "inline" : "none"}">
+                    <select id="ru_tag_op_${i}"><option value="add" ${(then.op || "add") !== "remove" ? "selected" : ""}>添加</option><option value="remove" ${then.op === "remove" ? "selected" : ""}>移除</option></select>
+                    标签<input id="ru_tag_tag_${i}" value="${escapeHtml(then.tag || "")}" size="12">
+                </span>
+                <span class="rule-sub" style="display:${thenType === "ending" ? "inline" : "none"}">
+                    结局说明<input id="ru_end_reason_${i}" value="${escapeHtml(then.reason || "")}" size="20" placeholder="如：你破产了，故事结束">
+                </span>
+            </div>
+        </div>`;
+    });
+    body.innerHTML = html;
+}
+
+export function openRuleEditor(worldId) {
+    const w = S.worlds.find(x => x.id === worldId) || S.currentWorld;
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    S.currentWorld = w;
+    if (!Array.isArray(w.rules)) w.rules = [];
+    S._ruleImportedLegacy = false;
+    S._ruleEdit = deepClone(w.rules);
+    S._ruleActiveIndex = S._ruleEdit.length ? 0 : -1;
+    renderRuleEditorBody();
+    showModal("ruleEditorModal");
+}
+
+export function addRule() {
+    syncRuleEditFromDOM();
+    if (!Array.isArray(S._ruleEdit)) S._ruleEdit = [];
+    S._ruleEdit.push(defaultRule());
+    S._ruleActiveIndex = S._ruleEdit.length - 1;
+    renderRuleEditorBody();
+}
+
+export function deleteRule(idx) {
+    syncRuleEditFromDOM();
+    const i = parseInt(idx);
+    if (Array.isArray(S._ruleEdit) && i >= 0 && i < S._ruleEdit.length) {
+        S._ruleEdit.splice(i, 1);
+        if (S._ruleActiveIndex >= S._ruleEdit.length) S._ruleActiveIndex = S._ruleEdit.length - 1;
+        if (S._ruleActiveIndex < 0) S._ruleActiveIndex = -1;
+        renderRuleEditorBody();
+    }
+}
+
+export function ruleTypeChange(el) {
+    syncRuleEditFromDOM();
+    const i = parseInt(el.dataset.idx);
+    const kind = el.dataset.kind;
+    const r = S._ruleEdit && S._ruleEdit[i];
+    if (!r) return;
+    if (kind === "when") {
+        const t = el.value;
+        r.when = { type: t };
+        if (t === "concept") r.when.term = "";
+        else if (t === "state") { r.when.field = ""; r.when.op = "=="; r.when.value = ""; }
+        else if (t === "tag") r.when.tag = "";
+    } else if (kind === "then") {
+        const t = el.value;
+        if (t === "ban") r.then = { type: "ban", concept: "", aliases: [], severity: "soft", unlessTags: [] };
+        else if (t === "tag") r.then = { type: "tag", op: "add", tag: "" };
+        else if (t === "ending") r.then = { type: "ending", reason: "" };
+    }
+    renderRuleEditorBody();
+}
+
+export function importBannedAsRules() {
+    const w = S.currentWorld;
+    if (!w) return;
+    syncRuleEditFromDOM();
+    const banned = Array.isArray(w.bannedConcepts) ? w.bannedConcepts : [];
+    const rules = banned.map((e, i) => {
+        const concept = typeof e === "string" ? e : (e && e.concept) || "";
+        const aliases = (typeof e === "object" && Array.isArray(e.aliases)) ? e.aliases : [];
+        const severity = (typeof e === "object" && e.severity === "hard") ? "hard" : "soft";
+        const unlessTags = (typeof e === "object" && Array.isArray(e.unlockTags)) ? e.unlockTags : [];
+        return {
+            id: "r_imp_" + i + "_" + Date.now().toString(36),
+            name: "禁用：" + concept,
+            enabled: true,
+            when: { type: "always" },
+            then: { type: "ban", concept, aliases, severity, unlessTags }
+        };
+    });
+    S._ruleEdit = rules;
+    S._ruleImportedLegacy = true; // 仅用于隐藏横幅；保存时统一把禁用词表移交 rules
+    S._ruleActiveIndex = rules.length ? 0 : -1;
+    renderRuleEditorBody();
+    showToast(`已把 ${rules.length} 条禁用词转为可编辑规则`, "success");
+}
+
+export function saveRuleReview() {
+    syncRuleEditFromDOM();
+    const w = S.currentWorld;
+    if (!w) { closeModal("ruleEditorModal"); return; }
+    const list = (S._ruleEdit || []).filter(r => {
+        if (r.then && r.then.type === "ban" && !r.then.concept) return false;
+        if (r.then && r.then.type === "tag" && !r.then.tag) return false;
+        if (r.then && r.then.type === "ending" && !r.then.reason) return false;
+        if (r.when && r.when.type === "state" && !r.when.field) return false;
+        if (r.when && r.when.type === "concept" && !r.when.term) return false;
+        if (r.when && r.when.type === "tag" && !r.when.tag) return false;
+        return true;
+    });
+    list.forEach(r => {
+        r.name = (r.name || "").trim().slice(0, 100);
+        r.enabled = r.enabled !== false;
+        if (r.then && r.then.type === "ban") {
+            r.then.concept = (r.then.concept || "").trim().slice(0, 50);
+            r.then.aliases = (r.then.aliases || []).map(x => x.trim()).filter(Boolean).slice(0, 20);
+            r.then.severity = r.then.severity === "hard" ? "hard" : "soft";
+            r.then.unlessTags = (r.then.unlessTags || []).map(x => x.trim()).filter(Boolean).slice(0, 20);
+        }
+    });
+    if (!Array.isArray(w.rules)) w.rules = [];
+    w.rules = list;
+    w.bannedConcepts = []; // ★ 单一数据源改为 rules：DSL 已完整接管禁用逻辑（默认词表由 store 兜底，不会丢）
+    saveWorlds();
+    S._ruleEdit = null;
+    S._ruleActiveIndex = -1;
+    S._ruleImportedLegacy = false;
+    closeModal("ruleEditorModal");
+    showToast(`世界规则已保存（${list.length} 条）`, "success");
 }

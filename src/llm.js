@@ -3,14 +3,15 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_LABELS, getActiveConditionTags } from "./store.js";
-import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, tryRepairJSON } from "./utils.js";
+import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, tryRepairJSON, runPool, chunkText, mergeLoreSnippets, deepClone } from "./utils.js";
 import { getNextPeriod, getTemperature } from "./theme.js";
 import { getWorldLoreKB, summarizeFactsFromChanges } from "./rag.js";
 import { buildSystemPrompt, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, getPositionedLore } from "./prompt.js";
-import { getProvider, readApiInputs } from "./providers.js";
+import { getProvider, readApiInputs, getChunkConcurrency } from "./providers.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
 import { processTurn } from "./game.js";
 import { buildLoreRevisionDiff, parseLoreRevisionResponse } from "./lore-revision.js";
+import { selectPromotionCandidates } from "./promotion.js"; // ★ B6：记忆晋升候选筛选
 
 export function logTurnStats(hit, miss, total, usage) {
     const model = document.getElementById("modelName")?.value || "unknown";
@@ -126,6 +127,57 @@ export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, c
         throw new Error("分块抽取返回格式异常：缺少 lore_kb.snippets");
     }
     return parsed.lore_kb;
+}
+
+// ★ Phase 3 · NER：从源文本抽取知识库（分块 + 并发 + 合并去重 + 重排 id + 改写 links.target）。
+// 供 generateWorld（建世界时）与「从源文档补抽」（已有世界 enrich）复用。
+// opts：{ onProgress(done,total), onChunkError(idx,err) }；返回 { ip, snippets }（snippets 已合并、id 重排、links 解析）。
+export async function extractLoreFromSource(sourceContent, name, ipName, styleRef, customStyle, opts = {}) {
+    const CHUNK_SIZE = 15000;
+    const COUNT_HINT = 25;
+    const src = sourceContent || "";
+    if (!src.trim()) return { ip: name, snippets: [] };
+    const chunks = chunkText(src, CHUNK_SIZE);
+    const CONCURRENCY = getChunkConcurrency();
+    const chunkResults = await runPool(chunks, CONCURRENCY,
+        (content, idx) => callLoreChunkLLM(name, ipName, content, idx + 1, chunks.length, COUNT_HINT, styleRef, customStyle),
+        {
+            retries: 4,
+            isRetryable: (e) => /429|timeout|network|fetch|abort|ECONN|ETIMEDOUT|无法修复|JSON 解析失败|截断|结构损坏/i.test(String((e && e.message) || "")),
+            onRetry: (idx, n, err) => {
+                const isJson = err && /无法修复|JSON 解析失败|截断|结构损坏/i.test(String((err && err.message) || ""));
+                if (opts.onRetry) opts.onRetry(idx, chunks.length, isJson ? "生成结果损坏" : "被限流", n);
+            },
+            onProgress: (done, total) => { if (opts.onProgress) opts.onProgress(done, total); },
+            onError: (idx, err) => { if (opts.onChunkError) opts.onChunkError(idx, err); }
+        }
+    );
+    let allSnippets = [];
+    for (const r of chunkResults) {
+        if (r && !r.__error) allSnippets = mergeLoreSnippets(allSnippets, (r.snippets) || []);
+    }
+    // 重排唯一 id，避免各段 id 冲突；同时改写 links.target 跟随新 id（relations 用实体名，无需重排）。
+    const idRemap = new Map();
+    const titleToId = new Map();
+    allSnippets.forEach((s, i) => {
+        const nid = "m" + (i + 1);
+        idRemap.set(s.id, nid);
+        if (s.title) titleToId.set(s.title.trim().toLowerCase(), nid);
+        s.id = nid;
+    });
+    for (const s of allSnippets) {
+        if (Array.isArray(s.links) && s.links.length) {
+            s.links = s.links
+                .map(l => {
+                    const t = typeof l.target === "string" ? l.target.trim() : "";
+                    const resolved = idRemap.get(t) || titleToId.get(t.toLowerCase()) || "";
+                    return { target: resolved, relation: l.relation || "related" };
+                })
+                .filter(l => l.target && l.target !== s.id)
+                .slice(0, 8);
+        }
+    }
+    return { ip: name, snippets: allSnippets };
 }
 
 export function mockGenerateWorld(name, type, desc, hero, ipName) {
@@ -748,6 +800,12 @@ export async function callLoreRevisionLLM() {
 
     const snippetsText = kb.snippets.map(s => `[${s.id}:${s.category}:${s.title}] ${s.content}`).join("\n");
 
+    // ★ B6：记忆晋升候选——高价值/置顶行为记录，作为晋升候选交给 AI 固化进知识库
+    const promotionCandidates = selectPromotionCandidates(S.activeBehaviorRecords);
+    const candidatesText = promotionCandidates.length
+        ? promotionCandidates.map(c => `[${c.id}] (${c.type},重要度${c.importance}${c.pinned ? ",置顶" : ""}) ${c.text}`).join("\n")
+        : "无";
+
     const prompt = `你正在为一个文字 RPG 游戏维护知识库。请基于当前知识库和最近的游戏动态，给出修订后的知识库条目列表。
 
 当前知识库（每条格式：[id:类别:标题] 内容）：
@@ -758,6 +816,10 @@ ${recentFacts || "无"}
 
 最近对话摘要：
 ${recentChat || "无"}
+
+晋升候选（高价值记忆，建议固化为长期知识库条目）：
+${candidatesText}
+规则：对上述候选中你认为值得长期保留为世界观/设定的，在 snippets 中以"新增条目"形式提出，且其 id 必须以 "promote_" 前缀 + 原记忆 id（如 promote_b3f2a9c1）；content 用该记忆提炼成的正式设定条目；不值得长期保留的候选不要动。
 
 请输出一个 JSON 对象，只包含一个字段：
 {
@@ -795,6 +857,101 @@ ${recentChat || "无"}
         if (diff.updates.length || diff.additions.length) return diff;
     } catch (e) {
         console.warn("B5 知识库修订调用失败：", e && e.message);
+    } finally {
+        clearTimeout(timeoutId);
+        S.auxiliaryControllers.delete(controller);
+    }
+    return null;
+}
+
+// ★ Phase 3 · Critic 审稿人：通读整库，查内部矛盾/触发词冲突/悬空链接/违反世界硬规则/重复条目，
+// 返回与 lore-revision 同 schema 的修订 diff（{ updates, additions }）。无问题时返回 null。
+// kb：世界知识库 { ip, snippets }；world：世界对象（取其 rules 作为不可违反的硬约束）。
+export async function callWorldCriticLLM(kb, world) {
+    if (!kb || !Array.isArray(kb.snippets) || !kb.snippets.length) return null;
+    const { baseUrl, corsProxy, apiKey, model: readModel } = readApiInputs();
+    const model = readModel || "deepseek-v4-flash";
+    const mock = document.getElementById("mockMode") && document.getElementById("mockMode").checked;
+    if (!baseUrl || !apiKey) { if (!mock) return null; }
+    if (mock) return null; // 模拟模式不烧 API，跳过审稿
+    const apiUrl = buildApiUrl(baseUrl, corsProxy);
+
+    const snippetsText = kb.snippets.map(s => {
+        const links = Array.isArray(s.links) && s.links.length
+            ? "\n  链接: " + s.links.map(l => `${l.target}(${l.relation || "related"})`).join(", ")
+            : "";
+        const rels = Array.isArray(s.relations) && s.relations.length
+            ? "\n  关系: " + s.relations.map(r => `${r.from}—${r.relation || "related"}→${r.to}`).join(", ")
+            : "";
+        return `[${s.id}:${s.category}:${s.title}] ${s.content}${links}${rels}`;
+    }).join("\n");
+
+    const rulesText = (world && Array.isArray(world.rules) && world.rules.length)
+        ? world.rules.map(r => {
+            const cond = r.when ? JSON.stringify(r.when) : "";
+            const act = r.then ? JSON.stringify(r.then) : "";
+            return `- 条件:${cond} 动作:${act}`;
+        }).join("\n")
+        : "（无自定义硬规则）";
+
+    const worldDesc = (world && world.desc) ? world.desc : "（无世界观描述）";
+
+    const prompt = `你是一个文字 RPG 游戏世界的「审稿人 / 质量审查员」。请批判性通读下面的完整知识库，找出会降低游玩质量的硬伤，并给出修订后的条目。
+
+# 世界观描述
+${worldDesc}
+
+# 世界硬规则（你的修订绝对不能违反这些，若发现知识库设定与某条硬规则冲突，必须修订知识库以符合规则）
+${rulesText}
+
+# 完整知识库（每条格式：[id:类别:标题] 内容；含链接与关系）
+${snippetsText}
+
+# 审查重点（只改确有问题的条目）
+1. 内部逻辑矛盾：两条设定互相打架（如 A 说某角色已死，B 说该角色在位）。
+2. 触发词冲突：两条不同设定的 activation_keys 高度重合却内容矛盾。
+3. 悬空链接 / 关系：links.target 或 relations 指向不存在的条目（给出修正建议或标记删除）。
+4. 违反上方世界硬规则：知识库设定与某条 rules 冲突。
+5. 重复 / 近似重复：内容高度雷同的条目，建议合并。
+6. 事实错误：明显的时间/因果/设定错乱。
+
+# 输出
+只输出一个 JSON 对象，只含 "snippets" 字段（与知识库同结构）：
+{
+  "snippets": [
+    { "id": "保留原 id（修订）或新建（新增，用 nl+序号）", "category": "规则/地点/人物/事件/物品/势力/冲突", "title": "...", "content": "...", "keywords": ["..."], "activation_keys": ["..."], "trigger_mode": "keyword|always", "priority": 0, "links": [{"target":"id","relation":"related"}], "relations": [{"from":"","relation":"","to":""}] },
+    ...
+  ]
+}
+
+修订规则：
+- 只输出你认为需要修订或新增的条目；无需修改的条目不要输出。
+- 修订条目必须保留原 id，仅改有问题的字段。
+- 新增条目用 "nl" + 序号作 id，category 必须合法。
+- 不要删除仍有价值的条目。
+- 只输出 JSON，不要任何解释。`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 40000);
+    S.auxiliaryControllers.add(controller);
+    try {
+        const resp = await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+            body: JSON.stringify({
+                model, messages: [{ role: "user", content: prompt }],
+                temperature: 0.2, max_tokens: 4000, stream: false
+            }),
+            signal: controller.signal
+        });
+        if (!resp.ok) throw new Error("审稿请求失败：" + resp.status);
+        const data = await resp.json();
+        const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+        const proposed = parseLoreRevisionResponse(content);
+        const diff = buildLoreRevisionDiff(kb.snippets, proposed);
+        if (diff.updates.length || diff.additions.length) return diff;
+    } catch (e) {
+        console.warn("Phase 3 审稿调用失败：", e && e.message);
     } finally {
         clearTimeout(timeoutId);
         S.auxiliaryControllers.delete(controller);
