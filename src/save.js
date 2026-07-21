@@ -126,6 +126,11 @@ export function loadSave(saveId) {
     const stored = S.saves.find(s => s.id === saveId);
     const save = stored || null;
     if (!save) return;
+    // ★ 防御：存档所属世界已被删除时，禁止进入游戏（currentWorld 为 null 会崩溃），给出提醒后返回
+    if (!S.worlds.find(w => w.id === save.worldId)) {
+        showToast(`存档「${save.worldName}」所属的世界已被删除，无法继续游玩`, "warn", 3500);
+        return;
+    }
     prepareSessionFromSave(save);
     showToast(`加载存档：${save.worldName}`, "success");
     closeAllModals();

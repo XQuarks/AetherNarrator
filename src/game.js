@@ -7,7 +7,7 @@ import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWor
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
-import { addBehaviorRecords, ensureLoreEmbeddings, getWorldLoreKB, retrieve, summarizeFactsFromChanges } from "./rag.js";
+import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
 import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
 import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded } from "./render.js";
@@ -318,9 +318,10 @@ export function applyStateChanges(changes) {
     // ★ A6 解锁标签运算（在 banned 扫描之后、应用之前）：
     // changes.tags / changes.present_npcs 支持 {add:[...], remove:[...]} 增量操作。
     // 标签变化会改变「仍被禁用的概念」集合，故失效 system prompt 缓存以便按新解锁状态重建禁律。
-    if (changes.tags || changes.present_npcs) {
+    if (changes.tags || changes.present_npcs || changes.revealed_locations) {
         if (!Array.isArray(s.tags)) s.tags = [];
         if (!Array.isArray(s.present_npcs)) s.present_npcs = [];
+        if (!Array.isArray(s.revealed_locations)) s.revealed_locations = [];
         // 兼容两种格式：{add:[...],remove:[...]} 或纯数组（视为 add）
         const normTagOp = (op) => Array.isArray(op) ? { add: op } : (op && typeof op === "object" ? op : null);
         const applyTagOp = (target, op) => {
@@ -333,11 +334,21 @@ export function applyStateChanges(changes) {
         };
         applyTagOp(s.tags, changes.tags);
         applyTagOp(s.present_npcs, changes.present_npcs);
+        applyTagOp(s.revealed_locations, changes.revealed_locations);
         invalidateSystemPromptCache();
         saveState();
     }
 
-    if (changes.current_location) s.current_location = changes.current_location;
+    if (changes.current_location) {
+        const oldLoc = s.current_location;
+        s.current_location = changes.current_location;
+        // ★ L3 认知追踪：离开某地点后，角色自然"知道那个地方存在且可达"，
+        // 故把旧所在地自动加入 revealed_locations（排除当前所在地、占位空值、重复）。
+        if (typeof oldLoc === "string" && oldLoc && oldLoc !== changes.current_location
+            && Array.isArray(s.revealed_locations) && !s.revealed_locations.includes(oldLoc)) {
+            s.revealed_locations.push(oldLoc);
+        }
+    }
     // ★ 时间线进度指针：单向只增（取 max）；推进时失效 system prompt 缓存，使下轮注入的 story_progress 值同步更新
     if (typeof changes.story_progress === "number" && isFinite(changes.story_progress)) {
         const nextSp = Math.max(1, Math.floor(changes.story_progress));
@@ -510,56 +521,54 @@ export function checkGoalDeadlines() {
 }
 
 export function buildSmartFallbackChoices() {
-    const loc = S.gameState.current_location || "这里";
-    const kb = getWorldLoreKB();
-    // P1#9：优先用知识库「人物」片段的真实姓名作为 NPC 名；
-    // 关系表里的 guide_npc / rival_npc 等占位 key 不作为展示名，避免兜底选项显示"与 guide_npc 交谈"。
-    const kbNpcNames = (kb && kb.snippets)
-        ? kb.snippets.filter(s => s.category === "人物").map(s => s.title)
-        : [];
-    const relNames = S.gameState.relationships
-        ? Object.keys(S.gameState.relationships).filter(k => !k.endsWith("_npc"))
-        : [];
-    const npcPool = kbNpcNames.length ? kbNpcNames : relNames;
-    const locations = (kb && kb.snippets) ? kb.snippets.filter(s => s.category === "地点").map(s => s.title) : [];
-    const events = (kb && kb.snippets) ? kb.snippets.filter(s => s.category === "事件").map(s => s.title) : [];
+    // ★ 选项场景一致性修复（docs/18）+ L3 认知追踪：
+    // 保底选项优先基于「真实场景状态」生成"与在场角色交谈 / 前往已知地点"，
+    // 但只在这些状态确实存在时才出现；其余用「场景安全」通用动作补足，
+    // 绝不引用 lore_kb 全量设定（避免孤立场景出现"与警犬交流""前往 Level 2"）。
 
-    const choices = [];
+    const picked = [];
 
-    // 优先：与当前在场的 NPC 互动
-    if (npcPool.length > 0) {
-        const npc = npcPool[Math.floor(Math.random() * npcPool.length)];
-        choices.push({ text: "与" + npc + "交谈", action: "talk_to_" + npc });
+    // —— L3 增强分支：基于游戏状态，且默认空 → 不触发，避免盲聊/盲走 ——
+    // 1) 当前在场角色 → "与X交谈"（过滤 _npc 占位键）
+    const present = (S.gameState.present_npcs || [])
+        .filter(n => n && typeof n === "string" && !String(n).endsWith("_npc"));
+    if (present.length) {
+        const npc = present[Math.floor(Math.random() * present.length)];
+        picked.push({ text: "与" + npc + "交谈", action: "talk_to_" + npc });
+    }
+    // 2) 已知可达地点 → "前往Y"（★ 必须排除当前所在地，绝不出现"前往自己脚下"）
+    const cur = S.gameState.current_location;
+    const revealed = (S.gameState.revealed_locations || [])
+        .filter(l => l && typeof l === "string" && l !== cur);
+    if (revealed.length) {
+        const loc = revealed[Math.floor(Math.random() * revealed.length)];
+        picked.push({ text: "前往" + loc, action: "go_to_" + loc });
     }
 
-    // 次优先：移动到附近地点
-    const nearby = locations.filter(l => l !== loc);
-    if (nearby.length > 0) {
-        const place = nearby[Math.floor(Math.random() * nearby.length)];
-        choices.push({ text: "前往" + place, action: "go_to_" + place });
+    // —— 场景安全通用池：不引用任何专有名词，任何场景都不会出戏 ——
+    const safePool = [
+        { text: "环顾四周，仔细观察当前环境",   action: "look_around" },
+        { text: "检查手边能触及的物品",         action: "examine_items" },
+        { text: "回想刚才发生的一切",           action: "recall" },
+        { text: "试着出声呼喊，看是否有人回应", action: "call_out" },
+        { text: "在原地稍作停留，整理思绪",     action: "rest" },
+        { text: "让事件继续发展",               action: "continue_story" }
+    ];
+
+    // 内联 Fisher–Yates 洗牌，按洗牌顺序把安全池补足到 3–4 个（增强分支优先保留）
+    const arr = safePool.slice();
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
     }
-
-    // 再次：探索当前场景或触发事件
-    choices.push({ text: "仔细打量" + loc + "的每个角落", action: "explore" });
-
-    // 兜底：让事件继续发展
-    choices.push({ text: "让事件继续发展", action: "continue_story" });
-
-    // 第四：推进或休息
-    if (events.length > 0) {
-        const evt = events[Math.floor(Math.random() * events.length)];
-        choices.push({ text: "打听关于「" + evt + "」的线索", action: "investigate" });
-    } else {
-        choices.push({ text: "在原地稍作停留，整理思绪", action: "rest" });
+    for (const c of arr) {
+        if (picked.length >= 4) break;
+        if (!picked.some(p => p.text === c.text)) picked.push(c);
     }
+    // 兜底：极端情况下不足 3 个
+    if (picked.length < 3) picked.push({ text: "环顾四周", action: "look" });
 
-    // 确保至少 3 个
-    if (choices.length < 3) {
-        choices.push({ text: "环顾四周", action: "look" });
-    }
-
-    // 限制最多 4 个
-    return choices.slice(0, 4);
+    return picked;
 }
 
 export async function submitInput() {
@@ -694,7 +703,13 @@ export async function processTurn(input) {
             }
 
             // ★ A2 生成后世界观合规守卫（柔和提醒，不阻断回合）
-            const localViolations = findWorldviewViolations(resp.narrative, getBannedConceptRules(), getActiveConditionTags());
+            // 选项场景一致性修复（docs/18）：把玩家选项文本也并入扫描范围，
+            // 避免选项里出现世界观禁用概念（原实现只扫 narrative）。
+            const choiceText = (resp.choices || []).map(c => (c && c.text) ? c.text : "").join("\n");
+            const localViolations = findWorldviewViolations(
+                resp.narrative + "\n" + choiceText,
+                getBannedConceptRules(), getActiveConditionTags()
+            );
             if (localViolations.length) {
                 const hit = localViolations[0].matched;
                 if (hit) {
@@ -714,7 +729,7 @@ export async function processTurn(input) {
                 epoch: S.currentSession.epoch,
                 turnId: S.conversationHistory.length + 1
             };
-            if (judgeEnabled) judgeWorldviewConsistency(resp.narrative, resp.state_changes, { playerInput: input }).then(result => {
+            if (judgeEnabled) judgeWorldviewConsistency(resp.narrative, resp.state_changes, { playerInput: input, choices: resp.choices }).then(result => {
                 const currentContext = {
                     worldId: S.currentWorld && S.currentWorld.id,
                     epoch: S.currentSession.epoch,

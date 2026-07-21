@@ -106,6 +106,7 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - status_effects: []
    - tags: ["初始条件标签，如 era_ancient/era_medieval/era_industrial/era_modern/era_future，表示世界当前所处时代；该标签决定现代/科技概念是否被允许出现（解锁禁律）"]
    - present_npcs: []（当前在场 NPC 姓名数组；引擎会自动将其激活为 char:<姓名> 标签，用于人物型解锁条件）
+   - revealed_locations: []（角色已发现/已知且可达、但非当前所在地的地点名数组；引擎据此允许生成"前往"类选项，并在角色离开某地时自动累积）
    - is_alive: true
    - death_reason: null
 
@@ -482,6 +483,8 @@ export function buildCompactGameState() {
         completed_events: S.gameState.completed_events || [], // ★ P2.2.15: 补入"已发生事件"，让 AI 每轮都能看到玩家已完成的关键事件
         status_effects: S.gameState.status_effects,
         npc_activity: S.gameState.npc_activity || {},
+        present_npcs: S.gameState.present_npcs || [],
+        revealed_locations: S.gameState.revealed_locations || [],
         is_alive: S.gameState.is_alive
     };
     return JSON.stringify(state);

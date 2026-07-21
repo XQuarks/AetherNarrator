@@ -307,14 +307,22 @@ export function renderSaveList() {
     }
     container.innerHTML = S.saves.map(s => {
         const isDead = s.state && s.state.is_alive === false;
+        const worldMissing = !S.worlds.find(w => w.id === s.worldId);   // ★ 孤儿存档：所属世界已被删除
+        const titleBadges =
+            (isDead ? ' <span class="dead-badge">&#x2620; 已死亡</span>' : "") +
+            (worldMissing ? ' <span class="deleted-badge">&#9888; 世界已删除</span>' : "");  // ★ 新增徽章
+        // ★ 孤儿存档：按钮改「查看」，点开是说明弹窗而非进游戏
+        const playBtn = worldMissing
+            ? `<button class="save-play-btn" data-action="showSaveDetail" data-id="${s.id}">查看</button>`
+            : `<button class="save-play-btn" data-action="showSaveDetail" data-id="${s.id}">继续游玩</button>`;
         return `
-        <div class="list-item save-item${isDead ? " dead-save" : ""}">
+        <div class="list-item save-item${isDead ? " dead-save" : ""}${worldMissing ? " missing-world" : ""}">
             <div class="save-info">
-                <div class="item-title">${escapeHtml(s.worldName)}${isDead ? ' <span class="dead-badge">&#x2620; 已死亡</span>' : ""}</div>
+                <div class="item-title">${escapeHtml(s.worldName)}${titleBadges}</div>
                 <div class="item-meta">${escapeHtml(s.progress)}<br>最后游玩：${escapeHtml(s.updatedAt)}</div>
             </div>
             <div class="save-actions">
-                <button class="save-play-btn" data-action="showSaveDetail" data-id="${s.id}">继续游玩</button>
+                ${playBtn}
                 <button class="save-del-btn" data-action="deleteSave" data-id="${s.id}">删除</button>
             </div>
         </div>
@@ -410,10 +418,35 @@ export function renderSaveDetail(saveId) {
     const save = stored || null;
     if (!save) { showToast("未找到该存档", "error"); return; }
     const world = S.worlds.find(w => w.id === save.worldId);
-    S.currentWorld = world || S.currentWorld; // 供导出世界等依赖 world 的逻辑兜底
     document.getElementById("detailSaveTitle").textContent = `存档详情 · ${save.worldName}`;
     const isDead = save.state && save.state.is_alive === false;
-    document.getElementById("detailSaveBody").innerHTML = `
+    const body = document.getElementById("detailSaveBody");
+    const footer = document.getElementById("detailSaveModalFooter");
+
+    // ★ 存档所属世界已被删除：友好提示，禁止进入游戏（避免 currentWorld 为 null 导致崩溃）
+    if (!world) {
+        body.innerHTML = `
+            <div class="form-group">
+                <label>所属世界</label>
+                <p style="margin:0;font-size:15px;color:var(--danger);">${escapeHtml(save.worldName)} <span class="deleted-badge">&#9888; 已删除</span></p>
+            </div>
+            <div class="form-group">
+                <label>状态</label>
+                <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">
+                    该存档对应的世界已被删除或不存在，<b>无法继续游玩</b>。<br>
+                    存档数据（进度、知识库副本等）仍保留在本地。你可以删除此存档释放空间，
+                    或重新创建一个同名世界后继续游玩。
+                </p>
+            </div>`;
+        footer.innerHTML = `
+            <button class="btn secondary" data-action="returnFromSaveDetail">返回</button>
+            <button class="btn danger" data-action="deleteSave" data-id="${save.id}">删除该存档</button>`;
+        showModal("saveDetailModal");
+        return;
+    }
+
+    S.currentWorld = world; // ★ 世界存在时才赋值（修复误把上一个世界带入的隐患）
+    body.innerHTML = `
         <div class="form-group">
             <label>所属世界</label>
             <p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(save.worldName)}</p>
@@ -439,7 +472,6 @@ export function renderSaveDetail(saveId) {
             <label>知识库条目</label>
             <p style="margin:0;font-size:14px;color:var(--text-secondary);">${save.lore_kb && save.lore_kb.snippets ? save.lore_kb.snippets.length : 0} 条（含本存档独立副本）</p>
         </div>`;
-    const footer = document.getElementById("detailSaveModalFooter");
     footer.innerHTML = `
         <button class="btn secondary" data-action="returnFromSaveDetail">返回</button>
         <button class="btn secondary" data-action="editSaveLore" data-id="${save.id}">存档知识库</button>

@@ -231,6 +231,7 @@ export function mockGenerateWorld(name, type, desc, hero, ipName) {
             status_effects: [],
             tags: [],
             present_npcs: [],
+            revealed_locations: [],
             is_alive: true,
             death_reason: null
         };
@@ -284,6 +285,7 @@ export function mockGenerateWorld(name, type, desc, hero, ipName) {
             status_effects: [],
             tags: [],
             present_npcs: [],
+            revealed_locations: [],
             is_alive: true,
             death_reason: null
         };
@@ -326,6 +328,7 @@ export function mockGenerateWorld(name, type, desc, hero, ipName) {
             status_effects: [],
             tags: [],
             present_npcs: [],
+            revealed_locations: [],
             is_alive: true,
             death_reason: null
         };
@@ -724,6 +727,7 @@ async function callLLMJson(systemContent, userContent, opts = {}) {
 // 设计：不阻断回合——仅用于弹提示；自由度 ≥4 自动跳过（尊重创建时选择）。
 // opts.playerInput：玩家原始输入；是否真正参与裁判由「自由度」决定（见下方 considerInput）。
 export async function judgeWorldviewConsistency(narrative, stateChangesObj, opts = {}) {
+    const choices = opts.choices; // 选项场景一致性修复（docs/18）：把玩家选项一并交给裁判
     const w = S.currentWorld;
     if (!w) return null;
     const freedom = (typeof w.plot_freedom === "number") ? w.plot_freedom : 3;
@@ -754,6 +758,7 @@ export async function judgeWorldviewConsistency(narrative, stateChangesObj, opts
         "【世界设定摘要】\n" + lore +
         tagLine +
         "\n\n【待判定叙事】\n" + (narrative || "（无）") +
+        "\n\n【待判定玩家选项】\n" + ((Array.isArray(choices) ? choices : []).map(c => (c && c.text) ? c.text : "").join("\n") || "（无）") +
         "\n\n【待判定状态变更】\n" + (stateChangesObj ? JSON.stringify(stateChangesObj, null, 2) : "（无）") +
         inputLine;
     try {
