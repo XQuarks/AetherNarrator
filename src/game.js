@@ -346,7 +346,10 @@ export function switchTimeline(id) {
 export function applyStateChanges(changes) {
     if (!changes) return;
     // ★ P1.2.6: 事务保护——先在副本上应用，任何中途异常都回滚 gameState，绝不保留半套状态
-    const backup = deepClone(S.gameState);
+    // ★ P1 性能：backup 延迟到「校验 + 世界观过滤之后、首次原地变更之前」才克隆整份状态；
+    //   若前两步因 AI 畸形响应抛错，状态本未被改动，无需快照（跳过一次 deepClone）。
+    //   正常回合仍会克隆一次（568 行 Object.assign 必改状态），行为与改动前一致。
+    let backup = null;
     try {
     const s = S.gameState;
     validateStateShape(changes);   // #7 完善：异常状态类型告警
@@ -362,6 +365,7 @@ export function applyStateChanges(changes) {
     // ★ A6 解锁标签运算（在 banned 扫描之后、应用之前）：
     // changes.tags / changes.present_npcs 支持 {add:[...], remove:[...]} 增量操作。
     // 标签变化会改变「仍被禁用的概念」集合，故失效 system prompt 缓存以便按新解锁状态重建禁律。
+    if (!backup) backup = deepClone(S.gameState); // ★ P1 性能：首次变更前才克隆整份状态快照（此后异常可回滚）
     if (changes.tags || changes.present_npcs || changes.revealed_locations) {
         if (!Array.isArray(s.tags)) s.tags = [];
         if (!Array.isArray(s.present_npcs)) s.present_npcs = [];
@@ -571,7 +575,7 @@ export function applyStateChanges(changes) {
     // ★ P0 性能：不再在此存盘——持久化统一由 processTurn 末尾的 createOrUpdateSave() 完成，避免每回合重复写盘。
     updateGameDayInfo();
     } catch (e) {
-        S.gameState = backup; // 回滚到变更前
+        if (backup) S.gameState = backup; // 回滚到变更前（无备份说明尚未任何变更，无需回滚）
         throw e;
     }
 }

@@ -130,7 +130,7 @@ export function segmentChinese(text) {
     return [...new Set(terms)];
 }
 
-export async function embeddingRetrieve(input, topK = 5) {
+export async function embeddingRetrieve(input, topK = 5, qVec = null) {
     const kb = getWorldLoreKB();
     if (!kb || !kb.snippets || !kb.snippets.length) return [];
     // AI 生成世界 / 老存档未预计算向量时，先尝试补算（一次性，之后命中 sn[0].embedding 即跳过）
@@ -139,21 +139,24 @@ export async function embeddingRetrieve(input, topK = 5) {
     }
     const embeddedSnippets = kb.snippets.filter(s => Array.isArray(s.embedding) && s.embedding.length);
     if (!embeddedSnippets.length) return [];
-    let qVec;
-    try {
-        qVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
-    } catch (e) {
-        console.warn("查询向量计算失败", e);
-        return [];
+    // ★ P1 优化：优先复用调用方已算好的查询向量（整回合只算一次），缺失时再自行计算（兜底）
+    let queryVec = qVec;
+    if (!queryVec) {
+        try {
+            queryVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
+        } catch (e) {
+            console.warn("查询向量计算失败", e);
+            return [];
+        }
     }
     // ★ Phase 1：优先走 ANN 索引（O(log n)）；任何失败回落 O(n) 兜底（行为完全一致）
     const worldId = (S.currentWorld && S.currentWorld.id) || "default";
     let scored;
     try {
         const idx = await getLoreAnnIndex(kb, worldId, { dim: EMBED_DIM });
-        scored = idx.search(qVec, topK * 2); // 多取一些，后续加权/门禁再筛
+        scored = idx.search(queryVec, topK * 2); // 多取一些，后续加权/门禁再筛
     } catch (e) {
-        scored = embeddingRetrieveBruteforce(embeddedSnippets, qVec, topK);
+        scored = embeddingRetrieveBruteforce(embeddedSnippets, queryVec, topK);
     }
     return scored.slice(0, topK);
 }
@@ -344,11 +347,20 @@ export async function selectTimelineSlice(snippet, input, qVec) {
 }
 
 export async function retrieve(input) {
+    // ★ P1 优化：整回合只算一次查询向量，供 embeddingRetrieve / 时间线切片 / 行为记忆三处复用，
+    //   避免同一 input 在同一回合被 computeEmbedding 算三次（Worker 往返重）。
+    let qVec = null;
+    try {
+        if (typeof window !== "undefined" && (typeof window.transformers !== "undefined" || typeof Worker !== "undefined")) {
+            qVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
+        }
+    } catch (e) { qVec = null; }
+
     // P1#2：小知识库（全文已注入 system）无需每轮跑 embedding 推理 + 关键词向量检索——
     // 那段知识在 buildTurnUserMessage 里不会进入 user 消息，纯属浪费（手机端尤卡）。
     // 仅保留行为记录召回（仍是按相关度），因为它独立于 lore 注入、本就服务于"关键事实"区块。
     if (isLoreFullInSystem()) {
-        const behavior = await retrieveBehaviorRecords(input, 3);
+        const behavior = await retrieveBehaviorRecords(input, 3, qVec);
         return behavior.map(b => ({
             id: "behavior_" + b.id, category: "行为记录", title: "关键事实",
             content: b.text, kw: 1.5, emb: 0
@@ -361,18 +373,12 @@ export async function retrieve(input) {
         showToast("向量模型未加载，已降级为关键词检索（检查网络或 transformers.js 是否加载）", "warn");
     }
 
-    // RAG 并行化：关键词检索和向量检索同时进行
+    // RAG 并行化：关键词检索和向量检索同时进行（向量检索复用上方已算的 qVec）
     const [keyword, embedding] = await Promise.all([
         Promise.resolve(keywordRetrieve(input, 7)),
-        embeddingRetrieve(input, 7)
+        embeddingRetrieve(input, 7, qVec)
     ]);
-    // 缓存查询向量，供时间线切片做语义匹配（向量可用时；兜底不影响主流程）
-    let qVec = null;
-    try {
-        if (typeof window !== "undefined" && (typeof window.transformers !== "undefined" || typeof Worker !== "undefined")) {
-            qVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
-        }
-    } catch (e) { qVec = null; }
+    // qVec 已在函数开头算好（供时间线切片语义匹配复用），此处不再重算
 
     // 保留真实分数（关键词分 + 余弦相似度）做加权融合，而非归一为 1/2 常量（修复 #1 丢失区分度）
     const KW_W = 1.0, EMB_W = 2.0;
@@ -388,8 +394,8 @@ export async function retrieve(input) {
         merged.set(e.snippet.id, cur);
     }
 
-    // 加入玩家行为记录
-    const behavior = await retrieveBehaviorRecords(input, 3);
+    // 加入玩家行为记录（复用本回合已算的 qVec，避免重复算查询向量）
+    const behavior = await retrieveBehaviorRecords(input, 3, qVec);
     for (const b of behavior) {
         merged.set("behavior_" + b.id, { snippet: { id: "behavior_" + b.id, category: "行为记录", title: "关键事实", content: b.text }, kw: 1.5, emb: 0 });
     }
@@ -516,27 +522,32 @@ export async function retrieve(input) {
     return out;
 }
 
-export async function retrieveBehaviorRecords(input, topK = 3) {
+export async function retrieveBehaviorRecords(input, topK = 3, qVec = null) {
     const records = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords : [];
     if (!records.length) return [];
 
     // ★ C4：向量语义检索优先（"黛玉病了"→"黛玉咳血"），关键词兜底
     const terms = segmentChinese(input);
     let useVector = false;
-    let qVec = null;
-    try {
-        if (typeof window.transformers !== "undefined" && terms.length > 0) {
-            qVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
-            useVector = true;
-            // 后台补算未计算的记忆 embedding
-            ensureBehaviorEmbeddings();
-        }
-    } catch (e) { /* 向量不可用，降级关键词 */ }
+    // ★ P1 优化：优先复用调用方已算好的查询向量（整回合只算一次），缺失时再自行计算（兜底）
+    let queryVec = qVec;
+    if (!queryVec) {
+        try {
+            if (typeof window.transformers !== "undefined" && terms.length > 0) {
+                queryVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
+            }
+        } catch (e) { /* 向量不可用，降级关键词 */ }
+    }
+    if (queryVec && terms.length > 0) {
+        useVector = true;
+        // 后台补算未计算的记忆 embedding
+        ensureBehaviorEmbeddings();
+    }
 
     const scored = records.map(b => {
         let score = 0;
-        if (useVector && b.embedding && qVec) {
-            score = cosineSimilarity(qVec, b.embedding) * 5; // 余弦相似度放大到与关键词可比
+        if (useVector && b.embedding && queryVec) {
+            score = cosineSimilarity(queryVec, b.embedding) * 5; // 余弦相似度放大到与关键词可比
         }
         // 关键词兜底：与向量分取 max（两者互补，向量覆盖语义、关键词覆盖精确匹配）
         let kwScore = 0;
