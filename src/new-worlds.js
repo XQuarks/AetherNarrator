@@ -25,7 +25,7 @@ export function createCthulhuWorld() {
                 courage: "胆识", perception: "观察", patience: "定力", luck: "命运", will: "理智"
             },
             time_periods: { morning: "清晨", forenoon: "上午", afternoon: "午后", evening: "黄昏", night: "深夜" },
-            time_config: { era_label: "1920年代", calendar_mode: "gregorian", clock_mode: "period", season: "深冬", show: true, deadlines: [] },
+            time_config: { era_label: "1920年代", calendar_mode: "gregorian", calendar_start: { year: 1926, month: 2, date: 2 }, clock_mode: "period", season: "深冬", show: true, deadlines: [] },
             game_over_conditions: ["is_alive === false", "sanity <= 0"]
         },
         initial_state: {
@@ -58,7 +58,7 @@ export function createCthulhuWorld() {
             },
             inventory: [
                 { item_id: "notebook", name: "调查笔记", count: 1 },
-                { item_id: "pistol", name: "左轮手枪", count: 1 },
+                { item_id: "pistol", name: "左轮手枪", count: 1, tags: ["has_firearm"] },
                 { item_id: "camera", name: "柯达相机", count: 1 },
                 { item_id: "ledger", name: "安吉尔教授的笔记盒", count: 1 },
                 { item_id: "cash", name: "旅费", count: 50 }
@@ -66,10 +66,10 @@ export function createCthulhuWorld() {
             completed_events: [],
             active_event: null,
             current_location: "波士顿 · 私人书房",
-            current_date: { day: 1, period: "morning" },
+            current_date: { year: 1926, month: 2, date: 2, period: "morning" },
             goals: [
-                { goal_id: "examine_notes", name: "仔细研究安吉尔教授的笔记和浮雕", type: "完成事件", deadline: { day: 1, period: "afternoon" }, visible: true },
-                { goal_id: "visit_wilcox", name: "拜访雕塑家威尔科克斯", type: "完成事件", deadline: { day: 3, period: "night" }, visible: true }
+                { goal_id: "examine_notes", name: "仔细研究安吉尔教授的笔记和浮雕", type: "完成事件", deadline: { year: 1926, month: 2, date: 2, period: "afternoon" }, visible: true },
+                { goal_id: "visit_wilcox", name: "拜访雕塑家威尔科克斯", type: "完成事件", deadline: { year: 1926, month: 2, date: 4, period: "night" }, visible: true }
             ],
             status_effects: [],
             npc_activity: {
@@ -124,7 +124,7 @@ export function createCthulhuWorld() {
             "6. 输出必须是 JSON 格式，包含 narrative、choices、state 等字段。"
         ].join("\n"),
         opening_narrative: [
-            "1926年的冬天比往年更冷。波士顿查尔斯河面上结了一层薄冰，寒风吹过鹅卵石铺就的街道，卷起零星的雪屑。",
+            "{calendar_year}年的冬天比往年更冷。波士顿查尔斯河面上结了一层薄冰，寒风吹过鹅卵石铺就的街道，卷起零星的雪屑。",
             "",
             "你在书房里举起那把从叔祖父安吉尔教授戒指上取下的铜钥匙，犹豫了片刻，然后将它插进了那个锁闭的锡盒。咔哒一声，锁簧弹开。盒子里不是什么金银珠宝——只有一块奇特的粘土浮雕，以及一叠杂乱无章的手稿和剪报。",
             "",
@@ -207,10 +207,10 @@ export function createUrbanLegendWorld() {
             completed_events: [],
             active_event: null,
             current_location: "Level 0 — 大堂",
-            current_date: { day: 1, period: "afternoon" },
+            current_date: { step: 1, period: "afternoon" },
             goals: [
-                { goal_id: "find_exit_0", name: "找到离开 Level 0 的路", type: "完成事件", deadline: { day: 3, period: "night" }, visible: true },
-                { goal_id: "find_water", name: "寻找安全的饮用水", type: "完成事件", deadline: { day: 1, period: "night" }, visible: true }
+                { goal_id: "find_exit_0", name: "找到离开 Level 0 的路", type: "完成事件", deadline: { step: 3, period: "night" }, visible: true },
+                { goal_id: "find_water", name: "寻找安全的饮用水", type: "完成事件", deadline: { step: 1, period: "night" }, visible: true }
             ],
             status_effects: [],
             npc_activity: {
@@ -283,6 +283,141 @@ export function createUrbanLegendWorld() {
             { text: "沿着走廊一直走，寻找楼梯或出口", hint: "最基本的策略——保持移动，避免被困在同一区域" },
             { text: "仔细检查墙上的每一行涂鸦，收集信息", hint: "从先行者的经验中学习，减少试错成本" },
             { text: "试着在自己来的那面墙上再次尝试卡出", hint: "也许能穿回现实世界——但也可能通往一个更糟的地方" }
+        ],
+        behavior_records: [],
+        style_ref: "none",
+        custom_style: "",
+        plot_freedom: 4,
+        custom_prefix: "",
+        rules: []
+    };
+}
+
+// Phase 2 演示世界：双界穿梭（道诡异仙式）——现实（公历）与异界（农历）各自独立流逝
+export function createDualWorld() {
+    return {
+        id: "demo_dual_world",
+        name: "双界 · 现实与异界",
+        type: "original",
+        desc: "你是一名普通的现代青年，却拥有在两个世界之间往返的意识。白日里你是 2003 年都市中一名普通的上班族，为房租和加班发愁；当意识沉入另一界，你便成为异界大周天历 3024 年的一名修士，在宗门与秘境间求道问道。两个世界的时间各自流淌、互不影响——现实里过了一周，异界或许只过了一夜。你的命运，始终被两界共同牵引。",
+        hero: "一名能在现代都市与异界修真界之间往返意识的年轻人。现实里有些社畜的烦恼，异界里则有修行的造化。",
+        ip_name: "原创 · 双界穿梭",
+        createdAt: new Date().toISOString().split("T")[0],
+        tags: ["原创", "双界穿梭", "修真", "现代", "意识穿越", "时间独立"],
+        schema: {
+            progression_label: "修为",
+            progression_path_label: "道途",
+            has_skills: true,
+            skill_label: "功法/技艺",
+            attribute_labels: {
+                courage: "胆识", perception: "灵觉", patience: "定力", luck: "气运", will: "道心"
+            },
+            time_periods: { morning: "清晨", forenoon: "上午", afternoon: "午后", evening: "黄昏", night: "深夜" },
+            // ★ Phase 2：多世界（双界）。timelines 字典 + active_timeline；各线按各自 calendar_mode 独立推进
+            time_config: {
+                mode: "multiverse",
+                active_timeline: "earth",
+                timelines: {
+                    earth: {
+                        name: "现实",
+                        calendar_mode: "gregorian",
+                        calendar_start: { year: 2003, month: 1, date: 1 },
+                        current_date: { year: 2003, month: 3, date: 15, period: "morning" },
+                        era_label: "公元2003年"
+                    },
+                    xianxia: {
+                        name: "异界",
+                        calendar_mode: "lunar",
+                        current_date: { year: 3024, month: 1, date: 1, period: "morning" },
+                        era_label: "大周天历3024年"
+                    }
+                },
+                clock_mode: "period",
+                show: true,
+                deadlines: []
+            },
+            game_over_conditions: ["is_alive === false"]
+        },
+        initial_state: {
+            name: "林岸",
+            age: 24,
+            background: "白天你是 2003 年江城一名普通的公司职员，挤地铁、赶报表、盘算月末的房租；每当意识沉入另一界，你便是异界青霄宗一名刚入门的记名弟子，在晨钟与灵雾间吞吐气息。两界记忆共存于你一人之身，时间却各自流淌。",
+            personality: ["务实", "好奇", "坚韧"],
+            attributes: {
+                courage: "现实里你怕迟到扣钱，异界里你敢独自夜探后山——两边的勇气来源截然不同。",
+                perception: "你总能先一步察觉身边的异样：地铁里谁在盯着你，山道上哪丛草被动过。",
+                patience: "报表能熬，打坐也能熬，你渐渐学会了在两界都按兵不动。",
+                luck: "气运似乎更眷顾异界的你——现实里它大多用来躲过暴雨和催租电话。",
+                will: "道心是你穿越两界而不迷失的根基。现实的压力与异界的诡谲都在磨损它。"
+            },
+            progression: { path: "未定道途", rank: "记名弟子", progress: 0 },
+            relationships: {
+                "现实 · 同事老周": "同部门的老员工，抽烟、吐槽老板、偶尔分你一份外卖。他不知道你夜里去了另一个世界。",
+                "异界 · 师姐苏映雪": "青霄宗内门弟子，冷淡但公道。她总在你险些走火入魔时出手点拨，是你在异界少数可信的人。",
+                "异界 · 执事长老": "掌管记名弟子起居与杂役，眼里只有规矩与贡献，从不为人情所动。"
+            },
+            skills: {
+                "基础吐纳": "异界入门功法，借晨昏之气温养经脉。你日复一日，进境缓慢却扎实。",
+                "市井眼力": "现实里练出的本事——在人群与文件里迅速分辨真假、轻重缓急。",
+                "两界记记": "你能把两界见闻分毫不差地记在心里，许多线索正藏在两边的对照之中。"
+            },
+            inventory: [
+                { item_id: "badge", name: "工牌", count: 1 },
+                { item_id: "phone", name: "手机", count: 1 },
+                { item_id: "spirit_stone", name: "下品灵石", count: 3, tags: ["xianxia"] },
+                { item_id: "manual", name: "吐纳口诀（抄本）", count: 1, tags: ["xianxia"] }
+            ],
+            completed_events: [],
+            active_event: null,
+            current_location: "江城 · 出租屋",
+            current_date: { year: 2003, month: 3, date: 15, period: "morning" },
+            goals: [
+                { goal_id: "survive_rent", name: "现实：月底前凑齐房租", type: "完成事件", deadline: { step: 12, period: "night" }, visible: true },
+                { goal_id: "first_breakthrough", name: "异界：初次引气入体", type: "完成事件", deadline: { step: 20, period: "night" }, visible: true }
+            ],
+            status_effects: [],
+            npc_activity: {
+                "现实 · 同事老周": "在工位上刷论坛，等午休",
+                "异界 · 师姐苏映雪": "在藏经阁抄录功法",
+                "异界 · 执事长老": "在议事堂核对本月弟子贡献"
+            },
+            is_alive: true,
+            death_reason: null
+        },
+        lore_kb: {
+            ip: "原创 · 双界穿梭",
+            snippets: [
+                { id: "dw1", category: "规则", title: "双界时间各自流淌", content: "现实与异界是两条相互独立的时间线。现实里过了一周，异界或许只过了一夜；反之亦然。两界的时间不互换、不折算，切换时各取当前所在界的日期继续推进。本世界的进度在两界均独立保留。", keywords: ["双界", "时间独立", "多世界", "时间线", "穿梭"] },
+                { id: "dw2", category: "规则", title: "意识穿越", content: "你并非肉身穿越，而是意识在睡梦或契机下沉入另一界。现实中的身体仍在原处（可能正在睡觉或发呆），异界的身体则是你在该界的修士之身。两界记忆互通，但遭遇与因果各自结算。", keywords: ["意识穿越", "两界", "记忆互通", "肉身", "契机"] },
+                { id: "dw3", category: "地点", title: "青霄宗", content: "异界一座中等宗门，山门临云海，弟子分记名、外门、内门三等。记名弟子做些洒扫、药园杂役，偶有长老讲法方可旁听。宗门规矩森严，贡献点决定资源多寡。", keywords: ["青霄宗", "宗门", "记名弟子", "贡献点", "讲法"] },
+                { id: "dw4", category: "冲突", title: "两界拉扯", content: "最难的从不是某一界的危机，而是两边同时催着你。现实的房租截止日，与异界某桩秘境机缘的窗口，可能在同一周撞上。你必须在两边都活着、都往前。", keywords: ["拉扯", "截止", "机缘", "取舍", "压力"] }
+            ]
+        },
+        system_prompt: [
+            "你是《双界 · 现实与异界》世界观下的 AI 文字游戏叙事主持人。风格定位：现代都市 + 东方修真双线，意识穿越。",
+            "",
+            "世界观硬约束：",
+            "1. 双界设定：现实（公元2003年，公历）与异界（大周天历3024年，农历）是两条独立时间线，时间各自流淌、互不折算。",
+            "2. 切换由抉择或事件触发：当剧情需要主角意识在现实与异界间切换时，在 state_changes 返回 switch_timeline:\"<目标界>\"（如 \"异界\" 或 \"现实\"），叙事须交代意识穿越的过渡。",
+            "3. 时间推进：每条时间线按各自历法推进，绝不可把一界的日期折算到另一界。现实用 year/month/date（公历），异界用 year/month/date（农历）。",
+            "4. 叙事风格：双线并置、对照成趣。现实写社畜的疲惫与琐碎，异界写修行的清冷与造化。诚实给出两界各自的压力与机遇。",
+            "5. 输出必须是 JSON 格式，包含 narrative、choices、state 等字段。"
+        ].join("\n"),
+        opening_narrative: [
+            "公元 2003 年，江城。",
+            "",
+            "你被闹钟拽醒时，窗外还是灰蒙蒙的。出租屋的墙皮有点翘，楼下早餐摊的油烟味顺着门缝钻进来。又是赶报表的一天。",
+            "",
+            "但你知道，今天和往常不太一样——昨夜你在梦里登上了青霄宗的后山，山雾里有个人影说：『明日辰时，引气入体之机将至。』",
+            "",
+            "现实与异界，都在这新的一天里等着你。",
+            "",
+            "你先从哪一边开始？"
+        ].join("\n"),
+        initial_choices: [
+            { text: "先应付现实：起床、洗漱、赶地铁上班", hint: "现实线推进，处理房租与工作的日常压力" },
+            { text: "闭目凝神，让意识沉入异界后山", hint: "异界线推进，抓住引气入体的机缘" },
+            { text: "在出租屋里发会儿呆，整理两界的事", hint: "暂不切换，盘算两边的截止与机缘" }
         ],
         behavior_records: [],
         style_ref: "none",

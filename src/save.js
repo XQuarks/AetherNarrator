@@ -12,9 +12,10 @@ import {
     checkDeathBanner, renderSaveList, renderWorldList
 } from "./render.js";
 import { normalizeSimulationState } from "./simulation.js";
-import { deepClone, defaultInitialState } from "./utils.js";
+import { deepClone, defaultInitialState, resolveOpeningTokens, detectTimeConflict, formatConflictMessage } from "./utils.js";
 import { invalidateSystemPromptCache, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
-import { formatWorldTime } from "./theme.js";
+import { formatWorldTime, stepOf, ensureTimelineState, getTimeConfig } from "./theme.js";
+import { normalizeCurrentDate } from "./calendar.js";
 import { LATEST_SAVE_SCHEMA_VERSION } from "./migrations.js";
 import { invalidateAllLoreAnn } from "./ann-index.js";
 
@@ -51,6 +52,10 @@ export async function startGame(opts = {}) {
         S.gameState = normalizeSimulationState(deepClone(defaultInitialState()));
         S.gameState.name = S.currentWorld.hero ? "主角" : "玩家";
     }
+    // 方案 B：current_date 按世界时间模式规范化（旧档 dated 回推为原生年/月/日）
+    S.gameState.current_date = normalizeCurrentDate(S.gameState.current_date, getTimeConfig().timeConfig);
+    // Phase 2：多世界时初始化/补齐全线 current_date（非多世界为 no-op）
+    ensureTimelineState(S.gameState, getTimeConfig());
 
     // ★ B7：从世界出厂默认深拷贝知识库为当前存档副本（后续编辑只改副本）
     S.activeLoreKB = S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null;
@@ -69,16 +74,18 @@ export async function startGame(opts = {}) {
     renderChoices([]);
     updateInputState(); // ★ P2.2.13: 重开新周目时复位输入（死亡态禁用的输入框在 gameState 重置为 is_alive:true 后重新启用）
 
-    // 开场白（UI 展示，不推入 chatHistory）
-    const openingText = S.currentWorld.opening_narrative
-        ? S.currentWorld.opening_narrative
+    // 开场白（UI 展示，不推入 chatHistory）；S5-3：含占位符时先展开为开局起点日期
+    const rawOpening = S.currentWorld.opening_narrative || "";
+    const openingText = rawOpening
+        ? resolveOpeningTokens(rawOpening, getTimeConfig().timeConfig, S.gameState.current_date)
         : `你进入了「${S.currentWorld.name}」。\n\n${S.currentWorld.desc}\n\n旅程即将开始，请做出你的第一个行动。`;
     S.conversationHistory.push({
         player: "",
         narrative: openingText,
         retrieved: [],
         period: S.gameState.current_date.period,
-        day: S.gameState.current_date.day,
+        day: stepOf(S.gameState.current_date),
+        tcd: deepClone(S.gameState.current_date),
         key_facts: []
     });
     // ★ P1: 开场白已注入 system prompt（固定，命中缓存），不再作为首条 chatHistory 消息
@@ -111,6 +118,9 @@ export function prepareSessionFromSave(save) {
     S.currentSession.worldId = save.worldId;
     invalidateSystemPromptCache();
     if (save.state) S.gameState = normalizeSimulationState(deepClone(save.state));
+    if (S.gameState) S.gameState.current_date = normalizeCurrentDate(S.gameState.current_date, getTimeConfig().timeConfig);
+    // Phase 2：多世界时恢复/补齐全线 current_date（非多世界为 no-op）
+    ensureTimelineState(S.gameState, getTimeConfig());
     // ★ B7：恢复存档独立知识库（若存档无副本则从 world 出厂默认深拷贝，兼容老存档）
     S.activeLoreKB = (save.lore_kb) ? deepClone(save.lore_kb) : (S.currentWorld && S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null);
     S.activeBehaviorRecords = deepClone(save.behavior_records || []);
@@ -147,6 +157,10 @@ export function loadSave(saveId) {
 
     // ★ 从历史恢复最后一条有选项的记录
     restoreLastChoices();
+
+    // S5-4：进游戏时若开场白/系统提示时间与世界起始时间冲突，弹不阻塞提示（避免"改了起点却进游戏才发现开场白冲突"）
+    const tc = detectTimeConflict(S.currentWorld);
+    if (tc.conflict) showToast("⚠ 时间可能冲突：" + formatConflictMessage(tc), "warn", 4000);
 }
 
 export function deleteSave(saveId) {

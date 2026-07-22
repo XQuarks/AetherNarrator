@@ -63,6 +63,23 @@ export async function idbSet(key, value) {
     }
 }
 
+// 批量写入：在单个事务内写入多个键值对（saveState 用，减少每回合写盘事务数）
+export async function idbSetMulti(entries) {
+    try {
+        const db = await openDB();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, "readwrite");
+            for (const [key, value] of entries) {
+                tx.objectStore(STORE_NAME).put(value, key);
+            }
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) {
+        console.warn("idbSetMulti 失败（可能空间不足）:", e.message);
+    }
+}
+
 // 删除：内部吞错，调用方可不等待
 export async function idbDel(key) {
     try {

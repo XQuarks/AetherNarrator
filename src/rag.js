@@ -6,7 +6,7 @@ import { MEMORY_TYPES } from "./store.js";
 
 import { cosineSimilarity, isFuzzyFact, normFact, runPool } from "./utils.js";
 import { getEmbedConcurrency } from "./providers.js";
-import { getPeriodLabel } from "./theme.js";
+import { formatTimeLabel, getTimeConfig } from "./theme.js";
 import { buildTurnUserMessage, isLoreFullInSystem } from "./prompt.js";
 import { showToast } from "./render.js";
 import { getLoreAnnIndex, embeddingRetrieveBruteforce } from "./ann-index.js";
@@ -532,7 +532,7 @@ export function addBehaviorRecords(facts) {
     const list = S.activeBehaviorRecords;
     const gs = S.gameState;
     const timeLabel = gs && gs.current_date
-        ? `第${gs.current_date.day}天 · ${getPeriodLabel(gs.current_date.period)}`
+        ? formatTimeLabel(gs.current_date, getTimeConfig().timeConfig)
         : "";
     const locLabel = (gs && gs.current_location) ? gs.current_location : "";
     for (const raw of facts) {

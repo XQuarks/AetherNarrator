@@ -4,19 +4,21 @@
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
 import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
-import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime } from "./theme.js";
+import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
+import { ensureCurrentDate, compareCalendar, advanceCalendarTime } from "./calendar.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
 import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
 import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded } from "./render.js";
-import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules } from "./worldview.js";
+import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules, recordWorldviewNag } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { runWorldCritic, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js"; // ★ Phase 3：审稿人
-import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
+import { advanceWorldTime, collectDueDeadlines } from "./time-engine.js";
+import { activeTimelineKey, getTimelineTriggered, recordTrigger, resetTriggers, createBranch } from "./triggers.js";
 import { applySimulationChanges, createRestEvent, normalizeSimulationState } from "./simulation.js";
 import { acquireTurn, isSessionContextCurrent, releaseTurn } from "./turn-lifecycle.js";
 
@@ -55,7 +57,8 @@ export function exportStory() {
     S.conversationHistory.forEach((entry, i) => {
         if (entry.isWarning) return;
         if (entry.player) {
-            text += "【玩家 · 第 " + entry.day + " 天 · " + (entry.period || "") + "】\n";
+            const timeStr = entry.tcd ? formatTimeLabel(entry.tcd, getTimeConfig().timeConfig) : ("第 " + (entry.day || 1) + " 天");
+            text += "【玩家 · " + timeStr + "】\n";
             text += "> " + entry.player + "\n\n";
         }
         text += entry.narrative + "\n\n";
@@ -280,22 +283,63 @@ export function restToNextDay() {
     const tc = getTimeConfig();
     const firstPeriod = tc.periods[0];
     if (!firstPeriod) return;
-    const nextDay = S.gameState.current_date.day + 1;
-    const from = deepClone(S.gameState.current_date);
-    const to = { day: nextDay, period: firstPeriod };
+    const cur = S.gameState.current_date;
+    const from = deepClone(cur);
+    // 下一天：dated 模式 +1 天；period/day 模式 day+1；none 模式仅 step+1。
+    // advanceCalendarTime 统一按模式推进，并同步 bump step（避免 period/day 模式 step/day 错位）。
+    const mode = tc.timeConfig.calendar_mode;
+    const to = advanceCalendarTime(cur, { days: 1 }, mode, tc.periods, tc.timeConfig.custom_calendar);
+    to.period = firstPeriod;
     applyStateChanges({ current_date: to, completed_events: [createRestEvent(from, to, S.gameState.current_location)] });
     S.conversationHistory.push({
         player: "（休息到次日清晨）",
         narrative: "你合上眼，再睁开时，天已破晓，新的一天开始了。",
         retrieved: [],
         period: firstPeriod,
-        day: nextDay,
+        day: stepOf(to),
+        tcd: deepClone(to),
         key_facts: []
     });
     renderLog();
     saveState();
     createOrUpdateSave();
     showToast("已休息到次日清晨", "success");
+}
+
+// Phase 2/3 多世界/分支：手动切换时间线或分支（顶栏切换控件调用；S4 切回主线/其它分支）
+export function switchTimeline(id) {
+    if (!S.gameState || !S.currentWorld) return;
+    const tc = getTimeConfig();
+    // 优先匹配分支（S4：单世界也能分支，不受 multiverse 限制）
+    if (S.gameState.branches && S.gameState.branches[id]) {
+        S.gameState.active_timeline = id;
+        S.gameState.current_date = deepClone(S.gameState.branches[id].current_date);
+        invalidateSystemPromptCache();
+        updateGameDayInfo();
+        if (typeof renderStatusPanel === "function") renderStatusPanel(S.currentStatusTab);
+        saveState();
+        createOrUpdateSave();
+        showToast("已切换到分支：" + (S.gameState.branches[id].label || id), "success");
+        return;
+    }
+    // 多世界时间线（Phase 2）
+    if (tc.timeConfig.mode !== "multiverse" || !tc.timelines || !tc.timelines[id]) {
+        showToast("当前世界不支持时间线切换", "warn");
+        return;
+    }
+    if (!S.gameState.timelines || !S.gameState.timelines[id]) {
+        showToast("时间线不存在：" + id, "error");
+        return;
+    }
+    // 当前 active 线的进度已在每次 applyStateChanges 时镜像同步，直接切换即可（互不丢进度）
+    S.gameState.active_timeline = id;
+    S.gameState.current_date = deepClone(S.gameState.timelines[id].current_date);
+    invalidateSystemPromptCache();
+    updateGameDayInfo();
+    if (typeof renderStatusPanel === "function") renderStatusPanel(S.currentStatusTab);
+    saveState();
+    createOrUpdateSave();
+    showToast("已切换到时间线：" + (tc.timelines[id].name || id), "success");
 }
 
 
@@ -336,7 +380,7 @@ export function applyStateChanges(changes) {
         applyTagOp(s.present_npcs, changes.present_npcs);
         applyTagOp(s.revealed_locations, changes.revealed_locations);
         invalidateSystemPromptCache();
-        saveState();
+        // ★ P0 性能：不再在此存盘——持久化统一由调用方（processTurn / 手动时间穿越）在回合末经 createOrUpdateSave() 完成，避免每回合重复写盘。
     }
 
     if (changes.current_location) {
@@ -451,28 +495,59 @@ export function applyStateChanges(changes) {
         s.death_reason = changes.death_reason || "未知原因";
     }
 
-    // E1–E10：所有时间形态统一转换为绝对分钟，显示字段从绝对分钟反推。
+    // E1–E10：所有时间形态统一处理（方案 B：模式分派，无隐藏序数）
     const tc = getTimeConfig();
+    const timeCtx = { ...tc.timeConfig, periods: tc.periods };
     const timeChange = changes.current_date
         ? { ...changes.current_date }
         : changes.period
             ? { period: changes.period }
             : null;
     if (timeChange) {
-        const result = advanceWorldTime(s.current_date, timeChange, tc.periods || DEFAULT_PERIOD_ORDER);
+        const result = advanceWorldTime(s.current_date, timeChange, timeCtx);
         s.current_date = result.currentDate;
         if (result.rejected) console.warn("AI 试图回退时间，已忽略", timeChange);
     } else {
-        s.current_date = hydrateWorldTime(s.current_date, tc.periods || DEFAULT_PERIOD_ORDER);
+        // 无时间变更：保持原状，仅规范化形状（补齐 step 等）
+        s.current_date = ensureCurrentDate(s.current_date, tc.timeConfig);
+    }
+
+    // Phase 2/3：把当前 active 时间线/分支的 current_date 写回（防止切换回去丢失进度）
+    if (s.active_timeline) {
+        if (s.timelines && s.timelines[s.active_timeline]) {
+            s.timelines[s.active_timeline].current_date = deepClone(s.current_date);
+        } else if (s.branches && s.branches[s.active_timeline]) {
+            s.branches[s.active_timeline].current_date = deepClone(s.current_date);
+        }
+    }
+
+    // Phase 2 多世界：切换时间线（事件/选项可带 switch_timeline）
+    if (changes.switch_timeline && tc.timeConfig.mode === "multiverse" && s.timelines && s.timelines[changes.switch_timeline]) {
+        s.active_timeline = changes.switch_timeline;
+        s.current_date = deepClone(s.timelines[changes.switch_timeline].current_date);
+        invalidateSystemPromptCache();
+    }
+
+    // Phase 3 · S3-2：时间穿越 reset_triggers（S3 重置回放）—— 回滚当前线触发记录
+    if (timeChange && timeChange.reset_triggers) {
+        resetTriggers(s, timeChange.reset_triggers, activeTimelineKey(s));
+    }
+    // Phase 3 · S3-2：时间穿越 branch（S4 分支隔离）—— 新建分支时间线，原未来保留
+    if (timeChange && timeChange.branch) {
+        createBranch(s, timeChange.branch_label, s.current_date, tc);
     }
 
     // E8/D1：世界级 deadline 到点转成一次性结构化事件，并写入高重要记忆。
-    if (!Array.isArray(s.triggered_deadlines)) s.triggered_deadlines = [];
+    // Phase 3：触发记录按当前 active 时间线/分支隔离（S1 不重触发 / S2 可重复）。
+    const tKey = activeTimelineKey(s);
+    const rec = getTimelineTriggered(s, tKey);
     const dueDeadlines = collectDueDeadlines(
         s.current_date,
         tc.timeConfig?.deadlines || [],
-        tc.periods || DEFAULT_PERIOD_ORDER,
-        new Set(s.triggered_deadlines)
+        timeCtx,
+        rec.ids,
+        rec.state,
+        stepOf(s.current_date)
     );
     const simulationChanges = deepClone(changes);
     if (dueDeadlines.length) {
@@ -486,14 +561,14 @@ export function applyStateChanges(changes) {
             }))
         ];
         for (const deadline of dueDeadlines) {
-            s.triggered_deadlines.push(deadline.id);
+            recordTrigger(s, deadline.id, stepOf(s.current_date), tKey);
             addBehaviorRecords([{ text: `世界时限「${deadline.title}」已到，后果需要在剧情中体现。`, importance: 5, type: "event" }]);
         }
     }
     Object.assign(s, applySimulationChanges(s, simulationChanges, s.current_date));
     checkGoalDeadlines();
 
-    saveState();
+    // ★ P0 性能：不再在此存盘——持久化统一由 processTurn 末尾的 createOrUpdateSave() 完成，避免每回合重复写盘。
     updateGameDayInfo();
     } catch (e) {
         S.gameState = backup; // 回滚到变更前
@@ -505,16 +580,31 @@ export function checkGoalDeadlines() {
     if (!S.gameState || !S.gameState.goals) return;
     const st = S.gameState;
     const tc = getTimeConfig();
-    const periodOrder = (tc && tc.periods) || DEFAULT_PERIOD_ORDER;
-    const currentTime = hydrateWorldTime(st.current_date, periodOrder);
+    const mode = tc.timeConfig.calendar_mode;
+    const custom = tc.timeConfig.custom_calendar;
+    const cur = st.current_date;
     for (const g of st.goals) {
         if (g.status !== "active" || !g.deadline) continue;
-        const deadlineTime = hydrateWorldTime({ day: g.deadline.day, period: g.deadline.period }, periodOrder);
-        if (currentTime.absolute_minutes > deadlineTime.absolute_minutes) {
-            g.status = "failed";   // 严格大于：恰好抵达 deadline 时段仍可完成
-            g.failed_at = { day: st.current_date.day, period: st.current_date.period };
-            // #6 完善：把失败后果记入关键事实，下一轮 AI 会在叙事中体现（而非仅改状态）
-            const dlText = "第" + g.deadline.day + "天" + (g.deadline.period || "");
+        const dl = g.deadline;
+        let overdue;
+        if (mode === "gregorian" || mode === "lunar" || mode === "custom_calendar") {
+            const start = tc.timeConfig.calendar_start || { year: 1, month: 1, date: 1 };
+            const curDate = { year: cur.year, month: cur.month, date: cur.date };
+            const target = {
+                year: dl.year != null ? dl.year : start.year,
+                month: dl.month != null ? dl.month : 1,
+                date: dl.date != null ? dl.date : 1
+            };
+            overdue = compareCalendar(curDate, target, mode, custom) > 0; // 严格大于：恰好抵达 deadline 时段仍可完成
+        } else {
+            const curStep = stepOf(cur);
+            const dlStep = dl.day != null ? dl.day : 0;
+            overdue = curStep > dlStep;
+        }
+        if (overdue) {
+            g.status = "failed";
+            g.failed_at = { ...cur };   // 原生快照，显示层用 formatTimeLabel 渲染
+            const dlText = formatDeadlineLabel(dl, tc.timeConfig);
             addBehaviorRecords(["目标「" + (g.name || g.goal_id) + "」已失败（未在" + dlText + "前达成），其后果需在剧情中体现。"]);
         }
     }
@@ -626,7 +716,8 @@ export async function processTurn(input) {
             narrative: "（系统拦截）" + injectionCheck.reason,
             retrieved: [],
             period: S.gameState.current_date.period,
-            day: S.gameState.current_date.day,
+            day: stepOf(S.gameState.current_date),
+            tcd: deepClone(S.gameState.current_date),
             key_facts: [],
             isWarning: true
         };
@@ -671,7 +762,8 @@ export async function processTurn(input) {
                 narrative: resp.narrative || "（无内容）",
                 retrieved: retrieved.map(s => s.title),
                 period: S.gameState.current_date.period,
-                day: S.gameState.current_date.day,
+                day: stepOf(S.gameState.current_date),
+                tcd: deepClone(S.gameState.current_date),
                 key_facts: [],
                 isWarning: true
             };
@@ -713,7 +805,12 @@ export async function processTurn(input) {
             if (localViolations.length) {
                 const hit = localViolations[0].matched;
                 if (hit) {
-                    showToast("⚠️ 叙事似乎偏离了世界观（出现「" + hit + "」），若非有意为之可重述或忽略。", "warn", 4000);
+                    // ★ 「3 次后静默」：同一概念累计提示满阈值则不再弹（仍照常检测，不影响剧情）
+                    const nag = recordWorldviewNag("a2:" + hit, S.gameState.worldviewNagCounts);
+                    if (nag.show) {
+                        S.gameState.worldviewNagCounts = nag.counts;
+                        showToast("⚠️ 叙事似乎偏离了世界观（出现「" + hit + "」），若非有意为之可重述或忽略。", "warn", 4000);
+                    }
                 }
             }
 
@@ -741,7 +838,12 @@ export async function processTurn(input) {
                     const msg = result.severity === "hard"
                         ? "⚠️ AI 裁判：叙事似乎引入了世界观之外的内容（如：" + v + "）。若非有意为之，可重述或忽略。"
                         : "💡 AI 提示：以下内容可能与世界观不太契合（" + v + "），供参考。";
-                    showToast(msg, "warn", 5000);
+                    // ★ 「3 次后静默」：同一违和描述累计提示满阈值则不再弹（仍照常检测）
+                    const nag = recordWorldviewNag("a7:" + (result.violations[0] || ""), S.gameState.worldviewNagCounts);
+                    if (nag.show) {
+                        S.gameState.worldviewNagCounts = nag.counts;
+                        showToast(msg, "warn", 5000);
+                    }
                 }
             }).catch(() => { /* 裁判异常不影响主流程 */ });
 
@@ -750,7 +852,8 @@ export async function processTurn(input) {
                 narrative: resp.narrative || "（无叙事）",
                 retrieved: retrieved.map(s => s.title),
                 period: S.gameState.current_date.period,
-                day: S.gameState.current_date.day,
+                day: stepOf(S.gameState.current_date),
+                tcd: deepClone(S.gameState.current_date),
                 key_facts: resp.key_facts || []
             };
             S.conversationHistory.push(entry);
@@ -781,7 +884,7 @@ export async function processTurn(input) {
             if (S.conversationHistory.length > 0) {
                 S.conversationHistory[S.conversationHistory.length - 1].choices = finalChoices;
             }
-            saveState();
+            // ★ P0 性能：此处不再单独 saveState——下方 createOrUpdateSave() 内部已统一持久化（含本回合最终选项），避免重复写盘。
         }
 
         createOrUpdateSave();
@@ -846,7 +949,8 @@ export async function processTurn(input) {
             narrative: "请求失败：" + e.message,
             retrieved: [],
             period: S.gameState.current_date.period,
-            day: S.gameState.current_date.day,
+            day: stepOf(S.gameState.current_date),
+            tcd: deepClone(S.gameState.current_date),
             key_facts: [],
             isWarning: true
         };

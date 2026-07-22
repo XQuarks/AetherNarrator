@@ -1,3 +1,5 @@
+import { normalizeTriggeredEvents } from "./triggers.js";
+
 function clone(value) {
     if (value == null) return value;
     if (typeof structuredClone === "function") return structuredClone(value);
@@ -42,6 +44,7 @@ function normalizeNpcActivity(value) {
 
 export function normalizeSimulationState(state) {
     const out = clone(state && typeof state === "object" ? state : {});
+    normalizeTriggeredEvents(out); // Phase 3：保证触发记录结构存在且向后兼容
     const activeSource = Array.isArray(out.active_events)
         ? out.active_events
         : out.active_event

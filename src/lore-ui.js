@@ -5,7 +5,7 @@
 // 不反向依赖 game.js，避免循环引用。
 // ============================================================
 import { S, LINK_RELATION_LABELS, DEFAULT_TIME_CONFIG, normalizeTimeConfig } from "./store.js";
-import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets } from "./utils.js";
+import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets, detectTimeConflict, formatConflictMessage } from "./utils.js";
 import { showModal, closeModal, showToast, getSelectedStyleRef } from "./render.js";
 import { getWorldLoreKB, ensureLoreEmbeddings } from "./rag.js";
 import { createOrUpdateSave, prepareSessionFromSave } from "./save.js";
@@ -13,7 +13,7 @@ import { saveWorlds } from "./storage.js";
 import { isEnhancementContextCurrent } from "./worldview.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { markPromotedRecords } from "./promotion.js"; // ★ B6：晋升后标记原记忆 promoted
-import { callLoreRevisionLLM, extractLoreFromSource } from "./llm.js";
+import { callLoreRevisionLLM, extractLoreFromSource, callRegenerateOpeningLLM } from "./llm.js";
 import { invalidateSystemPromptCache } from "./prompt.js";
 import { invalidateLoreAnn } from "./ann-index.js";
 import { renderLoreMarkdown } from "./markdown.js"; // ★ 步骤 B：Obsidian 风 markdown 渲染封装
@@ -107,17 +107,39 @@ function renderTimeConfigSection(mode) {
         .map(([v, t]) => `<option value="${v}"${cfg.calendar_mode === v ? " selected" : ""}>${t}</option>`).join("");
     const clkOpts = Object.entries(CLOCK_LABELS)
         .map(([v, t]) => `<option value="${v}"${cfg.clock_mode === v ? " selected" : ""}>${t}</option>`).join("");
+    // S5-1：起始日期输入框（gregorian/lunar/custom_calendar 显示；day/none 隐藏）
+    const TC_DATED_MODES = ["gregorian", "lunar", "custom_calendar"];
+    const showStart = TC_DATED_MODES.includes(cfg.calendar_mode);
+    const cs = cfg.calendar_start || {};
+    const startRow = showStart ? `
+            <div class="form-group"><label>起始日期（年 / 月 / 日）</label>
+                <div class="time-cfg-start-row">
+                    <input id="tc_start_year" class="tc-num" type="number" min="1" max="9999" value="${cs.year != null ? cs.year : ""}" placeholder="年" data-action="timeConfigChanged" data-event="input">
+                    <span class="tc-sep">/</span>
+                    <input id="tc_start_month" class="tc-num" type="number" min="1" max="12" value="${cs.month != null ? cs.month : ""}" placeholder="月" data-action="timeConfigChanged" data-event="input">
+                    <span class="tc-sep">/</span>
+                    <input id="tc_start_date" class="tc-num" type="number" min="1" max="31" value="${cs.date != null ? cs.date : ""}" placeholder="日" data-action="timeConfigChanged" data-event="input">
+                </div>
+                <span class="time-cfg-start-hint">仅 dated 历法生效；留空则开局回退默认起点</span>
+            </div>` : "";
+    // S5-1：multiverse 各时间线起始日期走代码配置（见 docs/21），本基础档不提供 UI
+    const multiverseHint = cfg.mode === "multiverse" ? `
+            <div class="form-group time-cfg-multiverse"><span class="time-cfg-start-hint">🌐 本世界为双界穿梭（multiverse）。各时间线独立起始日期请在代码中配置（见 <code>docs/21</code> 进阶待办），本基础档暂不提供 UI。</span></div>` : "";
     return `<div class="time-cfg-card">
         <div class="time-cfg-head">🌐 世界时间体系 <span class="time-cfg-ai">⚙️ AI 已按世界观自动设定，可在此微调</span></div>
         <div class="time-cfg-grid">
-            <div class="form-group"><label>纪元 / 年份</label><input id="tc_era" maxlength="40" value="${escapeHtml(cfg.era_label || "")}" placeholder="例如：大清乾隆年间"></div>
-            <div class="form-group"><label>历法</label><select id="tc_calendar">${calOpts}</select></div>
+            <div class="form-group"><label>纪元 / 年份</label><input id="tc_era" maxlength="40" value="${escapeHtml(cfg.era_label || "")}" placeholder="例如：大清乾隆年间" data-action="timeConfigChanged" data-event="input"></div>
+            <div class="form-group"><label>历法</label><select id="tc_calendar" data-action="timeConfigChanged" data-event="change">${calOpts}</select></div>
             <div class="form-group"><label>时钟</label><select id="tc_clock">${clkOpts}</select></div>
-            <div class="form-group"><label>季节</label><input id="tc_season" maxlength="10" value="${escapeHtml(cfg.season || "")}" placeholder="例如：仲春"></div>
+            <div class="form-group"><label>季节</label><input id="tc_season" maxlength="10" value="${escapeHtml(cfg.season || "")}" placeholder="例如：仲春" data-action="timeConfigChanged" data-event="input"></div>
             <div class="form-group"><label>当前天气</label><input id="tc_weather" maxlength="20" value="${escapeHtml(cfg.weather || "")}" placeholder="例如：细雨"></div>
             <div class="form-group time-cfg-show"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="tc_show" style="width:auto;" ${cfg.show !== false ? "checked" : ""}><span>在界面显示世界时间</span></label></div>
+            ${startRow}
+            ${multiverseHint}
         </div>
         <p class="time-cfg-hint">此设定仅在创建本世界时可调整；进入游戏后将锁定，不可实时修改。</p>
+        <div id="timeConflictBadge" class="time-conflict-badge" style="display:none;"></div>
+        ${renderOpeningFixActions()}
     </div>`;
 }
 
@@ -211,20 +233,128 @@ function renderBacklinksPanel(note, list, idx) {
         <div class="lore-back-list">${backHtml.length ? backHtml.join("") : `<div class="lore-back-empty">暂无其他条目链向此处</div>`}</div>`;
 }
 
+// S5-1：从 DOM 读取"起始日期"三输入并写回 tc.calendar_start（仅 dated 历法生效；其余模式清空）。
+// tc.calendar_mode 必须先已设置。输入不完整则置 null（开局由 ensureCurrentDate 兜底）。
+function readCalendarStartFromDOM(tc) {
+    const TC_DATED_MODES = ["gregorian", "lunar", "custom_calendar"];
+    if (!TC_DATED_MODES.includes(tc.calendar_mode)) { tc.calendar_start = null; return; }
+    const yEl = document.getElementById("tc_start_year");
+    const moEl = document.getElementById("tc_start_month");
+    const dEl = document.getElementById("tc_start_date");
+    if (!yEl || !moEl || !dEl) { tc.calendar_start = null; return; }
+    const y = parseInt(yEl.value, 10);
+    const mo = parseInt(moEl.value, 10);
+    const d = parseInt(dEl.value, 10);
+    if (Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(d) && mo >= 1 && d >= 1) {
+        tc.calendar_start = { year: y, month: Math.min(12, Math.max(1, mo)), date: Math.max(1, d) };
+    } else {
+        tc.calendar_start = null;
+    }
+}
+
 // 切视图前把时间表单值写回 schema，避免 InnerHTML 重渲染丢失编辑
-function syncTimeConfigFromDOM() {
+export function syncTimeConfigFromDOM() {
     if (!S._loreEditingWorldDefault) return;
     const era = document.getElementById("tc_era");
     if (!era) return;
     const tc = (S.currentWorld && S.currentWorld.schema && S.currentWorld.schema.time_config) || {};
     tc.era_label = era.value.trim().slice(0, 40);
     tc.calendar_mode = document.getElementById("tc_calendar")?.value || "day";
+    readCalendarStartFromDOM(tc);
     tc.clock_mode = document.getElementById("tc_clock")?.value || "period";
     tc.season = document.getElementById("tc_season")?.value.trim().slice(0, 10);
     tc.weather = document.getElementById("tc_weather")?.value.trim().slice(0, 20);
     tc.show = !!document.getElementById("tc_show")?.checked;
     if (!S.currentWorld.schema) S.currentWorld.schema = {};
     S.currentWorld.schema.time_config = tc;
+}
+
+// S5-4：编辑卡时间冲突徽章实时刷新（只读 schema，不重渲染卡片，避免输入框丢焦点）
+// 由 app.js 的 data-action="timeConfigChanged" 在改起始日期/历法/纪元/季节时调用。
+export function updateTimeConflictBadge() {
+    const el = document.getElementById("timeConflictBadge");
+    if (!el) return;
+    const actions = document.getElementById("openingFixActions");
+    if (!S._loreEditingWorldDefault) {
+        el.style.display = "none"; el.innerHTML = "";
+        if (actions) actions.classList.remove("conflict");
+        return;
+    }
+    const res = detectTimeConflict(S.currentWorld);
+    if (!res.conflict) {
+        el.style.display = "none"; el.innerHTML = "";
+        if (actions) actions.classList.remove("conflict");
+        return;
+    }
+    el.style.display = "";
+    el.innerHTML = `⚠ 时间可能冲突：${escapeHtml(formatConflictMessage(res))}`;
+    if (actions) actions.classList.add("conflict"); // S5-4'：冲突时高亮修复按钮组
+}
+
+// S5-4'：开场白时间修复按钮组（仅 world 模式卡片；当前世界已有开场白才可点）
+function renderOpeningFixActions() {
+    const hasOpening = !!(S.currentWorld && S.currentWorld.opening_narrative && S.currentWorld.opening_narrative.trim());
+    const disabled = hasOpening ? "" : "disabled";
+    const tip = hasOpening ? "" : "（当前世界尚未生成开场白）";
+    return `<div id="openingFixActions" class="opening-fix-actions">
+        <div class="opening-fix-title">开场白时间修复 <span class="opening-fix-tip">${escapeHtml(tip)}</span></div>
+        <div class="opening-fix-btns">
+            <button class="btn-secondary-sm" data-action="regenerateOpening" ${disabled}>🔄 重新生成开场白</button>
+            <button class="btn-secondary-sm" data-action="convertOpeningToPlaceholders" ${disabled}>🏷 改成占位符版</button>
+        </div>
+        <div class="opening-fix-note">消耗一次 LLM API 调用；生成后预览 diff，确认才写回。</div>
+    </div>`;
+}
+
+// S5-4' + S5-7：开场白时间冲突一键修复（regenerate | toPlaceholders）
+export async function regenerateOpening(mode) {
+    if (!S.currentWorld) { showToast("未找到当前世界", "warn"); return; }
+    const oldOpening = S.currentWorld.opening_narrative;
+    if (!oldOpening || !oldOpening.trim()) { showToast("当前世界没有可修复的开场白（可能尚未生成）", "warn"); return; }
+    const newTimeConfig = (getWorldSchema(S.currentWorld) || {}).time_config;
+    showToast("AI 正在生成修复后的开场白…", "info", 3000);
+    try {
+        const res = await callRegenerateOpeningLLM(S.currentWorld, newTimeConfig, oldOpening, mode);
+        S._openingFixBuffer = { oldOpening, newOpening: res.newOpening, mode };
+        renderOpeningFixModal();
+        showModal("openingFixModal");
+    } catch (e) {
+        console.warn("S5-4' 开场白生成失败：", e && e.message);
+        showToast("生成失败：" + (e && e.message || "未知错误"), "error");
+    }
+}
+
+// 渲染开场白修复预览模态（旧 vs 新 diff）
+export function renderOpeningFixModal() {
+    const el = document.getElementById("openingFixBody");
+    if (!el || !S._openingFixBuffer) return;
+    const b = S._openingFixBuffer;
+    const modeLabel = b.mode === "toPlaceholders" ? "改成占位符版" : "重新生成开场白";
+    el.innerHTML = `
+        <p class="muted">修复方式：<b>${escapeHtml(modeLabel)}</b>（消耗一次 LLM API 调用）</p>
+        <div class="opening-diff">
+            <div class="opening-diff-col"><div class="opening-diff-h">原开场白</div><pre class="opening-diff-old">${escapeHtml(b.oldOpening)}</pre></div>
+            <div class="opening-diff-col"><div class="opening-diff-h">新开场白</div><pre class="opening-diff-new">${escapeHtml(b.newOpening)}</pre></div>
+        </div>`;
+}
+
+// 确认写回：把新开场白写入世界，绝不静默覆盖
+export function applyOpeningFix() {
+    if (!S._openingFixBuffer || !S.currentWorld) { closeModal("openingFixModal"); return; }
+    S.currentWorld.opening_narrative = S._openingFixBuffer.newOpening;
+    S._openingFixBuffer = null;
+    createOrUpdateSave();
+    closeModal("openingFixModal");
+    updateTimeConflictBadge();
+    invalidateSystemPromptCache();
+    showToast("开场白已更新！", "success");
+}
+
+// 丢弃修复建议
+export function rejectOpeningFix() {
+    S._openingFixBuffer = null;
+    closeModal("openingFixModal");
+    showToast("已丢弃本次开场白修复建议", "success");
 }
 
 // ★ 知识库视图（三栏）
@@ -340,6 +470,7 @@ function renderLoreReviewBody() {
     } else if (S._loreView === "graph") {
         setTimeout(mountGraphNow, 50);
     }
+    updateTimeConflictBadge(); // S5-4：编辑卡首次渲染即展示既有冲突徽章
 }
 
 let _loreBodyDelegated = false;
@@ -514,6 +645,7 @@ export async function saveLoreReview() {
         const tc = (S.currentWorld.schema && S.currentWorld.schema.time_config) || {};
         tc.era_label = (document.getElementById("tc_era")?.value || "").trim().slice(0, 40);
         tc.calendar_mode = document.getElementById("tc_calendar")?.value || "day";
+        readCalendarStartFromDOM(tc);
         tc.clock_mode = document.getElementById("tc_clock")?.value || "period";
         tc.season = (document.getElementById("tc_season")?.value || "").trim().slice(0, 10);
         tc.weather = (document.getElementById("tc_weather")?.value || "").trim().slice(0, 20);
@@ -741,6 +873,38 @@ function mountGraphNow() {
         .nodeColor("color")
         .nodeVal(d => 1 + Math.min(8, d.degree))
         .nodeRelSize(4)
+        // 默认在节点旁绘制常驻标题（不再仅悬停才显示）
+        .nodeCanvasObject((node, ctx, globalScale) => {
+            const val = 1 + Math.min(8, node.degree || 0);
+            const r = Math.sqrt(val) * 4; // 与 nodeRelSize(4) 一致
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+            ctx.fillStyle = node.color;
+            ctx.fill();
+            if (node.kind === "entity") {
+                ctx.setLineDash([3, 2]); ctx.lineWidth = 1.5 / globalScale;
+                ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.stroke(); ctx.setLineDash([]);
+            }
+            const raw = (node.label || node.id || "");
+            const text = raw.length > 12 ? raw.slice(0, 11) + "…" : raw;
+            const fontSize = 12 / globalScale; // 屏显字号恒定，不随缩放变小
+            ctx.font = fontSize + "px Sans-Serif";
+            ctx.textAlign = "center"; ctx.textBaseline = "top";
+            const tw = ctx.measureText(text).width;
+            const ty = node.y + r + 1 / globalScale;
+            ctx.fillStyle = "rgba(255,255,255,0.72)";
+            ctx.fillRect(node.x - tw / 2 - 2 / globalScale, ty - 1 / globalScale, tw + 4 / globalScale, fontSize + 2 / globalScale);
+            ctx.fillStyle = "#222";
+            ctx.fillText(text, node.x, ty);
+        })
+        .nodePointerAreaPaint((node, color, ctx) => {
+            const val = 1 + Math.min(8, node.degree || 0);
+            const r = Math.sqrt(val) * 4 + 4; // 命中区略大于视觉圆
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+            ctx.fill();
+        })
         .linkColor(d => d.kind === "relation" ? (model.relationColorMap[d.relation] || "#bbb") : (REL_COLORS[d.relation] || "#888"))
         .linkWidth(0.6)
         .linkLineDash(d => d.kind === "relation" ? [4, 2] : [])

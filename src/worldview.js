@@ -31,6 +31,24 @@ export function findWorldviewViolations(text, rules, activeTags = new Set()) {
     return out;
 }
 
+// ===== 世界观守卫「N 次后静默」机制 =====
+// 同一个疑似偏离世界观的「东西」(key) 累计被系统提示达到阈值后，不再弹提示，
+// 但仍会照常检测、不影响剧情推进。计数存放在 S.gameState.worldviewNagCounts，随存档保存。
+export const WORLDVIEW_NAG_THRESHOLD = 3;
+
+// 纯函数：给定 key 与已有计数表，返回本次是否弹提示以及更新后的计数表。
+// - 已达标(key 计数 >= 阈值)：返回 { show:false, counts }，计数不变（已静默）
+// - 未达标：计数 +1 并返回 { show:true, counts }
+// 设计为纯函数（不依赖 S / DOM），便于 node 单测；game.js 负责把 counts 写回存档。
+export function recordWorldviewNag(key, nagCounts = {}, threshold = WORLDVIEW_NAG_THRESHOLD) {
+    const counts = nagCounts && typeof nagCounts === "object" ? nagCounts : {};
+    const count = Number(counts[key]) || 0;
+    if (count >= threshold) {
+        return { show: false, counts };
+    }
+    return { show: true, counts: { ...counts, [key]: count + 1 } };
+}
+
 export function filterStateChangesByWorldview(changes, rules, activeTags = new Set()) {
     const source = clone(changes && typeof changes === "object" ? changes : {});
     const violations = [];

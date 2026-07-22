@@ -93,14 +93,32 @@ export const DEFAULT_PERIOD_LABELS = {
 export const DEFAULT_TIME_CONFIG = {
     era_label: "",            // 纪元/年份，如「建安十三年」「星际历70498」「明朝末年」，可为空
     calendar_mode: "day",     // day(第N天) | gregorian(月日+星期) | lunar(阴历月日) | custom_calendar(新历法) | none(不显示日期)
+    calendar_start: null,     // 本模式独立起始日 {year,month,date}（gregorian/lunar/custom 用；day/none 为 null）—— 方案 B：消除「day:32 像跑了32天」
+    custom_calendar: null,    // 自定义历法月历表 {label, months:[{name,days}]}
+    mode: "single",           // single | multiverse（Phase 2 双世界穿梭）
+    timelines: null,          // {<id>:{calendar_mode,calendar_start,current_date,...}}（multiverse 用，Phase 2 细化）
     clock_mode: "period",     // period(时段标签) | clock(具体时钟) | none(不显示时刻)
     season: "",               // 春/夏/秋/冬/自定义，可为空，用于驱动节日/氛围（E11）
     weather: "",              // 当前天气，可随剧情变化
     show: true,               // 是否展示时间（false 等同 hidden）
-    deadlines: []             // 世界级截止 [{id,title,day,period}]（E8）
+    deadlines: []             // 世界级截止（方案 B：dated 模式用 {year,month,date,period}；day 模式用 {step,period}）
 };
 
 const CALENDAR_MONTH_LEN = 30; // 历法月长，用于把"第 N 天"推导为月/日
+
+// S5-2 必带字段保底：dated 模式(公历/阴历)必须带起点；自定义历法必须带月历表；否则回退「第 N 天」模式。
+// 仅在 normalizeTimeConfig 内对顶层 time_config 调用（不进 timeline 内部——线的 current_date 由 ensureTimelineState 保证，不会静默 year-1）。
+function enforceTimeConfigRequired(cfg) {
+    if ((cfg.calendar_mode === "gregorian" || cfg.calendar_mode === "lunar") && !cfg.calendar_start) {
+        cfg.calendar_mode = "day";
+        cfg.calendar_start = null;
+    }
+    if (cfg.calendar_mode === "custom_calendar" && !cfg.custom_calendar) {
+        cfg.calendar_mode = "day";
+        cfg.custom_calendar = null;
+    }
+    return cfg;
+}
 
 // 归一化 time_config，丢弃非法字段，保证后续渲染安全（无 schema 时回退默认）
 export function normalizeTimeConfig(raw) {
@@ -109,20 +127,96 @@ export function normalizeTimeConfig(raw) {
         if (typeof raw.era_label === "string") cfg.era_label = raw.era_label.slice(0, 40);
         const calModes = ["day", "gregorian", "lunar", "custom_calendar", "none"];
         if (calModes.includes(raw.calendar_mode)) cfg.calendar_mode = raw.calendar_mode;
+        // 方案 B：本模式独立起始日（gregorian/lunar/custom 用）
+        if (raw.calendar_start && Number.isFinite(raw.calendar_start.year)) {
+            cfg.calendar_start = {
+                year: raw.calendar_start.year | 0,
+                month: Math.min(12, Math.max(1, raw.calendar_start.month | 0)),
+                date: Math.max(1, raw.calendar_start.date | 0)
+            };
+        }
+        // 自定义历法月历表
+        if (raw.custom_calendar && Array.isArray(raw.custom_calendar.months) && raw.custom_calendar.months.length) {
+            cfg.custom_calendar = {
+                label: typeof raw.custom_calendar.label === "string" ? raw.custom_calendar.label.slice(0, 20) : "",
+                months: raw.custom_calendar.months.slice(0, 24).map(m => ({
+                    name: String(m && m.name != null ? m.name : "").slice(0, 10),
+                    days: Math.min(400, Math.max(1, (m && m.days) | 0))
+                }))
+            };
+        }
+        // 多世界穿梭（Phase 2）：仅当 mode 为 multiverse 时保留 timelines / active_timeline
+        if (raw.mode === "multiverse") {
+            cfg.mode = "multiverse";
+            if (raw.timelines && typeof raw.timelines === "object") {
+                const calModes = ["day", "gregorian", "lunar", "custom_calendar", "none"];
+                const norm = {};
+                for (const [id, line] of Object.entries(raw.timelines)) {
+                    const l = line && typeof line === "object" ? line : {};
+                    const nl = {
+                        name: typeof l.name === "string" ? l.name.slice(0, 30) : id,
+                        calendar_mode: calModes.includes(l.calendar_mode) ? l.calendar_mode : "day",
+                        calendar_start: (l.calendar_start && Number.isFinite(l.calendar_start.year))
+                            ? { year: l.calendar_start.year | 0, month: Math.min(12, Math.max(1, l.calendar_start.month | 0)), date: Math.max(1, l.calendar_start.date | 0) }
+                            : null,
+                        current_date: (l.current_date && typeof l.current_date === "object") ? l.current_date : null,
+                        era_label: typeof l.era_label === "string" ? l.era_label.slice(0, 40) : "",
+                        season: typeof l.season === "string" ? l.season.slice(0, 10) : "",
+                        weather: typeof l.weather === "string" ? l.weather.slice(0, 20) : ""
+                    };
+                    if (l.custom_calendar && Array.isArray(l.custom_calendar.months) && l.custom_calendar.months.length) {
+                        nl.custom_calendar = {
+                            label: typeof l.custom_calendar.label === "string" ? l.custom_calendar.label.slice(0, 20) : "",
+                            months: l.custom_calendar.months.slice(0, 24).map(m => ({ name: String(m && m.name != null ? m.name : "").slice(0, 10), days: Math.min(400, Math.max(1, (m && m.days) | 0)) }))
+                        };
+                    }
+                    norm[id] = nl;
+                }
+                cfg.timelines = norm;
+            }
+            // S5-2 保底：双界必须带 timelines；active 线必须指向存在的线，否则取第一条
+            if (!cfg.timelines || !Object.keys(cfg.timelines).length) {
+                cfg.mode = "single";
+                cfg.timelines = null;
+                cfg.active_timeline = null;
+            } else if (!raw.active_timeline || !cfg.timelines[raw.active_timeline]) {
+                cfg.active_timeline = Object.keys(cfg.timelines)[0];
+            } else {
+                cfg.active_timeline = raw.active_timeline;
+            }
+        }
         const clkModes = ["period", "none"]; // 仅允许「时段标签」或「不显示」；禁用「具体时钟」以免界面出现具体小时
         if (clkModes.includes(raw.clock_mode)) cfg.clock_mode = raw.clock_mode;
         if (typeof raw.season === "string" && raw.season.trim()) cfg.season = raw.season.slice(0, 10);
         if (typeof raw.weather === "string" && raw.weather.trim()) cfg.weather = raw.weather.slice(0, 20);
         if (typeof raw.show === "boolean") cfg.show = raw.show;
         if (Array.isArray(raw.deadlines)) {
-            cfg.deadlines = raw.deadlines.slice(0, 12).map(d => ({
-                id: typeof d.id === "string" ? d.id.slice(0, 40) : "",
-                title: typeof d.title === "string" ? d.title.slice(0, 60) : "",
-                day: typeof d.day === "number" ? d.day : 0,
-                period: typeof d.period === "string" ? d.period : ""
-            })).filter(d => d.title);
+            cfg.deadlines = raw.deadlines.slice(0, 12).map(d => {
+                const out = {
+                    id: typeof d.id === "string" ? d.id.slice(0, 40) : "",
+                    title: typeof d.title === "string" ? d.title.slice(0, 60) : "",
+                    day: typeof d.day === "number" ? d.day : 0,
+                    period: typeof d.period === "string" ? d.period : "",
+                    year: typeof d.year === "number" ? d.year : null,
+                    month: typeof d.month === "number" ? Math.min(12, Math.max(1, d.month)) : null,
+                    date: typeof d.date === "number" ? Math.max(1, d.date) : null
+                };
+                // S3-1：重触发策略（默认 once；repeatable 可带 max_repeats/cooldown_steps，0 或缺失=不限次）
+                if (d.retrigger_policy && typeof d.retrigger_policy === "object" && d.retrigger_policy.mode === "repeatable") {
+                    out.retrigger_policy = {
+                        mode: "repeatable",
+                        max_repeats: Number.isFinite(d.retrigger_policy.max_repeats) ? Math.max(1, d.retrigger_policy.max_repeats) : 0,
+                        cooldown_steps: Number.isFinite(d.retrigger_policy.cooldown_steps) ? Math.max(0, d.retrigger_policy.cooldown_steps) : 0
+                    };
+                } else {
+                    out.retrigger_policy = "once";
+                }
+                return out;
+            }).filter(d => d.title);
         }
     }
+    // S5-2 必带字段保底（顶层）：dated 模式须带起点、自定义历法须带月历表，否则回退「第 N 天」
+    enforceTimeConfigRequired(cfg);
     return cfg;
 }
 
@@ -171,8 +265,20 @@ export const SYSTEM_ROLES = new Set([
 
 // 现代/科技概念的解锁标签：当世界进入这些时代后，相关概念即被「合法化」。
 const MODERN_UNLOCK = ["era_industrial", "era_modern", "era_future"];
-// 火器类额外支持「已合法持有火器」(has_firearm) 物品标签解锁
-const FIREARM_UNLOCK = ["era_industrial", "era_modern", "era_future", "has_firearm"];
+// 火器按「时期 / 现代」拆分两套解锁标签，让规则守卫能区分左轮（1920 合理）与 AK-47（现代不应出现）。
+// · 时期火器：左轮 / 手枪 / 栓动步枪 / 猎枪 / 火枪等 1900 前后合理的武器，解锁标签 has_firearm
+//   （也可由 era_industrial+ 时代标签解锁）。
+// · 现代火器：突击步枪 / 自动步枪 / 冲锋枪 / 机枪 / 加特林等，解锁标签 has_modern_firearm
+//   （也可由 era_modern/era_future 解锁）。
+// 两者不互相包含：持有左轮（has_firearm）不会放行 AK-47（需 has_modern_firearm）。
+const PERIOD_FIREARM_UNLOCK = ["era_industrial", "era_modern", "era_future", "has_firearm"];
+const MODERN_FIREARM_UNLOCK = ["era_modern", "era_future", "has_modern_firearm"];
+
+// 时期火器关键词：背包物品名称命中任一即自动激活 has_firearm。
+// 注意：不含单字「枪」，避免「冲锋枪/机枪」被误判为时期火器；纯拉丁写法（如 AK-47）无法命中，交由 A7 语义兜底。
+const PERIOD_FIREARM_KEYWORDS = ["左轮", "手枪", "火枪", "猎枪", "霰弹枪", "栓动", "步枪", "子弹", "弹药", "火器"];
+// 现代火器关键词：背包物品名称命中任一即自动激活 has_modern_firearm。
+const MODERN_FIREARM_KEYWORDS = ["冲锋枪", "机枪", "突击步枪", "自动步枪", "加特林"];
 
 // 默认「禁用概念」词表（A2/A4 世界观守卫）：通用现代/科技概念，适用于奇幻/古代/武侠等世界。
 // 每个条目为 { concept, unlockTags }：当 unlockTags 中「任一标签」在游戏状态里处于活跃状态时，该概念被解锁（不再禁用）。
@@ -204,10 +310,17 @@ export const DEFAULT_BANNED_CONCEPTS = [
     { concept: "飞机", unlockTags: MODERN_UNLOCK },
     { concept: "轮船", unlockTags: MODERN_UNLOCK },
     { concept: "坦克", unlockTags: MODERN_UNLOCK },
-    { concept: "枪", unlockTags: FIREARM_UNLOCK },
-    { concept: "手枪", unlockTags: FIREARM_UNLOCK },
-    { concept: "步枪", unlockTags: FIREARM_UNLOCK },
-    { concept: "子弹", unlockTags: FIREARM_UNLOCK },
+    // —— 火器按「时期 / 现代」拆分：移除单字「枪」，避免含「枪」的现代武器被泛放行 ——
+    { concept: "手枪", unlockTags: PERIOD_FIREARM_UNLOCK },
+    { concept: "左轮", unlockTags: PERIOD_FIREARM_UNLOCK },
+    { concept: "霰弹枪", unlockTags: PERIOD_FIREARM_UNLOCK },
+    { concept: "火枪", unlockTags: PERIOD_FIREARM_UNLOCK },
+    { concept: "子弹", unlockTags: PERIOD_FIREARM_UNLOCK },
+    { concept: "突击步枪", unlockTags: MODERN_FIREARM_UNLOCK },
+    { concept: "自动步枪", unlockTags: MODERN_FIREARM_UNLOCK },
+    { concept: "冲锋枪", unlockTags: MODERN_FIREARM_UNLOCK },
+    { concept: "机枪", unlockTags: MODERN_FIREARM_UNLOCK },
+    { concept: "加特林", unlockTags: MODERN_FIREARM_UNLOCK },
     { concept: "炸弹", unlockTags: MODERN_UNLOCK },
     { concept: "导弹", unlockTags: MODERN_UNLOCK },
     { concept: "卫星", unlockTags: MODERN_UNLOCK },
@@ -241,6 +354,17 @@ export function getActiveConditionTags() {
     if (gs && Array.isArray(gs.inventory)) {
         for (const it of gs.inventory) {
             if (it && Array.isArray(it.tags)) it.tags.forEach(t => tags.add(t));
+            // ★ 系统性修复（按时期/现代拆分）：背包持有名称含时期火器 → 自动激活 has_firearm；
+            //   含现代火器 → 自动激活 has_modern_firearm。现代火器优先（如「突击步枪」含「步枪」但属现代），
+            //   只激活 has_modern_firearm、不误激活 has_firearm，使左轮解锁但不放行 AK-47。
+            //   覆盖内置世界（克苏鲁左轮手枪漏打标签）与 AI 生成世界的初始物品，现有存档无需重开。
+            if (it && typeof it.name === "string") {
+                if (MODERN_FIREARM_KEYWORDS.some(k => it.name.includes(k))) {
+                    tags.add("has_modern_firearm");
+                } else if (PERIOD_FIREARM_KEYWORDS.some(k => it.name.includes(k))) {
+                    tags.add("has_firearm");
+                }
+            }
         }
     }
     if (gs && Array.isArray(gs.present_npcs)) {

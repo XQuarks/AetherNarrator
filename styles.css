@@ -1095,6 +1095,14 @@
         .cache-indicator.good { color: #1D9E75; border-color: #5DCAA5; }
         .cache-indicator.warn { color: #BA7517; border-color: #EF9F27; }
         .cache-indicator.bad { color: #E24B4A; border-color: #F09595; }
+        .timeline-switch { display: flex; gap: 4px; margin-top: 3px; }
+        .timeline-switch .tl-chip {
+            font-size: 11px; padding: 2px 9px; border-radius: 10px; cursor: pointer;
+            background: var(--card-bg); color: var(--text-muted);
+            border: 1px solid var(--card-border); transition: all .15s ease;
+        }
+        .timeline-switch .tl-chip:hover:not(:disabled) { color: var(--primary); border-color: var(--primary); }
+        .timeline-switch .tl-chip.active { color: #fff; background: var(--primary); border-color: var(--primary); cursor: default; }
         .game-body {
             flex: 1;
             display: flex;
@@ -1551,6 +1559,54 @@
         .time-cfg-summary { line-height:1.7; }
         .time-cfg-hint { font-size:12px; color:var(--text-secondary, #666); margin:8px 0 0; }
         @media (max-width: 560px) { .time-cfg-grid { grid-template-columns:1fr; } }
+        .time-cfg-start-row { display:flex; align-items:center; gap:6px; }
+        .time-cfg-start-row .tc-num { width:64px; }
+        .time-cfg-start-row .tc-sep { color:var(--text-muted); }
+        .time-cfg-start-hint { font-size:11px; color:var(--text-muted); margin-top:4px; display:block; }
+        .time-cfg-start-hint code { background:rgba(127,127,213,0.12); padding:0 4px; border-radius:4px; }
+        .time-cfg-multiverse { grid-column:1 / -1; }
+        .time-conflict-badge {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.55);
+            color: #b45309;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        /* S5-4'：开场白时间修复按钮组 */
+        .opening-fix-actions {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: rgba(201, 168, 124, 0.08);
+            border: 1px dashed rgba(201, 168, 124, 0.4);
+            font-size: 13px;
+        }
+        .opening-fix-actions.conflict {
+            border-color: rgba(245, 158, 11, 0.8);
+            background: rgba(245, 158, 11, 0.1);
+            box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+        }
+        .opening-fix-title { font-weight: 600; color: var(--text); margin-bottom: 6px; }
+        .opening-fix-tip { font-weight: 400; color: var(--muted); font-size: 11px; }
+        .opening-fix-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+        .opening-fix-btns [disabled] { opacity: 0.45; cursor: not-allowed; }
+        .opening-fix-note { margin-top: 6px; color: var(--muted); font-size: 11px; }
+
+        /* S5-4' 模态：开场白 diff */
+        .opening-diff { display: flex; gap: 14px; margin-top: 10px; }
+        .opening-diff-col { flex: 1; min-width: 0; }
+        .opening-diff-h { font-weight: 600; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+        .opening-diff-old, .opening-diff-new {
+            white-space: pre-wrap; word-break: break-word; margin: 0;
+            padding: 10px; border-radius: 8px; font-family: var(--mono, monospace);
+            font-size: 13px; line-height: 1.6; max-height: 46vh; overflow: auto;
+        }
+        .opening-diff-old { background: rgba(120, 120, 120, 0.1); border: 1px solid rgba(120, 120, 120, 0.25); }
+        .opening-diff-new { background: rgba(100, 200, 120, 0.1); border: 1px solid rgba(100, 200, 120, 0.4); }
 
 /* ===== 步骤 B：Obsidian 风三栏链状知识库 UI ===== */
 #loreReviewModal .modal { max-width: min(1180px, 96vw); }

@@ -10,7 +10,8 @@ import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset }
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, cwNext, cwPrev } from "./render.js";
-import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreRequireConfirm, togglePinMemory, triggerMemoryPackImport, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore } from "./game.js";
+import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreRequireConfirm, togglePinMemory, triggerMemoryPackImport, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore, switchTimeline } from "./game.js";
+import { syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix } from "./lore-ui.js";
 
 async function init() {
     applyTheme();
@@ -160,6 +161,7 @@ const ACTIONS = {
     confirmRestart: (el) => confirmRestart(el.dataset.id),
     doRestartConfirmed: () => doRestartConfirmed(),
     restToNextDay: () => restToNextDay(),
+    switchTimeline: (el) => switchTimeline(el.dataset.id),
     loadSave: (el) => loadSave(el.dataset.id),
     showSaveDetail: (el) => showSaveDetail(el.dataset.id),
     returnFromSaveDetail: () => returnFromSaveDetail(),
@@ -208,6 +210,13 @@ const ACTIONS = {
     ruleTypeChange: (el) => ruleTypeChange(el),
     importBannedAsRules: () => importBannedAsRules(),
     saveRuleReview: () => saveRuleReview(),
+    // ★ S5-4：编辑卡时间体系字段改动 → 写回 schema 并实时刷新冲突徽章
+    timeConfigChanged: () => { syncTimeConfigFromDOM(); updateTimeConflictBadge(); },
+    // ★ S5-4' + S5-7：开场白时间冲突一键修复
+    regenerateOpening: () => regenerateOpening("regenerate"),
+    convertOpeningToPlaceholders: () => regenerateOpening("toPlaceholders"),
+    applyOpeningFix: () => applyOpeningFix(),
+    rejectOpeningFix: () => rejectOpeningFix(),
 };
 
 document.addEventListener("keydown", (e) => {

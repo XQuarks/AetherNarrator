@@ -4,7 +4,7 @@
 import { S, calendarLabel, MEMORY_TYPE_LABELS } from "./store.js";
 
 import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema } from "./utils.js";
-import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, updateFontSizeButtons, updateTempLabel } from "./theme.js";
+import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, formatTimeLabel, formatDeadlineLabel, stepOf, updateFontSizeButtons, updateTempLabel, getAllTimelineViews, formatDateOnly } from "./theme.js";
 import { abortCurrentRequest, chooseOption, confirmRestart, continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./game.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
 
@@ -679,7 +679,7 @@ export function renderStatusPanel(tab) {
                         let cls = "";
                         if (g.status === "completed") cls = "completed";
                         else if (g.status === "failed") cls = "failed";
-                        const deadline = g.deadline ? `截止：第${g.deadline.day}天 ${escapeHtml(getPeriodLabel(g.deadline.period))}` : "无期限";
+                        const deadline = g.deadline ? `截止：${escapeHtml(formatDeadlineLabel(g.deadline, getTimeConfig().timeConfig))}` : "无期限";
                         return `<div class="goal-item ${cls}"><strong>${escapeHtml(g.name)}</strong><br><span style="font-size:11px;color:var(--text-muted)">${escapeHtml(g.type)} · ${deadline}</span></div>`;
                     }).join("") : '<div class="empty-hint">暂无目标</div>'}
                 </div>
@@ -732,7 +732,7 @@ export function renderStatusPanel(tab) {
                 <div class="status-section">
                     <div class="status-section-title">世界时限</div>
                     <div class="status-card">
-                        ${cfg.deadlines.map(d => `<div class="row"><span class="label">${escapeHtml(d.title)}</span><span class="value">${escapeHtml(calendarLabel(d.day, cfg.calendar_mode))} ${escapeHtml(getPeriodLabel(d.period))}</span></div>`).join("")}
+                        ${cfg.deadlines.map(d => `<div class="row"><span class="label">${escapeHtml(d.title)}</span><span class="value">${escapeHtml(formatDeadlineLabel(d, cfg))}</span></div>`).join("")}
                     </div>
                 </div>` : "";
 
@@ -771,10 +771,10 @@ export function renderStatusPanel(tab) {
             const entries = (S.conversationHistory || [])
                 .map((e, i) => ({ ...e, _i: i }))
                 .filter(e => e.narrative && !e.isWarning)
-                .sort((a, b) => (a.day - b.day) || (tc.periods.indexOf(a.period) - tc.periods.indexOf(b.period)));
+                .sort((a, b) => (stepOf(a.tcd || a) - stepOf(b.tcd || b)) || (tc.periods.indexOf(a.period) - tc.periods.indexOf(b.period)));
             const tlHtml = entries.length ? entries.map(e => `
                 <div class="timeline-item">
-                    <div class="timeline-time">${escapeHtml(formatTimeShort(e.day, e.period, e.clock))}</div>
+                    <div class="timeline-time">${escapeHtml(e.tcd ? formatTimeLabel(e.tcd, cfg) : formatTimeShort(e.day, e.period, e.clock))}</div>
                     <div class="timeline-text">${escapeHtml((e.narrative || "").slice(0, 80))}${(e.narrative || "").length > 80 ? "…" : ""}</div>
                 </div>`).join("") : '<div class="empty-hint">暂无经历记录</div>';
 
@@ -794,7 +794,30 @@ export function renderStatusPanel(tab) {
 
 export function updateGameDayInfo() {
     if (!S.gameState) return;
-    document.getElementById("gameDayInfo").textContent = formatWorldTime(S.gameState);
+    const dayEl = document.getElementById("gameDayInfo");
+    if (!dayEl) return;
+    const views = getAllTimelineViews(S.gameState);
+    if (views && views.length > 1) {
+        const active = views.find(v => v.active);
+        const others = views.filter(v => !v.active).map(v => `${v.name}:${v.dateLabel}`).join(" ｜ ");
+        dayEl.textContent = `🌐 ${active ? active.name : ""} · ${formatDateOnly(S.gameState.current_date, getTimeConfig().timeConfig)}`
+            + (others ? ` ｜ 另界 ${others}` : "");
+        renderTimelineSwitch(views);
+    } else {
+        dayEl.textContent = formatWorldTime(S.gameState);
+        const sw = document.getElementById("timelineSwitch");
+        if (sw) sw.innerHTML = "";
+    }
+}
+
+// Phase 2 多世界：顶栏时间线切换控件（点击切换到另一时间线，进度互不丢失）
+function renderTimelineSwitch(views) {
+    const sw = document.getElementById("timelineSwitch");
+    if (!sw) return;
+    if (!views || views.length < 2) { sw.innerHTML = ""; return; }
+    sw.innerHTML = views.map(v =>
+        `<button class="tl-chip${v.active ? " active" : ""}" data-action="switchTimeline" data-id="${escapeHtml(v.id)}" ${v.active ? "disabled" : ""}>${escapeHtml(v.name)}</button>`
+    ).join("");
 }
 
 export function highlightItems(text) {
@@ -825,7 +848,7 @@ export function renderLog(reset) {
         const html = `
         <div class="log-entry${warningClass}">
             <div class="meta">
-                <span>${metaLabel} · ${escapeHtml(formatTimeShort(entry.day, entry.period, entry.clock))}</span>
+                <span>${metaLabel} · ${escapeHtml(entry.tcd ? formatTimeLabel(entry.tcd, getTimeConfig().timeConfig) : formatTimeShort(entry.day, entry.period, entry.clock))}</span>
             </div>
             ${entry.player ? `<div class="player-text">${escapeHtml(entry.player)}</div>` : ""}
             <div class="narrative">${entry.isWarning ? escapeHtml(entry.narrative) : highlightItems(entry.narrative)}</div>

@@ -4,6 +4,7 @@
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_LABELS, LINK_RELATIONS, MAX_SOURCE_CHARS, normalizeTimeConfig } from "./store.js";
 import { applyStateChanges } from "./game.js";
+import { formatCalendarDate } from "./calendar.js";
 
 export function deepClone(obj) {
     return typeof structuredClone !== "undefined" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj));
@@ -45,6 +46,7 @@ export function defaultWorldSchema(styleHint) {
             courage: "胆识", perception: "洞察", patience: "耐心", luck: "气运", will: "心志"
         },
         time_periods: DEFAULT_PERIOD_LABELS,
+        time_config: normalizeTimeConfig(null),
         game_over_conditions: ["is_alive === false"]
     };
 }
@@ -184,6 +186,9 @@ export function defaultInitialState() {
         current_location: "初始地点",
         story_progress: 1,   // ★ 时间线进度指针（单向，仅增）：知识库 timeline 片段只在 order ≤ 此值时才注入，避免剧透未来
         current_date: { day: 1, period: "morning" },
+        triggered_event_ids: { main: [] },   // Phase 3：按时间线/分支隔离的触发记录
+        retrigger_state: { main: {} },        // Phase 3：repeatable 的 {count,lastStep}
+        branches: {},                         // Phase 3：S4 分支隔离的时间线副本
         goals: [],
         status_effects: [],
         tags: [],            // ★ A6 解锁标签：时代/物品/人物等条件标签，决定禁用概念是否解锁
@@ -212,10 +217,175 @@ export function escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// ============================================================
+// S5-3 · 开场白占位符解析（纯函数，可在 Node 下单测）
+// 把 {era_label}/{season}/{calendar_date}/{calendar_year}/{calendar_month} 展开为当前时间。
+// - era_label / season 为配置级字段，任意历法模式都解析（缺则替换为空串）
+// - calendar_* 仅当 current_date 为 dated 形态（含 year）时解析；否则保留原始占位符（非破坏性，便于作者察觉）
+// text: 含占位符的开场白；timeConfig: 归一化后的 time_config；currentDate: 当前 current_date（开场通常用开局起点）
+// ============================================================
+const OPENING_TOKENS_RE = /\{(era_label|season|calendar_date|calendar_year|calendar_month)\}/g;
+
+export function resolveOpeningTokens(text, timeConfig, currentDate) {
+    if (!text || typeof text !== "string") return text || "";
+    const cfg = timeConfig || {};
+    const cd = currentDate || {};
+    const mode = cfg.calendar_mode;
+    const isDated = (mode === "gregorian" || mode === "lunar" || mode === "custom_calendar") && typeof cd.year === "number";
+    return text.replace(OPENING_TOKENS_RE, (m, key) => {
+        switch (key) {
+            case "era_label":
+                return cfg.era_label || "";
+            case "season":
+                return cfg.season || "";
+            case "calendar_year":
+                return isDated ? String(cd.year) : m;
+            case "calendar_month":
+                return isDated ? String(cd.month) : m;
+            case "calendar_date":
+                if (isDated) {
+                    const fmt = formatCalendarDate({ year: cd.year, month: cd.month, date: cd.date }, mode, cfg.custom_calendar);
+                    return fmt || m;
+                }
+                return m;
+            default:
+                return m;
+        }
+    });
+}
+
 export function createElementFromHTML(html) {
     const template = document.createElement("template");
     template.innerHTML = html.trim();
     return template.content.firstChild;
+}
+
+// ============================================================
+// S5-4 · 时间冲突 Lint（纯函数，可在 Node 下单测）
+// 检测 opening_narrative / system_prompt / era_label 中写死的时间与 calendar_start 不一致。
+// 设计要点（见 docs/20 §13）：
+// - 先剥 {..} 占位符（S5-3 用占位符的开场白不会误报）
+// - 年份严格判定（≠ calendar_start.year 即冲突，黎总拍板）
+// - 无 calendar_start（day/none）时跳过年份比对，仅做季节/现代措辞检查
+// - system_prompt 可能是数组（demo 世界），统一 join 成字符串再扫
+// ============================================================
+const TIME_CONFLICT_YEAR_RE = /\b(1[6-9]\d{2}|20\d{2})\b/g;
+const TIME_CONFLICT_SEASON_WORDS = ["孟春", "仲春", "季春", "春季", "春", "孟夏", "仲夏", "季夏", "夏季", "夏", "孟秋", "仲秋", "季秋", "秋季", "秋", "孟冬", "仲冬", "季冬", "冬季", "冬"];
+const TIME_CONFLICT_ABSOLUTE_RE = /如今|当代|现在|今年/;
+const TIME_CONFLICT_PLACEHOLDER_RE = /\{[^}]*\}/g;
+
+function seasonBaseOf(s) {
+    if (!s) return null;
+    for (const key of ["春", "夏", "秋", "冬"]) if (String(s).startsWith(key)) return key;
+    return null;
+}
+
+export function detectTimeConflict(world) {
+    const schema = getWorldSchema(world) || {};
+    const cfg = normalizeTimeConfig(schema.time_config);
+    const startYear = cfg.calendar_start ? cfg.calendar_start.year : null;
+    const season = (cfg.season || "").trim();
+
+    // 先剥占位符再扫描；system_prompt 可能为数组，统一成字符串
+    const strip = (t) => {
+        const s = Array.isArray(t) ? t.join(" ") : String(t == null ? "" : t);
+        return s.replace(TIME_CONFLICT_PLACEHOLDER_RE, " ");
+    };
+    const fullText = [strip(schema.opening_narrative), strip(schema.system_prompt), strip(cfg.era_label)].join("\n");
+
+    // 年份冲突（严格判定：≠ 起始年即冲突）
+    const years = [];
+    let m;
+    TIME_CONFLICT_YEAR_RE.lastIndex = 0;
+    while ((m = TIME_CONFLICT_YEAR_RE.exec(fullText)) !== null) {
+        const y = parseInt(m[1], 10);
+        if (startYear != null && y !== startYear && !years.includes(y)) years.push(y);
+    }
+
+    // 季节冲突（仅当配置了季节；按春/夏/秋/冬分族，避免「春」误伤「春季」）
+    let seasonConflict = null;
+    const base = seasonBaseOf(season);
+    if (base) {
+        for (const w of TIME_CONFLICT_SEASON_WORDS) {
+            if (fullText.includes(w)) {
+                const wb = seasonBaseOf(w);
+                if (wb && wb !== base) { seasonConflict = w; break; }
+            }
+        }
+    }
+
+    // 现代措辞（历史世界：起始年 < 2000）
+    const absolutePhrase = TIME_CONFLICT_ABSOLUTE_RE.test(fullText) && startYear != null && startYear < 2000;
+
+    const snippets = [];
+    if (years.length) snippets.push(`年份 ${years.join("、")} 与起始年 ${startYear} 不一致`);
+    if (seasonConflict) snippets.push(`季节「${seasonConflict}」与配置「${season}」不一致`);
+    if (absolutePhrase) snippets.push("出现现代措辞（如今/当代/现在/今年）但起始年为历史年代");
+
+    return {
+        conflict: years.length > 0 || seasonConflict !== null || absolutePhrase,
+        yearConflict: years.length ? { years } : null,
+        seasonConflict: seasonConflict ? { words: [seasonConflict] } : null,
+        absolutePhrase,
+        snippets
+    };
+}
+
+export function formatConflictMessage(res) {
+    if (!res || !res.conflict) return "";
+    return (res.snippets || []).join("；");
+}
+
+// ============================================================
+// S5-5 · 审稿时间锚点构造（纯函数，可在 Node 下单测；无 DOM 依赖）
+// 从世界抽取「权威时间锚点」文本，喂给 callWorldCriticLLM 作为时间一致性审稿基准。
+// 设计要点（见 docs/20 §13 S5-5）：
+// - multiverse：优先取 active_timeline 的平铺时间字段（calendar_mode/calendar_start/era_label/season），回退顶层
+// - 无实质时间信息（无年份/纪元/季节）时返回空串，prompt 不增时间章节
+// ============================================================
+function calendarModeLabel(mode) {
+    return ({
+        gregorian: "公历", lunar: "农历", custom_calendar: "自定义历法",
+        day: "日计数模式", none: "不显示日期", multiverse: "多世界", single: "默认"
+    })[mode] || mode || "未知";
+}
+
+export function buildCriticTimeContext(world) {
+    const schema = getWorldSchema(world) || {};
+    const cfg = normalizeTimeConfig(schema.time_config);
+    let tc = cfg;
+    // 多世界穿梭：取 active 线的平铺时间字段重组为 time_config 再归一化
+    if (cfg.mode === "multiverse" && cfg.timelines) {
+        const activeKey = cfg.active_timeline || Object.keys(cfg.timelines)[0];
+        const line = activeKey ? cfg.timelines[activeKey] : null;
+        if (line) {
+            tc = normalizeTimeConfig({
+                calendar_mode: line.calendar_mode,
+                calendar_start: line.calendar_start,
+                era_label: line.era_label,
+                season: line.season,
+                custom_calendar: line.custom_calendar
+            });
+        } else {
+            tc = normalizeTimeConfig(null);
+        }
+    }
+    const parts = ["历法：" + calendarModeLabel(tc.calendar_mode)];
+    if (tc.era_label) parts.push("纪元标签：" + tc.era_label);
+    if (tc.calendar_start && typeof tc.calendar_start.year === "number") {
+        const s = tc.calendar_start;
+        const dateStr = tc.calendar_mode === "custom_calendar"
+            ? `${s.year} 年（自定义历法）`
+            : `${s.year} 年${s.month ? " " + s.month + " 月" : ""}${s.date ? " " + s.date + " 日" : ""}`;
+        parts.push("起始日期：" + dateStr);
+    } else {
+        parts.push("无绝对年份（day/none 模式）");
+    }
+    if (tc.season) parts.push("季节：" + tc.season);
+    // 无任何实质时间信息（无年份/纪元/季节）则不增章节
+    const hasAnchor = !!((tc.calendar_start && typeof tc.calendar_start.year === "number") || tc.era_label || tc.season);
+    if (!hasAnchor) return "";
+    return parts.join(" / ");
 }
 
 export function cosineSimilarity(a, b) {

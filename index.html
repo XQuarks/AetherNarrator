@@ -53,7 +53,7 @@
         <h1 class="home-title rise"><span class="glyph">以太叙事</span><span class="title-sheen">以太叙事</span></h1>
         <p class="home-subtitle-en rise">AetherNarrator</p>
         <div class="divider rise"><span class="line"></span><span class="rune"></span><span class="line r"></span></div>
-        <p class="home-subtitle rise">会自己向前走的世界 · 私密本地存储 · 中文知识记忆</p>
+        <p class="home-subtitle rise">一本会自己生长的冒险书 · 故事只存于你的设备 · 它记得你写下的每个名字</p>
 
         <div class="menu-grid">
             <button class="menu-btn primary-btn rise d1" data-action="showWorldList">
@@ -174,6 +174,7 @@
         <div>
             <div class="world-name" id="gameWorldName">未知世界</div>
             <div class="day-info" id="gameDayInfo">第 1 天 · 早晨<span class="cache-indicator hidden" id="cacheIndicator" title="缓存命中/未命中 token 数"></span></div>
+            <div class="timeline-switch" id="timelineSwitch"></div>
         </div>
         <div class="header-actions">
             <button data-action="showStatusPanel">角色</button>
@@ -608,11 +609,26 @@
     </div>
 </div>
 
+<!-- ================= 开场白时间冲突一键修复（S5-4' + S5-7） ================= -->
+<div class="modal-overlay" id="openingFixModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="openingFixModalTitle">
+        <div class="modal-header">
+            <h2 id="openingFixModalTitle">🕰 开场白时间冲突 · 修复预览</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="openingFixModal">×</button>
+        </div>
+        <div class="modal-body" id="openingFixBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="rejectOpeningFix">✗ 丢弃</button>
+            <button class="btn primary" data-action="applyOpeningFix">✓ 应用修复</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= 世界规则 DSL 编辑器（Phase 2） ================= -->
 <div class="modal-overlay" id="ruleEditorModal">
     <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="ruleEditorTitle">
         <div class="modal-header">
-            <h2 id="ruleEditorTitle">世界规则（不碰代码配世界）</h2>
+            <h2 id="ruleEditorTitle">世界规则</h2>
             <button class="modal-close" data-action="closeModal" data-modal="ruleEditorModal">×</button>
         </div>
         <div class="modal-body" id="ruleEditorBody"></div>

@@ -3,8 +3,9 @@
 // ============================================================
 import { S } from "./store.js";
 import { CHAT_ANCHOR_MSGS, CHAT_RECENT_MSGS, LORE_FULL_THRESHOLD, MAX_CHAT_MESSAGES, SYSTEM_ROLES, DEFAULT_BANNED_CONCEPTS, getBannedConcepts } from "./store.js";
-import { dedupeStrings, getWorldSchema } from "./utils.js";
-import { getTimeConfig, formatWorldTime } from "./theme.js";
+import { dedupeStrings, getWorldSchema, resolveOpeningTokens } from "./utils.js";
+import { getTimeConfig, formatWorldTime, getPeriodLabel, stepOf } from "./theme.js";
+import { formatCalendarDate } from "./calendar.js";
 import { getWorldLoreKB } from "./rag.js";
 import { getProvider } from "./providers.js";
 
@@ -274,7 +275,11 @@ export function buildSystemPrompt() {
 
     // ★ P1: 开场白注入 system prompt（世界级固定内容，永远命中缓存）
     if (S.currentWorld && S.currentWorld.opening_narrative) {
-        systemPrompt += "\n\n# 故事起点 / 开场白（固定上下文）\n\n你正在讲述的故事始于以下场景。后续所有叙事都应从此处展开，保持世界观和氛围的一致性：\n\n---\n" + S.currentWorld.opening_narrative + "\n---";
+        // S5-3：注入前展开占位符（{era_label}/{season}/{calendar_date}/...），使用开局起点日期
+        const tc = getTimeConfig();
+        const openingDate = (S.gameState && S.gameState.current_date) || tc.timeConfig.calendar_start || null;
+        const openingResolved = resolveOpeningTokens(S.currentWorld.opening_narrative, tc.timeConfig, openingDate);
+        systemPrompt += "\n\n# 故事起点 / 开场白（固定上下文）\n\n你正在讲述的故事始于以下场景。后续所有叙事都应从此处展开，保持世界观和氛围的一致性：\n\n---\n" + openingResolved + "\n---";
     }
 
     // ★ NPC 一致性自检指令（静态，注入 system prompt）
@@ -330,9 +335,17 @@ export function buildTimeModeRules() {
     let timeExtra = "";
     if (cfg && cfg.era_label) timeExtra += `当前纪元/年份：${cfg.era_label}。`;
     if (cfg && cfg.calendar_mode && cfg.calendar_mode !== "none") timeExtra += `本世界历法为「${cfg.calendar_mode}」，叙事中可用对应的月日/季节表达时间（如阴历「三月初九」）。`;
+    if (cfg && cfg.calendar_mode === "gregorian") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（真实公历，含星期）。常规推进只填 period；跨度（闭关/沉睡/远行）填 addMonths/addDays（如闭关三月填 addMonths:3）；跳到具体历史/未来日期填绝对 year/month/date（如昏迷苏醒到 2004-06-16 填 {year:2004,month:6,date:16}）。真实历史世界观不得编造与史实冲突的日期。`;
+    if (cfg && cfg.calendar_mode === "lunar") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（农历）。跨度填 addMonths/addDays；绝对跳填写 year/month/date。`;
+    if (cfg && cfg.calendar_mode === "custom_calendar") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（本世界自定义历法，月长见 custom_calendar 配置）。跨度与绝对跳转同上，按本世界月长计算。`;
     if (cfg && cfg.season) timeExtra += `当前季节：${cfg.season}。`;
     if (cfg && cfg.weather) timeExtra += `当前天气：${cfg.weather}。天气可随剧情变化，但不得无故改变季节。`;
     if (cfg && cfg.clock_mode === "clock") timeExtra += `本世界使用具体时钟制。每次行动可将耗时分钟数填入 state_changes.current_date.elapsed_minutes（如 15=15 分钟），系统自动累加并换算日期、时段与时钟。典型耗时：短应答 5 分钟、勘察/聊天 15 分钟、远行 60 分钟、重大事件 120 分钟。`;
+    if (tc.timeConfig.mode === "multiverse" && tc.timelines) {
+        const names = Object.keys(tc.timelines).map(id => tc.timelines[id].name || id).join(" / ");
+        const activeName = (tc.timelines[tc.active_timeline] && tc.timelines[tc.active_timeline].name) || tc.active_timeline;
+        timeExtra += `本世界为多世界（双界穿梭），存在各自独立流逝的时间线：${names}。每条时间线有自己独立的日期，互不干扰。当前处于「${activeName}」时间线。当剧情需要主角意识在两个世界间来回切换时，在 state_changes 中返回 switch_timeline:\"<目标时间线id>\"（如 \"${Object.keys(tc.timelines).find(id => id !== tc.active_timeline) || ""}\"）；切换后系统会自动加载该界当前日期，你须在叙事中体现"意识回到另一界"的过渡，并基于该界日期继续推进。`;
+    }
     return `本世界时段顺序：${periodList} → 下一天${tc.labels[tc.periods[0]] || tc.periods[0]}。
 
 时段含义：${periodDesc}。
@@ -369,7 +382,14 @@ export function buildTimeModeRules() {
 ## NPC 随时段刷新（E9）
 每次推进 period 后，必须在 state_changes.npc_activity 中更新 NPC 的当前活动描述，反映新时段下 NPC 在做什么（如早晨贾母在花厅喝茶→午前贾母在佛堂念佛→午后贾母小憩）。未推进时段时无需更新。非关键 NPC 简要描述即可。
 
-日期追踪：叙事中用"次日清晨""又过了一日"或"第N天"等自然表达，AI 根据剧情自行判断哪种更贴合当前叙事氛围。每个世界可有多于或少于5个时段，时段名称由世界设定决定。\n\n${timeExtra}`;
+日期追踪：叙事中用"次日清晨""又过了一日"或"第N天"等自然表达，AI 根据剧情自行判断哪种更贴合当前叙事氛围。每个世界可有多于或少于5个时段，时段名称由世界设定决定。\n\n${timeExtra}
+
+## 时间穿越指令（Phase 3 · 已触发事件四策略）
+当剧情需要时，state_changes.current_date 可携带以下字段实现时间旅行，系统会按策略处理"已触发事件"：
+- **普通时间跳跃（含倒流）**：直接给 year/month/date（或 day/period）即可，日历任意跳跃；已触发的一次性事件不会因回到过去而重放（S1 不重触发）。
+- **重置回放（S3）**：在 current_date 中加入 \`reset_triggers: ["事件id"]\` 或 \`reset_triggers: "all"\`，回滚指定（或所有）事件的触发记录，使重走该段可重新触发（轮回/重开/"如果当初…"）。
+- **分支隔离（S4）**：在 current_date 中加入 \`branch: true\` 与 \`branch_label: "分支名"\`，系统新建一条平行时间线，原未来作为另一分支保留，两线触发记录互不影响（量子分叉/蝴蝶效应）。
+注意：只有在剧情明确需要时（如轮回、平行世界）才使用 reset_triggers / branch，日常推进不要使用。`;
 }
 
 export function buildHeroContext() {
@@ -467,11 +487,23 @@ export function isLoreFullInSystem() {
 
 export function buildCompactGameState() {
     if (!S.gameState) return "{}";
+    const tc = getTimeConfig();
+    const isMultiverse = tc.timeConfig.mode === "multiverse" && tc.timelines;
+    const activeId = S.gameState.active_timeline || (tc.timelines && Object.keys(tc.timelines)[0]);
     const state = {
         name: S.gameState.name || (S.currentWorld && S.currentWorld.hero ? S.currentWorld.hero.slice(0, 20) : "主角"),
         background: S.gameState.background || (S.currentWorld && S.currentWorld.hero ? S.currentWorld.hero : "未指定"),
         current_location: S.gameState.current_location,
         current_date: S.gameState.current_date,
+        // Phase 2 多世界：把时间线信息透传给 AI，使其能基于双界各自时间产出 switch_timeline
+        active_timeline: isMultiverse ? activeId : undefined,
+        timelines: isMultiverse ? Object.keys(tc.timelines).map(id => ({
+            id,
+            name: tc.timelines[id].name || id,
+            active: id === activeId,
+            calendar_mode: tc.timelines[id].calendar_mode,
+            current_date: (S.gameState.timelines && S.gameState.timelines[id] && S.gameState.timelines[id].current_date) || tc.timelines[id].current_date
+        })) : undefined,
         story_progress: (typeof S.gameState.story_progress === "number" && isFinite(S.gameState.story_progress)) ? S.gameState.story_progress : 1,
         time_label: formatWorldTime(S.gameState),
         attributes: S.gameState.attributes,
@@ -553,9 +585,9 @@ export function getPendingEventHint() {
         // 优先用结构化 trigger；缺失/损坏时从 content 文本兜底推断（让 AI 生成的任意 IP 世界也能触发）
         const c = s.trigger || inferTriggerFromContent(s.content);
         if (!c) continue;
-        if (c.day && st.current_date.day < c.day) continue;
-        if (c.dayMin && st.current_date.day < c.dayMin) continue;
-        if (c.dayMax && st.current_date.day > c.dayMax) continue;
+        if (c.day && stepOf(st.current_date) < c.day) continue;
+        if (c.dayMin && stepOf(st.current_date) < c.dayMin) continue;
+        if (c.dayMax && stepOf(st.current_date) > c.dayMax) continue;
         if (c.periods && c.periods.length) {
             if (!c.periods.includes(st.current_date.period)) continue;
         }
@@ -660,8 +692,54 @@ export function buildTurnUserMessage(input, retrieved) {
     return userPrompt;
 }
 
+// ★ S5-6：机制四·权威时间覆盖。每轮把「权威当前时间」作为叙事时间真相源显式返回，
+// 供 buildAuthorNote 注入「中部纠偏位」。纯函数、无 DOM 依赖，可在 Node 下单测。
+//   state：S.gameState（含 current_date / timelines / active_timeline）
+//   tc：getTimeConfig() 结果（缺省内部取）；multiverse 时两界各自 current_date 都给、标 active 界
+// 设计要点：放中部动态段（非 system 静态段）→ 不破 DeepSeek 前缀缓存；与 S5-4/Lint、S5-5/Critic 互补，只做运行期兜底。
+export function buildAuthoritativeTime(state, tc) {
+    const cfg = tc || getTimeConfig();
+    const tcfg = (cfg && cfg.timeConfig) || {};
+    // 不展示时间的世界（hidden / none）：给约束提示，不抛锚
+    if (cfg.mode === "hidden" || tcfg.mode === "none" || tcfg.show === false) {
+        return "本世界不展示具体时间，叙事中不要提及具体日期或年份，只推进剧情。";
+    }
+    const lines = [];
+    if (tcfg.mode === "multiverse" && cfg.timelines) {
+        const activeId = cfg.active_timeline || Object.keys(cfg.timelines)[0];
+        for (const id of Object.keys(cfg.timelines)) {
+            const line = cfg.timelines[id];
+            const cd = (id === activeId)
+                ? (state && state.current_date) || line.current_date
+                : (state && state.timelines && state.timelines[id] && state.timelines[id].current_date) || line.current_date;
+            if (!cd) continue;
+            const parts = [];
+            if (line.era_label) parts.push(line.era_label);
+            if (line.season) parts.push(line.season);
+            const dateStr = formatCalendarDate(cd, line.calendar_mode, line.custom_calendar);
+            if (dateStr) parts.push(dateStr);
+            const period = cd.period;
+            if (period) parts.push(getPeriodLabel(period));
+            const tag = id === activeId ? "（当前所在界）" : "";
+            lines.push(`· ${line.name || id}${tag}：${parts.join(" · ")}`);
+        }
+    } else {
+        // 单界：formatWorldTime 已按当前配置拼好 纪元·季节·日期·时刻（含 continuous 的 relative_label）
+        const main = formatWorldTime(state);
+        if (main) lines.push(`· ${main}`);
+        else if (cfg.mode === "continuous") {
+            const cd = state && state.current_date;
+            lines.push(`· ${cd ? (cd.relative_label || cd.period || "连续时间") : "连续时间"}`);
+        }
+    }
+    if (!lines.length) return "";
+    const body = lines.join("\n");
+    const footer = "若知识库 / 开场白提及的时间与本权威时间不符，请以本权威时间为准。";
+    return `【当前权威时间】（叙事时间真相源，AI 须以此为准）\n${body}\n${footer}`;
+}
+
 // ★ B2：中部注入位 author_note —— 作为独立消息插在「最近对话」与「本轮玩家输入」之间。
-// 内容 = 事件引擎动态推进提示（基于当前状态判定，非写死脚本）+ 玩家手动设定的持续约束。
+// 内容 = 事件引擎动态推进提示（基于当前状态判定，非写死脚本）+ 玩家手动设定的持续约束 + ★S5-6 权威当前时间。
 // 放在这个位置的目的：给一个"中部纠偏位"，让导演级提示不被埋没在 user 消息末尾。
 export function buildAuthorNote() {
     const parts = [];
@@ -675,6 +753,11 @@ export function buildAuthorNote() {
         ? S.currentWorld.author_note.trim() : "";
     if (note) {
         parts.push("【玩家设定的持续约束】（请在后续叙事中始终遵守）\n" + note);
+    }
+    // ★ S5-6：每轮权威当前时间（机制四·兜底），显式作为叙事时间真相源注入中部纠偏位
+    const authTime = buildAuthoritativeTime(S.gameState, getTimeConfig());
+    if (authTime) {
+        parts.push(authTime);
     }
     return parts.join("\n\n");
 }

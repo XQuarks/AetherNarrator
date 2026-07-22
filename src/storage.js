@@ -6,11 +6,11 @@ import { STORAGE_KEYS } from "./store.js";
 import { deepClone, defaultWorldSchema } from "./utils.js";
 import { closeModal, showToast } from "./render.js";
 import { parseStoredArray, parseStoredObject } from "./migrations.js";
-import { idbGet, idbSet, idbDel } from "./idb.js";
+import { idbGet, idbSet, idbDel, idbSetMulti } from "./idb.js";
 import { PROVIDERS, detectProvider } from "./providers.js";
 import { EMBED_MODEL, EMBED_DIM } from "./rag.js";
 import { mergeWorldPack } from "./world-transfer.js";
-import { createCthulhuWorld, createUrbanLegendWorld } from "./new-worlds.js";
+import { createCthulhuWorld, createUrbanLegendWorld, createDualWorld } from "./new-worlds.js";
 
 export async function loadConfig() {
     const parsed = parseStoredObject(await idbGet(STORAGE_KEYS.config), {});
@@ -35,7 +35,8 @@ export async function loadWorlds() {
     const data = await idbGet(STORAGE_KEYS.worlds);
     const defaults = [
         createCthulhuWorld(),
-        createUrbanLegendWorld()
+        createUrbanLegendWorld(),
+        createDualWorld()
     ];
     const parsed = parseStoredArray(data, defaults);
     if (!parsed.ok) console.warn("世界数据损坏，已使用安全默认值；原 localStorage 未覆盖", parsed.error);
@@ -61,6 +62,10 @@ export async function loadWorlds() {
     }
     if (!S.worlds.some(w => w.id === "demo_urban_legend")) {
         S.worlds.push(createUrbanLegendWorld());
+        changed = true;
+    }
+    if (!S.worlds.some(w => w.id === "demo_dual_world")) {
+        S.worlds.push(createDualWorld());
         changed = true;
     }
     if (changed) saveWorlds().catch(() => {});
@@ -95,7 +100,7 @@ export function createDemoWorld(name, type, desc, tags) {
 }
 
 // 新世界工厂（实现在 new-worlds.js 中）
-export { createCthulhuWorld, createUrbanLegendWorld } from "./new-worlds.js";
+export { createCthulhuWorld, createUrbanLegendWorld, createDualWorld } from "./new-worlds.js";
 
 export async function loadSaves() {
     const data = await idbGet(STORAGE_KEYS.saves);
@@ -119,11 +124,14 @@ export async function saveState(serialized) {
     const stateStr = serialized ? serialized.state : JSON.stringify(S.gameState);
     const historyStr = serialized ? serialized.history : JSON.stringify(S.conversationHistory);
     const chatStr = serialized ? serialized.chatHistory : JSON.stringify(S.chatHistory);
-    // 索引数据库写入为异步；idbSet 内部已吞错，调用方可不等待（fire-and-forget）
-    await idbSet(STORAGE_KEYS.state, stateStr);
-    await idbSet(STORAGE_KEYS.history, historyStr);
-    await idbSet(STORAGE_KEYS.chatHistory, chatStr);
-    await idbSet(STORAGE_KEYS.chatSummary, JSON.stringify(S.chatSummary));
+    const summaryStr = JSON.stringify(S.chatSummary);
+    // ★ P0 性能：4 个键合并进同一个 IndexedDB 事务，避免 4 次独立事务写放大（每回合重复写盘的主因）
+    await idbSetMulti([
+        [STORAGE_KEYS.state, stateStr],
+        [STORAGE_KEYS.history, historyStr],
+        [STORAGE_KEYS.chatHistory, chatStr],
+        [STORAGE_KEYS.chatSummary, summaryStr]
+    ]);
 }
 
 export async function saveConfig() {
