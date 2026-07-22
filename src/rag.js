@@ -274,6 +274,38 @@ function expandRecursiveTriggers(seedSnips, kb, maxDepth) {
 //   ② 在已解锁阶段内按对话语义/关键词精选相关片段（无匹配则给全部已解锁阶段作为"已知经历"）；
 //   ③ 按 order 升序输出，不露"第X章"等章节字（只用地点+要点）。
 // 仅对走动态召回的 nonCore 类生效；人物/地点等固定在 system 的类不走此处，靠结构化 timeline + system 指令由 AI 自判。
+
+// 时间线分段文本拼接：地点 + 要点（不含 order/phase，避免章节字混入匹配）
+const textOfTimeline = (t) => ((t.location || "") + " " + (t.summary || ""));
+
+// ★ P0 优化：时间线分段向量缓存——首次按段现算后缓存在段对象上（仿 ensureLoreEmbeddings 在 snippet 上存 embedding），
+// 后续回合直接复用，避免每条时间线知识每回合都重算整段向量（最坏数十次串行 Worker 往返）。
+// 只在段已解锁（one-way 门禁）时按需计算；KB 重新载入（段对象被替换）时缓存自然失效。
+// 进行中的计算用 WeakMap 去重（不往段对象上挂 promise，避免污染存档序列化）。embedFn 默认走真实 computeEmbedding，测试可注入 mock。
+const _segEmbedPending = new WeakMap();
+export async function embedTimelineSegment(t, embedFn = computeEmbedding) {
+    const text = textOfTimeline(t);
+    // 已算且模型/维度一致 → 直接复用
+    if (Array.isArray(t.embedding) && t.embedding.length && t.embedDim === EMBED_DIM && t.embedModel === EMBED_MODEL) {
+        return t.embedding;
+    }
+    // 并发去重：同一段正在计算时复用同一个 promise，避免重复 Worker 往返
+    if (_segEmbedPending.has(t)) return _segEmbedPending.get(t);
+    const p = (async () => {
+        try {
+            const v = await embedFn(text, false); // 文档句不加查询前缀
+            t.embedding = v;
+            t.embedDim = EMBED_DIM;
+            t.embedModel = EMBED_MODEL;
+            return v;
+        } finally {
+            _segEmbedPending.delete(t);
+        }
+    })();
+    _segEmbedPending.set(t, p);
+    return p;
+}
+
 export async function selectTimelineSlice(snippet, input, qVec) {
     const tl = snippet.timeline;
     if (!Array.isArray(tl) || !tl.length) return snippet;
@@ -282,25 +314,21 @@ export async function selectTimelineSlice(snippet, input, qVec) {
     const progress = (S.gameState && typeof S.gameState.story_progress === "number") ? S.gameState.story_progress : 1;
     const unlocked = tl.filter((t) => orderOf(t) <= progress);
     if (!unlocked.length) return snippet; // 连最早阶段都未解锁（异常）→ 不注入 timeline，保留原 content
-    const textOf = (t) => ((t.location || "") + " " + (t.summary || "")); // 不含 phase，避免章节字混入匹配
     // ② 关键词匹配（零成本，始终可用）——仅在已解锁片段内
     const terms = segmentChinese(input || "");
     const kwMatched = [];
     for (const t of unlocked) {
-        const text = textOf(t).toLowerCase();
+        const text = textOfTimeline(t).toLowerCase();
         let hit = 0;
         for (const term of terms) if (text.includes(term)) hit++;
         if (hit > 0) kwMatched.push({ t, hit });
     }
-    // 语义匹配（向量可用时增强）——仅在已解锁片段内
+    // 语义匹配（向量可用时增强）——仅在已解锁片段内；段向量首次算后缓存，后续回合直接复用（P0 优化）
     let chosen = null;
     if (qVec && (typeof window !== "undefined" && (typeof window.transformers !== "undefined" || typeof Worker !== "undefined"))) {
         try {
-            const scored = [];
-            for (const t of unlocked) {
-                const tv = await computeEmbedding(textOf(t), false);
-                scored.push({ t, sim: cosineSimilarity(qVec, tv) });
-            }
+            const segs = await Promise.all(unlocked.map(async (t) => ({ t, tv: await embedTimelineSegment(t) })));
+            const scored = segs.map(({ t, tv }) => ({ t, sim: cosineSimilarity(qVec, tv) }));
             chosen = scored.sort((a, b) => b.sim - a.sim).slice(0, 3).map((x) => x.t);
         } catch (e) { /* 降级关键词 */ }
     }
@@ -562,19 +590,26 @@ export function addBehaviorRecords(facts) {
 }
 
 // ★ C4：后台异步补算所有行为记忆的向量 embedding（"黛玉病了"→"黛玉咳血" 语义匹配）
-export async function ensureBehaviorEmbeddings() {
+// embedFn 为可注入的向量计算函数（默认走 computeEmbedding），便于测试与未来替换推理后端。
+export async function ensureBehaviorEmbeddings(embedFn) {
     if (typeof window.transformers === "undefined" && typeof Worker === "undefined") return;
     const records = S.activeBehaviorRecords;
     if (!records || !records.length) return;
-    for (const r of records) {
-        // ★ P0-3 维度打标：模型/维度一致才跳过，否则重算
-        if (r.embedding && r.embedDim === EMBED_DIM && r.embedModel === EMBED_MODEL) continue;
-        try {
-            r.embedding = await computeEmbedding(r.text); // 记忆文本作为文档，不加查询前缀
-            r.embedDim = EMBED_DIM;
-            r.embedModel = EMBED_MODEL;
-        } catch (e) { /* 单条失败不阻塞其余 */ }
-    }
+    // ★ P0 提速：先筛出仍需算向量的记忆（模型/维度一致已算过的跳过），再用 runPool 并发补算，
+    //   避免最坏 100 条记忆逐条串行 Worker 往返；单条失败仅该条降级为关键词检索，不中断整体。
+    const pending = records.filter(r => !(r.embedding && r.embedDim === EMBED_DIM && r.embedModel === EMBED_MODEL));
+    if (!pending.length) return;
+    const embed = embedFn || computeEmbedding;
+    const EMBED_CONCURRENCY = getEmbedConcurrency();
+    await runPool(pending, EMBED_CONCURRENCY,
+        async (r) => {
+            try {
+                r.embedding = await embed(r.text); // 记忆文本作为文档，不加查询前缀
+                r.embedDim = EMBED_DIM;
+                r.embedModel = EMBED_MODEL;
+            } catch (e) { /* 单条失败不阻塞其余 */ }
+        }
+    );
 }
 
 export function summarizeFactsFromChanges(input, narrative, changes) {

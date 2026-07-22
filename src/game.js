@@ -301,7 +301,7 @@ export function restToNextDay() {
         key_facts: []
     });
     renderLog();
-    saveState();
+    // ★ 性能：删除冗余 saveState——下方 createOrUpdateSave() 内部已统一持久化（当前存档 + 存档槽），避免手动操作双写。
     createOrUpdateSave();
     showToast("已休息到次日清晨", "success");
 }
@@ -317,7 +317,7 @@ export function switchTimeline(id) {
         invalidateSystemPromptCache();
         updateGameDayInfo();
         if (typeof renderStatusPanel === "function") renderStatusPanel(S.currentStatusTab);
-        saveState();
+        // ★ 性能：删除冗余 saveState——下方 createOrUpdateSave() 内部已统一持久化，避免手动操作双写。
         createOrUpdateSave();
         showToast("已切换到分支：" + (S.gameState.branches[id].label || id), "success");
         return;
@@ -337,7 +337,7 @@ export function switchTimeline(id) {
     invalidateSystemPromptCache();
     updateGameDayInfo();
     if (typeof renderStatusPanel === "function") renderStatusPanel(S.currentStatusTab);
-    saveState();
+    // ★ 性能：删除冗余 saveState——下方 createOrUpdateSave() 内部已统一持久化，避免手动操作双写。
     createOrUpdateSave();
     showToast("已切换到时间线：" + (tc.timelines[id].name || id), "success");
 }
