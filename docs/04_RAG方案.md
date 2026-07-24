@@ -18,7 +18,8 @@ RAG（Retrieval-Augmented Generation）确保 AI 叙事严格遵循世界观设�
   ├─→ 行为记录检索 (中文分词)
   │     └─→ 关键事实 → 得分
   │
-  └─→ 融合排序 → Top 8 → 注入 User Message
+  └─→ 触发门控 (B1：trigger_mode/scan_depth 命中才进候选) → 融合排序 → 注入 User Message
+        （无触发元数据的老存档降级：取 Top 8 全量注入）
 ```
 
 ---
@@ -57,7 +58,7 @@ RAG（Retrieval-Augmented Generation）确保 AI 叙事严格遵循世界观设�
 | 关键词+向量同时命中 | 叠加 |
 | 行为记录 | 1.5× |
 
-最终取 Top 8 注入 user message。
+**当前默认世界（带触发元数据）先经过 B1 触发门控**：仅命中 `trigger_mode` 的片段进入候选，再融合排序并受 token 预算裁剪后注入；**无触发元数据的老存档才降级为"取 Top 8 全量注入"**。
 
 > 演进说明（B1 / B4）：当前 lore 已改为**触发式注入**——每条片段带 `activation_keys`/`trigger_mode`/`scan_depth`，仅命中（关键词/正则/向量相似度≥0.30）才进入候选；并以 token 预算 + `priority` 裁剪、递归触发（`recursive`）替代"无条件全量 Top8"。无触发元数据的老存档降级为全量检索。
 
