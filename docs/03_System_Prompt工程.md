@@ -40,6 +40,13 @@ System Prompt 是控制 AI 叙事行为的核心。当前使用固定前缀 + �
 - 动态内容（关键事实、NPC 关系、游戏状态、玩家输入）**全部放在 user 消息**
 - 不在 system prompt 中嵌入时间戳、随机 ID 或任何每轮变化的内容
 
+> **关键事实注入机制（B6 记忆晋升）**：关键事实不再"每轮无条件注入最近 5 条"。它们累积进 `S.activeBehaviorRecords`（≤100），由 RAG 的行为记录检索按需召回；仅高价值记忆（`importance ≥ 4` / `pinned`）经 AI 建议 + 玩家在确认台「应用」后晋升为 lore 固化。详见 `06_玩家行为记录与关键事实.md`。
+
+> **时间维度与开场注入（2026-07-22 时间系统解耦后新增）**：
+> - **权威时间兜底**：每轮在 system prompt 中部注入【当前权威时间】（原生 `current_date`，含纪元/季节/日历日期；multiverse 标注当前活动界），纠正 AI 时间漂移。见 `src/prompt.js::buildAuthoritativeTime`。
+> - **开场占位符**：世界开场白支持 `{era_label}`/`{season}`/`{calendar_date}`/`{calendar_year}`/`{calendar_month}` 占位符，进游戏前由 `utils.js::resolveOpeningTokens` 展开（非 dated 模式保留原文）。见 `docs/20` S5-3。
+> - **时间冲突 Lint + Critic 时间一致性**：`utils.js::detectTimeConflict` 在编辑/加载时检测年份/季节/现代措辞冲突；`llm.js::callWorldCriticLLM` 第 7 条审查重点注入时间锚点，约束 AI 不写出矛盾时间。见 `docs/20` S5-4 / S5-5。
+
 ### 2.2 Token 优化
 
 - 聊天历史压缩：完整保留最近 4 轮，更早轮次用 1-2 句中文摘要
