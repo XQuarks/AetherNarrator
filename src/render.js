@@ -948,15 +948,7 @@ export function startTypewriter(index) {
     const fullText = data.narrative || "";
     if (!fullText) return Promise.resolve();
 
-    // ★ P3.2.17: 尊重 prefers-reduced-motion — 直接出全文，跳过逐字动画
-    const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (prefersReduced) {
-        narrativeEl.innerHTML = renderNarrative(fullText, data.isWarning);
-        S.typingIndex = index;
-        return new Promise(resolve => { S.typingResolver = resolve; finishTyping(); });
-    }
-
-    // 清空容器，进入打字状态
+    // 清空容器，进入打字状态（不再因系统"减少动态效果"而跳过逐字动画）
     narrativeEl.innerHTML = "";
     narrativeEl.classList.add("typing");
     log.classList.add("typing-active");

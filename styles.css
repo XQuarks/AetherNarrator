@@ -1680,13 +1680,6 @@
             button, .mem-act, .spoiler-toggle { min-height: 44px; }
         }
 
-        /* ★ F1: 减弱动效时只关无限循环装饰动画（雾漂移/标题流光/按钮呼吸），
-           保留一次性入场动画（.rise 等）以确保页面内容正常显示。 */
-        @media (prefers-reduced-motion: reduce) {
-            .mist, .title-sheen, .menu-btn { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
-            * { transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
-        }
-
         /* ★ 步骤二：知识库初览中的"时间体系"卡片 */
         .time-cfg-card { border:1px solid var(--border, rgba(0,0,0,0.12)); border-radius:10px; padding:12px 14px; margin-bottom:14px; background:rgba(127,127,213,0.06); }
         .time-cfg-head { font-weight:600; margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
