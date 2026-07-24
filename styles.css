@@ -1,9 +1,9 @@
 
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@300;400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500&display=swap');
 
         :root {
-            --bg: #1E1B16;
-            --bg-gradient: radial-gradient(ellipse at 50% -10%, #2E281F 0%, #26221B 38%, #1A1712 100%);
+            --bg: #191510;
+            --bg-gradient: radial-gradient(ellipse at 50% -10%, #28221A 0%, #211B14 38%, #15110C 100%);
             --bg-panel: #26221B;
             --bg-sidebar: #221E18;
             --card: rgba(217, 207, 192, 0.05);
@@ -39,6 +39,17 @@
             --mist-b: rgba(201, 168, 124, 0.05);
             --mote: rgba(216, 188, 154, 0.55);
             --glow: rgba(201, 168, 124, 0.35);
+            /* demo 顶栏变量 */
+            --header-h: 56px;
+            --panel: rgba(38, 34, 27, 0.72);
+            --panel-solid: #26221B;
+            --panel-border: rgba(201, 168, 124, 0.14);
+            --text-2: rgba(217, 207, 192, 0.64);
+            --text-3: rgba(217, 207, 192, 0.40);
+            --primary-strong: #DDBE92;
+            --blur: saturate(140%) blur(14px);
+            --serif: "Noto Serif SC", "Songti SC", Georgia, serif;
+            --sans: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
         }
 
         /* 白天模式 — 仿电子书阅读器 */
@@ -77,6 +88,13 @@
             --mist-b: rgba(158, 125, 78, 0.04);
             --mote: rgba(158, 125, 78, 0.40);
             --glow: rgba(158, 125, 78, 0.28);
+            /* demo 顶栏变量（日间） */
+            --panel: rgba(252, 249, 243, 0.82);
+            --panel-solid: #FCF9F3;
+            --panel-border: rgba(158, 125, 78, 0.22);
+            --text-2: rgba(56, 50, 38, 0.66);
+            --text-3: rgba(56, 50, 38, 0.42);
+            --primary-strong: #8A6B3E;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -121,36 +139,53 @@
             to { opacity: 1; }
         }
 
-        /* 顶部导航栏 */
-        .nav-header {
+        /* demo 风格顶栏 */
+        .topbar {
+            height: var(--header-h);
+            flex: none;
             display: flex;
             align-items: center;
-            justify-content: center;
-            padding: 0 20px;
-            background: var(--bg-panel);
-            border-bottom: 1px solid var(--separator);
-            position: relative;
-            min-height: 52px;
-            flex: none;
+            gap: 10px;
+            padding: 0 14px;
+            padding-top: env(safe-area-inset-top);
+            background: var(--panel);
+            backdrop-filter: var(--blur);
+            -webkit-backdrop-filter: var(--blur);
+            border-bottom: 1px solid var(--panel-border);
+            z-index: 5;
         }
-        .nav-header .back-btn {
-            position: absolute;
-            left: 12px;
-            background: none;
-            border: none;
-            color: var(--text);
-            font-size: 20px;
-            cursor: pointer;
-            padding: 8px;
-            transition: opacity 0.15s;
-        }
-        .nav-header .back-btn:hover { opacity: 0.6; }
-        .nav-header .title {
-            font-size: 13px;
-            font-weight: 500;
-            margin: 0;
+        .topbar .title {
+            font-weight: 700;
+            font-size: 16px;
             letter-spacing: 0.06em;
+            font-family: var(--serif);
         }
+        .topbar .sub {
+            font-size: 11.5px;
+            color: var(--text-2);
+            margin-top: 1px;
+            font-family: var(--sans);
+        }
+        .icon-btn {
+            width: 36px;
+            height: 36px;
+            flex: none;
+            display: grid;
+            place-items: center;
+            border-radius: 10px;
+            border: 1px solid var(--panel-border);
+            background: transparent;
+            color: var(--text-2);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 0;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .icon-btn:hover {
+            color: var(--primary-strong);
+            border-color: var(--primary);
+        }
+        .spacer { flex: 1; }
 
         /* 主界面 */
         .home-screen {
@@ -162,9 +197,9 @@
             min-height: 100%;
             min-height: 100dvh;
         }
-        /* 氛围背景层：雾 / 暗角 / 浮尘（仅首页，固定在该屏内，不溢出到其他屏） */
-        #homeMotes {
-            position: absolute;
+        /* 全局背景光点层：单个 fixed canvas，置于所有界面之下（z-index:0 在 body 背景之上、各屏透明内容之下） */
+        #bgMotes {
+            position: fixed;
             inset: 0;
             width: 100%;
             height: 100%;
@@ -197,10 +232,41 @@
         [data-theme="light"] .vignette {
             background: radial-gradient(ellipse at 50% 42%, transparent 58%, rgba(120,108,84,0.10) 100%);
         }
+        /* 世界 / 存档 / 设置 三屏复用首页氛围背景（雾 + 暗角），纯 CSS、随主题自动适配 */
+        #worldListScreen::before,
+        #saveListScreen::before,
+        #settingsScreen::before {
+            content: "";
+            position: absolute;
+            inset: -20%;
+            z-index: -1;
+            pointer-events: none;
+            background:
+                radial-gradient(38% 45% at 22% 30%, var(--mist-a) 0%, transparent 70%),
+                radial-gradient(42% 50% at 80% 24%, var(--mist-b) 0%, transparent 72%),
+                radial-gradient(50% 55% at 60% 88%, var(--mist-a) 0%, transparent 75%);
+            animation: mistDrift 26s ease-in-out infinite alternate;
+        }
+        #worldListScreen::after,
+        #saveListScreen::after,
+        #settingsScreen::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            background: radial-gradient(ellipse at 50% 42%, transparent 52%, rgba(0,0,0,0.28) 100%);
+        }
+        [data-theme="light"] #worldListScreen::after,
+        [data-theme="light"] #saveListScreen::after,
+        [data-theme="light"] #settingsScreen::after {
+            background: radial-gradient(ellipse at 50% 42%, transparent 58%, rgba(120,108,84,0.10) 100%);
+        }
         .home-content {
             width: 100%;
             max-width: 430px;
             padding: 44px 30px;
+            padding-bottom: calc(72px + env(safe-area-inset-bottom));
             text-align: center;
             position: relative;
             z-index: 2;
@@ -350,6 +416,7 @@
             display: block;
             margin-bottom: 2px;
             letter-spacing: 0.04em;
+            font-family: var(--serif);
         }
         .menu-btn .desc {
             font-size: 12px;
@@ -428,42 +495,84 @@
            含顶部标题组与底部脚注，作为一个整体块居中，不会顶到上下边缘。背景层本就 absolute inset:0 全屏，与此无关。 */
 
         /* 列表屏幕 */
-        .create-world-bar {
-            margin: 12px 16px 0;
-            padding: 14px 18px;
-            border-radius: var(--radius-m);
-            background: rgba(201, 168, 124, 0.08);
-            border: 1px dashed rgba(201, 168, 124, 0.3);
+        /* ---- 分区标题（快速入口 / 全部世界） ---- */
+        .section-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 18px 2px;
+            max-width: 960px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        .section-head h2 {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            margin: 0;
+            font-family: var(--sans);
+        }
+        .section-head::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: var(--card-border);
+        }
+        /* ---- 快速入口 action-tile 网格 ---- */
+        .world-actions-grid {
+            max-width: 960px;
+            margin: 6px auto 0;
+            padding: 0 18px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 14px;
+            box-sizing: border-box;
+        }
+        .action-tile {
             display: flex;
             align-items: center;
             gap: 12px;
+            padding: 16px 18px;
+            border-radius: var(--radius-m);
+            border: 1.5px dashed rgba(201, 168, 124, 0.4);
+            background: rgba(201, 168, 124, 0.04);
+            color: var(--primary-light);
             cursor: pointer;
-            transition: background 0.15s ease, border-color 0.15s ease;
+            text-align: left;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.18s ease;
+            font-family: inherit;
         }
-        .create-world-bar:hover {
-            background: rgba(201, 168, 124, 0.14);
-            border-color: rgba(201, 168, 124, 0.5);
+        .action-tile:hover {
+            background: rgba(201, 168, 124, 0.10);
+            border-color: var(--primary);
+            transform: translateY(-2px);
         }
-        .create-world-bar .create-icon {
+        .action-tile .at-icon {
             font-size: 22px;
             color: var(--primary-light);
             line-height: 1;
-            font-weight: 300;
+            flex: none;
         }
-        .create-world-bar .create-label {
-            font-size: 14px;
-            font-weight: 500;
+        .action-tile .at-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .action-tile .at-title {
+            font-size: 15px;
+            font-weight: 700;
             color: var(--primary-light);
+            letter-spacing: 0.03em;
+            font-family: var(--serif);
         }
-        .create-world-bar .create-desc {
-            font-size: 11px;
+        .action-tile .at-desc {
+            font-size: 11.5px;
             color: var(--text-muted);
-            margin-left: auto;
+            line-height: 1.4;
+            font-family: var(--sans);
         }
         .list-content {
             flex: 1;
             overflow-y: auto;
             padding: 16px;
+            padding-bottom: calc(72px + env(safe-area-inset-bottom));
         }
         .empty-state {
             text-align: center;
@@ -481,7 +590,7 @@
             transition: background 0.15s ease, border-color 0.15s ease;
         }
         .list-item:hover { background: var(--card-hover); border-color: var(--card-border-hover); }
-        .list-item .item-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; color: var(--text); }
+        .list-item .item-title { font-size: 15px; font-weight: 500; font-family: var(--serif); margin-bottom: 4px; color: var(--text); }
         .list-item .item-meta { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
         .list-item .item-tags { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
         .list-item.dead-save { border-color: rgba(226, 75, 74, 0.3); background: rgba(226, 75, 74, 0.05); }
@@ -548,14 +657,15 @@
         .tag.primary { background: rgba(201, 168, 124, 0.12); color: var(--primary); }
         .tag.accent { background: rgba(201, 168, 124, 0.08); color: var(--primary-light); }
 
-        /* 弹窗 */
+        /* 弹窗：桌面端默认居中（手机端在 ≤767px 媒体查询中改为底部抽屉） */
         .modal-overlay {
             position: fixed;
             inset: 0;
             background: var(--overlay-bg);
             display: none;
             justify-content: center;
-            align-items: flex-end;
+            align-items: center;
+            padding: 32px 24px;
             z-index: 1000;
             opacity: 0;
             transition: opacity 0.25s ease;
@@ -568,18 +678,21 @@
         }
         .modal {
             background: var(--bg-panel);
-            border-radius: var(--radius-l) var(--radius-l) 0 0;
+            border-radius: var(--radius-l);
+            border: 1px solid var(--card-border);
             width: 100%;
             max-width: 520px;
-            max-height: 90vh;
+            max-height: calc(100dvh - 64px);
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            transform: translateY(100%);
-            transition: transform 0.3s ease;
-            border-top: 1px solid var(--card-border);
+            transform: scale(0.96) translateY(8px);
+            opacity: 0;
+            transition: transform 0.25s ease, opacity 0.25s ease;
+            backdrop-filter: saturate(180%) blur(18px);
+            -webkit-backdrop-filter: saturate(180%) blur(18px);
         }
-        .modal-overlay.show .modal { transform: translateY(0); }
+        .modal-overlay.show .modal { transform: scale(1) translateY(0); opacity: 1; }
         .modal-header {
             padding: 20px 20px 16px;
             display: flex;
@@ -1070,26 +1183,29 @@
         .toast.error { border-color: var(--danger); }
 
         /* 游戏界面 — 视觉语言与首页 home_v1 保持一致：氛围背景 + 浮层卡片 */
-        .game-screen { background: var(--bg-gradient); background-color: var(--bg); color: var(--text); }
-        /* 游戏屏专属氛围背景层（与首页同一套雾/暗角/浮尘） */
-        #gameMotes { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+        /* 背景透明，复用 body 渐变 + 全局 #bgMotes 光点（与其它屏统一，避免盖住底层光点） */
+        .game-screen { color: var(--text); }
         .game-screen > .game-header,
         .game-screen > .death-banner,
         .game-screen > .game-body { position: relative; z-index: 2; }
         .game-header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding: 0 20px;
+            gap: 10px;
+            padding: 0 14px;
+            padding-top: env(safe-area-inset-top);
             background: var(--card);
             border-bottom: 1px solid var(--card-border);
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             flex: none;
             height: 56px;
+            z-index: 5;
         }
-        .game-header .world-name { font-size: 14px; font-weight: 500; color: var(--text); letter-spacing: 0.04em; }
-        .game-header .day-info { font-size: 12px; color: var(--text-muted); }
+        /* demo 风格：标题 + 副标题（时间线切换归到 meta 内） */
+        .game-header .game-header-meta { min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+        .game-header .world-name { font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--serif); }
+        .game-header .day-info { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; font-family: var(--sans, system-ui, sans-serif); display: flex; align-items: center; flex-wrap: wrap; }
         .cache-indicator { font-size: 10px; color: var(--text-tertiary); margin-left: 8px; padding: 2px 6px; border-radius: 4px;
             background: var(--card-bg); border: 1px solid var(--card-border); cursor: default; }
         .cache-indicator.good { color: #1D9E75; border-color: #5DCAA5; }
@@ -1108,12 +1224,14 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            min-height: 0; /* 关键：允许收缩，否则内部 game-log 撑开导致无法滚动 */
         }
         .game-log {
             flex: 1;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
             overscroll-behavior-y: contain;
+            min-height: 0; /* 关键：允许 game-log 收缩到小于内容高度，overflow-y:auto 才会触发滚动 */
             padding: 20px 24px;
             background: transparent;
         }
@@ -1141,7 +1259,7 @@
         }
         .log-entry .narrative {
             line-height: 1.85;
-            font-size: 14.5px;
+            font-size: 15.5px;
             letter-spacing: 0.01em;
             color: var(--text);
         }
@@ -1222,6 +1340,7 @@
             background: var(--card);
             color: var(--text-secondary);
             font-size: 13px;
+            font-family: var(--serif);
             cursor: pointer;
             transition: all 0.15s;
             animation: choiceIn 0.35s ease-out both;
@@ -1236,10 +1355,16 @@
         }
         .choice-chip:hover { color: var(--text); border-color: var(--card-border-hover); background: var(--card-hover); }
         .choice-chip:active { color: var(--primary); border-color: var(--primary); }
+        .choice-chip .choice-index {
+            color: var(--primary);
+            font-weight: 600;
+            margin-right: 6px;
+        }
         .choices-row.in-log {
             padding: 0 0 16px 0;
             margin-top: 4px;
             flex-wrap: wrap;
+            overflow: visible; /* 关键：in-log 模式需要换行显示全部选项，不能被 overflow-x:auto 截成单行滚动盒 */
         }
         .input-row {
             display: flex;
@@ -1260,6 +1385,7 @@
         .input-row input::placeholder { color: var(--text-muted); }
         .input-row .send-btn {
             flex-shrink: 0;
+            font-family: var(--serif);
             background: var(--primary);
             color: var(--btn-primary-text);
             border: none;
@@ -1272,20 +1398,32 @@
             letter-spacing: 0.04em;
         }
         .input-row .send-btn:hover { opacity: 0.85; }
-        .game-header .header-actions { display: flex; gap: 6px; }
-        .game-header .header-actions button {
-            padding: 6px 14px;
+        /* demo 风格顶栏：图标按钮组（返回箭头 + 主题 + 角色 + 设置） */
+        .game-header .spacer { flex: 1; }
+        .game-header .icon-btn {
+            width: 36px;
+            height: 36px;
+            flex: none;
+            display: grid;
+            place-items: center;
+            border-radius: 10px;
             border: 1px solid var(--card-border);
-            background: var(--card);
             color: var(--text-secondary);
-            border-radius: var(--radius-m);
-            font-size: 12px;
+            background: transparent;
+            transition: all 0.15s ease;
             cursor: pointer;
-            transition: all 0.15s;
-            letter-spacing: 0.04em;
-            min-height: 36px;
+            padding: 0;
+            min-height: 0;
         }
-        .game-header .header-actions button:hover { color: var(--primary); border-color: var(--primary); background: var(--card-hover); }
+        .game-header .icon-btn:hover { color: var(--primary); border-color: var(--primary); background: var(--card-hover); }
+        .game-header .icon-btn svg { display: block; }
+        /* 主题切换：日/夜图标二选一 */
+        .game-header .icon-btn .theme-icon-sun { display: none; }
+        .game-header .icon-btn .theme-icon-moon { display: block; }
+        :root[data-theme="light"] .game-header .icon-btn .theme-icon-sun,
+        html[data-theme="light"] .game-header .icon-btn .theme-icon-sun { display: block; }
+        :root[data-theme="light"] .game-header .icon-btn .theme-icon-moon,
+        html[data-theme="light"] .game-header .icon-btn .theme-icon-moon { display: none; }
 
         .death-banner {
             display: flex; align-items: center; gap: 8px;
@@ -1611,6 +1749,8 @@
 /* ===== 步骤 B：Obsidian 风三栏链状知识库 UI ===== */
 #loreReviewModal .modal { max-width: min(1180px, 96vw); }
 .lore-obsidian { display: flex; flex-direction: column; gap: 12px; max-height: 80vh; }
+/* 知识库三栏分段切换条：桌面隐藏，仅在手机端媒体查询中显示 */
+.lore-seg { display: none; }
 .lore-obs-toolbar { display: flex; gap: 8px; align-items: center; }
 .lore-search { flex: 1; background: var(--bg-panel); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 8px 12px; font-size: 13px; font-family: inherit; }
 .lore-search:focus { outline: none; border-color: var(--primary); }
@@ -1702,19 +1842,31 @@
 .lore-col-aside[open] > summary::before { content: "▾ "; }
 
 @media (max-width: 720px) {
-  .lore-obs-cols { flex-direction: column; max-height: none; gap: 8px; }
-  .lore-col-aside { display: block; }
-  .lore-col-aside > summary {
-    display: flex; align-items: center; gap: 6px; padding: 9px 12px;
-    background: var(--bg-sidebar); border: 1px solid var(--card-border);
-    border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text);
-    list-style: none;
+  /* 知识库三栏 → 手机端分段切换（文件 / 笔记 / 关联） */
+  .lore-seg {
+    display: flex; gap: 6px; padding: 4px;
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: var(--radius-m);
   }
-  .lore-col-aside:not([open]) > .lore-tree,
-  .lore-col-aside:not([open]) > .lore-backlinks { display: none; }
-  .lore-tree { width: auto; flex: none; max-height: 44vh; }
-  .lore-backlinks { width: auto; flex: none; max-height: 44vh; }
-  .lore-note { max-height: none; min-height: 54vh; }
+  .lore-seg-btn {
+    flex: 1; padding: 9px 8px; border: 1px solid transparent;
+    border-radius: var(--radius-s);
+    background: transparent; color: var(--text-secondary);
+    font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit;
+    transition: background .15s, color .15s;
+  }
+  .lore-seg-btn:hover { background: var(--card-hover); color: var(--text); }
+  .lore-seg-btn.active { background: var(--bg-panel); color: var(--text); border-color: var(--card-border); box-shadow: var(--shadow-card); }
+
+  .lore-obs-cols { display: block; gap: 0; }
+  .lore-obs-cols > [data-seg] { display: none; }
+  .lore-obs-cols > [data-seg].seg-show { display: block; }
+  .lore-col-aside > summary { display: none !important; }
+  .lore-col-aside > .lore-tree,
+  .lore-col-aside > .lore-backlinks { display: block !important; }
+  .lore-tree { width: auto; flex: none; max-height: 56vh; }
+  .lore-backlinks { width: auto; flex: none; max-height: 56vh; }
+  .lore-note { max-height: none; min-height: 50vh; }
 }
 
 /* ===== 知识库弹窗：视图切换（知识库 / 图谱 / 时间体系） ===== */
@@ -1803,3 +1955,568 @@
 }
 .req-tag { color: #b42318; background: #fef3f2; border: 1px solid #fda29b; }
 .opt-tag { color: #067647; background: #ecfdf3; border: 1px solid #abefc6; }
+
+/* ============================================================
+   UI 重设计层（2026-07 · docs/ui-redesign）
+   说明：本段叠加在既有样式之后，只覆盖游戏界面相关规则；
+   颜色全部沿用 :root / [data-theme="light"] 变量，深浅主题自动同步。
+   回退方法：整段删除即可恢复旧外观（index.html 的 textarea 不受影响）。
+   ============================================================ */
+
+/* ============================================================
+   UI 重设计层（追加，不修改上方原有规则）
+   目标：游戏界面接近 demo.html 效果
+   ============================================================ */
+
+/* ---- 阅读列宽：正文/选项/输入区统一收敛到 720px 居中 ---- */
+.game-log { padding: 26px 18px 16px; scroll-behavior: smooth; }
+#gameLog { display: flex; flex-direction: column; gap: 22px; }
+#gameLog > .log-entry,
+#gameLog > .choices-row { max-width: 720px; width: 100%; margin-left: auto; margin-right: auto; }
+#gameLog > .log-entry { margin-bottom: 0; }
+
+/* ---- 日志条目：流畅阅读流（去掉重卡片感） ---- */
+#gameLog .log-entry {
+    border-radius: 0 !important;
+    padding: 0 0 4px 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin-bottom: 0 !important;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ---- meta 行：小字 + 右侧分隔线（demo 风格） ---- */
+#gameLog .log-entry .meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+    font-family: var(--sans, system-ui, sans-serif);
+    margin-bottom: 0 !important;
+}
+#gameLog .log-entry .meta::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--card-border);
+}
+
+/* ---- 叙事文字：衬线 + 两端对齐 + 舒展行高 ---- */
+#gameLog .log-entry .narrative {
+    font-size: 17px !important;
+    line-height: 2.05 !important;
+    letter-spacing: 0.02em;
+    text-align: justify;
+    color: var(--text) !important;
+    font-family: var(--serif);
+}
+#gameLog .log-entry .narrative p + p { margin-top: 0.9em; }
+/* 打字过程中保留原始换行，使逐字显示时也能看出段落结构（结束后由 <p> 段落接管） */
+#gameLog .log-entry .narrative.typing { white-space: pre-wrap; }
+
+/* ---- 玩家行动：金棕气泡，右对齐，与 AI 叙事一眼区分 ---- */
+#gameLog .log-entry .player-text {
+    align-self: flex-end;
+    max-width: 85%;
+    display: block;
+    padding: 10px 16px !important;
+    border-radius: 14px 14px 4px 14px !important;
+    background: rgba(201, 168, 124, 0.13) !important;
+    border: 1px solid rgba(201, 168, 124, 0.28) !important;
+    font-size: 14px !important;
+    line-height: 1.8;
+    color: var(--primary-strong, #c9a87c) !important;
+    font-weight: 400 !important;
+    font-family: var(--serif);
+    margin-bottom: 0 !important;
+}
+.log-entry .player-text::before {
+    content: "你";
+    display: block;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-family: var(--sans, system-ui, sans-serif);
+    margin-bottom: 3px;
+    letter-spacing: 0.04em;
+}
+[data-theme="light"] .log-entry .player-text {
+    background: rgba(158, 125, 78, 0.10);
+    border-color: rgba(158, 125, 78, 0.30);
+}
+
+/* ---- 氛围提示（环境变化/危机低语，虚线胶囊居中） ---- */
+.log-whisper { margin-top: 6px; display: flex; justify-content: center; }
+.log-whisper > span {
+    display: inline-block;
+    max-width: 100%;
+    padding: 6px 14px;
+    font-size: 12px;
+    line-height: 1.6;
+    letter-spacing: 0.03em;
+    color: var(--danger, #b42318);
+    font-family: var(--sans, system-ui, sans-serif);
+    border: 1px dashed rgba(201, 124, 124, 0.40);
+    border-radius: 999px;
+    background: transparent;
+}
+[data-theme="light"] .log-whisper > span {
+    border-color: rgba(180, 80, 50, 0.35);
+}
+
+/* ---- 选项 chips：圆角胶囊形，flex 横排 ---- */
+#choicesArea { display: flex; flex-wrap: wrap; gap: 9px; }
+.choice-chip {
+    padding: 9px 16px;
+    border-radius: 99px;
+    border: 1px solid rgba(201, 168, 124, 0.40);
+    background: var(--card, rgba(30, 26, 24, 0.6));
+    font-size: 13.5px;
+    color: var(--primary-strong, #c9a87c);
+    transition: all 0.15s ease;
+    text-align: left;
+    cursor: pointer;
+}
+.choice-chip:hover {
+    background: rgba(201, 168, 124, 0.16);
+    transform: translateY(-1px);
+    border-color: rgba(201, 168, 124, 0.55);
+}
+.choice-chip:active { color: var(--primary); border-color: var(--primary); }
+
+/* ---- 输入区：composer 风格，与阅读列同宽 ---- */
+.game-input-area {
+    flex: none;
+    border-top: 1px solid var(--card-border);
+    background: var(--card, var(--bg-panel));
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+}
+.input-row {
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    align-items: flex-end;
+    gap: 9px;
+}
+.input-row textarea#playerInput {
+    flex: 1;
+    min-width: 0;
+    min-height: 42px;
+    max-height: 120px;
+    resize: none;
+    padding: 11px 14px;
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    font-size: 15px;
+    line-height: 1.55;
+    background: rgba(0, 0, 0, 0.14);
+    color: var(--text);
+    font-family: var(--serif, "Noto Serif SC", Georgia, serif);
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+[data-theme="light"] .input-row textarea#playerInput { background: rgba(255, 255, 255, 0.5); }
+.input-row textarea#playerInput:focus { border-color: var(--primary); outline: none; }
+.input-row textarea#playerInput::placeholder { color: var(--text-muted); font-family: var(--sans, system-ui, sans-serif); }
+.input-row .send-btn {
+    height: 42px;
+    padding: 0 20px;
+    border-radius: 12px;
+    background: var(--primary);
+    color: var(--btn-primary-text, #1a1614);
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    transition: all 0.15s ease;
+    flex: none;
+}
+.input-row .send-btn:hover { background: var(--primary-strong, #dbb896); opacity: 1; }
+.composer-hint {
+    max-width: 720px;
+    margin: 6px auto 0;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-family: var(--sans, system-ui, sans-serif);
+    letter-spacing: 0.03em;
+}
+.game-input-area .loading-indicator { max-width: 720px; margin-left: auto; margin-right: auto; }
+
+/* ---- 移动端（≤767px）：角色面板变底部弹层、顶栏收紧 ---- */
+@media (max-width: 767px) {
+    .game-header { padding: 0 10px; gap: 8px; }
+    .game-header .icon-btn { width: 34px; height: 34px; border-radius: 9px; }
+    .game-header .world-name { font-size: 15px; }
+    .game-header .day-info { font-size: 11px; }
+    .game-header .timeline-switch { margin-top: 2px; }
+    .game-log { padding: 18px 14px 12px; }
+    #gameLog .log-entry .narrative { font-size: 16.5px !important; line-height: 2.0 !important; }
+    #gameLog .log-entry .player-text { max-width: 90%; font-size: 13.5px !important; }
+    /* 角色状态面板：右侧抽屉 → 底部弹层（手机端拇指习惯） */
+    .status-panel-overlay { justify-content: stretch; align-items: flex-end; }
+    .status-panel {
+        max-width: 100%;
+        height: 82%;
+        border-left: none;
+        border-top: 1px solid var(--card-border);
+        border-radius: 16px 16px 0 0;
+        transform: translateY(102%);
+    }
+    .status-panel-overlay.show .status-panel { transform: translateY(0); }
+    .composer-hint { display: none; } /* 手机上省一行空间，placeholder 已说明 */
+
+    /* ---- 底部导航（手机端 ≤767px 显示） ---- */
+    .bottom-nav { display: flex; }
+    .bottom-nav button { flex: 1; }
+
+    /* ---- 弹窗：手机端从底部升起（带顶部抓手条） ---- */
+    .modal-overlay { align-items: flex-end; padding: 0; }
+    .modal {
+        max-width: 100%;
+        max-height: 92dvh;
+        border: none;
+        border-top: 1px solid var(--card-border);
+        border-radius: 18px 18px 0 0;
+        transform: translateY(102%);
+        position: relative;
+    }
+    .modal::before {
+        content: "";
+        position: absolute;
+        top: 7px; left: 50%;
+        transform: translateX(-50%);
+        width: 38px; height: 4px;
+        border-radius: 99px;
+        background: var(--text-tertiary);
+        opacity: .35;
+        z-index: 2;
+    }
+    .modal-overlay.show .modal { transform: translateY(0); }
+    .modal-header { padding-top: 20px; }
+    .modal-wide, #loreReviewModal .modal, .modal-graph-wide { max-width: 100% !important; width: 100%; }
+}
+
+/* ---- 首页菜单卡微调 ---- */
+.menu-btn { backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); }
+.menu-btn .ic { width: 40px; height: 40px; }
+
+/* ---- 世界列表卡片化 ---- */
+#worldListContent {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 12px 18px calc(72px + env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-auto-rows: max-content;
+    gap: 14px;
+}
+.world-card {
+    background: rgba(38, 34, 27, 0.07);
+    border: 1px solid rgba(201, 168, 124, 0.45);
+    border-radius: var(--radius-l);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: fit-content;
+    align-self: start;
+    transition: transform .18s, border-color .18s, box-shadow .18s, background .18s;
+    cursor: pointer;
+    animation: fadeSlideIn 0.4s ease-out both;
+    backdrop-filter: saturate(180%) blur(22px);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        0 4px 20px rgba(0,0,0,0.14);
+}
+.world-card:hover { transform: translateY(-2px); border-color: rgba(201, 168, 124, 0.68); background: rgba(38, 34, 27, 0.11); box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 6px 24px rgba(0,0,0,0.18); }
+.world-card.new-world { border-color: rgba(201, 168, 124, 0.52); }
+
+/* ---- 卡片内部结构 ---- */
+.wc-cover {
+    display: flex;
+    align-items: flex-end;
+    padding: 12px 16px;
+    height: 64px;          /* 照 demo：封面为顶部色块横条，全尺寸统一竖版 */
+    background: linear-gradient(120deg, rgba(201, 168, 124, 0.22), rgba(201, 168, 124, 0.04));
+    flex: none;
+    position: relative;
+    border-bottom: 1px solid rgba(201, 168, 124, 0.14);
+}
+.wc-glyph {
+    font-size: 30px;
+    font-weight: 700;
+    color: var(--primary-strong);
+    opacity: .9;
+    line-height: 1;
+    font-family: var(--serif);
+}
+[data-theme="light"] .wc-cover { border-bottom-color: rgba(158, 125, 78, 0.22); }
+.wc-badge {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    font-size: 10.5px;
+    padding: 2px 9px;
+    border-radius: 99px;
+    background: rgba(201,168,124,.18);
+    color: var(--primary-strong);
+    border: 1px solid rgba(201,168,124,.30);
+}
+.wc-badge-original { color: var(--primary-strong); border-color: rgba(201,168,124,.30); background: rgba(201,168,124,.18); }
+[data-theme="light"] .wc-badge-original { color: var(--primary-strong); border-color: rgba(158,125,78,.30); background: rgba(158,125,78,.12); }
+.wc-body { padding: 12px 16px 10px; flex: 1; }
+.wc-title { font-size: 16.5px; font-weight: 700; letter-spacing: .03em; display: flex; align-items: center; gap: 8px; font-family: var(--serif); }
+.wc-desc {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.75;
+    margin-top: 6px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-family: var(--serif);
+}
+.wc-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.wc-chip {
+    font-size: 10.5px;
+    padding: 2.5px 9px;
+    border-radius: 99px;
+    border: 1px solid rgba(201, 168, 124, 0.14);
+    color: var(--text-secondary);
+}
+[data-theme="light"] .wc-chip { border-color: rgba(158, 125, 78, 0.22); }
+.wc-chip-status {
+    color: var(--primary-strong);
+    border-color: rgba(201, 168, 124, 0.4);
+    background: rgba(201, 168, 124, 0.12);
+    font-weight: 600;
+}
+.wc-foot {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-top: 1px solid rgba(201, 168, 124, 0.14);
+    flex: none;
+    min-height: 50px;
+    background: transparent;
+}
+[data-theme="light"] .wc-foot { background: transparent; border-top-color: rgba(158, 125, 78, 0.22); }
+[data-theme="light"] .world-card {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(158, 125, 78, 0.58);
+    backdrop-filter: saturate(180%) blur(22px);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        0 4px 16px rgba(120, 108, 84, 0.10);
+}
+[data-theme="light"] .world-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(158, 125, 78, 0.80);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 6px 22px rgba(120, 108, 84, 0.13);
+}
+.wc-foot-spacer { flex: 1; }
+/* 卡片底部按钮：对抗全局 .btn{flex:1}，确保自然宽度 + 高可见度 */
+.wc-foot .btn {
+    flex: none !important;
+    padding: 9px 16px !important;
+    font-size: 12.5px !important;
+    font-family: var(--serif);
+    min-height: 36px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 8px !important;
+    white-space: nowrap;
+    line-height: 1.2;
+    border: 1px solid rgba(201, 168, 124, 0.14) !important;
+    color: var(--text-secondary) !important;
+}
+.wc-foot .btn:hover { color: var(--primary-strong) !important; border-color: var(--primary) !important; }
+[data-theme="light"] .wc-foot .btn { border-color: rgba(158, 125, 78, 0.22) !important; }
+.wc-foot .btn.primary {
+    background: var(--primary) !important;
+    border-color: var(--primary) !important;
+    color: #2A2118 !important;
+    font-weight: 600 !important;
+}
+.wc-foot .btn.primary:hover { background: var(--primary-strong) !important; }
+[data-theme="light"] .wc-foot .btn.primary {
+    background: var(--primary) !important;
+    border-color: var(--primary) !important;
+    color: #FCF9F3 !important;
+}
+[data-theme="light"] .wc-foot .btn.primary:hover { background: var(--primary-strong) !important; border-color: var(--primary-strong) !important; color: #FCF9F3 !important; }
+.wc-foot .btn.ghost-danger {
+    color: #C97C7C !important;
+    border-color: #C97C7C !important;
+    background: transparent !important;
+    font-weight: 500 !important;
+}
+[data-theme="light"] .wc-foot .btn.ghost-danger { color: #B05656 !important; border-color: #B05656 !important; }
+.wc-foot .btn.ghost-danger:hover { background: transparent !important; }
+
+/* ---- 世界卡片：全尺寸统一竖版（照 demo：封面在上、正文居中、底部操作，仅网格多列自适应） ---- */
+
+/* ---- 选项页（独立页面） ---- */
+.settings-content {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 16px 18px calc(72px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+/* 设置卡直接复用存档界面存档框 .list-item 的样式（日夜间统一），
+   不额外加 backdrop-filter / 不另设圆角 / 不另写背景色，杜绝切换闪烁 */
+.settings-card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-m);
+    padding: 16px 18px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+/* 浅色模式：存档弹窗 / 设置卡 / 列表项统一为同款半透明 */
+[data-theme="light"] .modal { background: rgba(252, 249, 243, 0.38); }
+[data-theme="light"] .settings-card { background: rgba(254, 252, 249, 0.38); }
+[data-theme="light"] .list-item { background: rgba(254, 252, 249, 0.38); }
+[data-theme="light"] .list-item:hover { background: rgba(254, 252, 249, 0.48); }
+[data-theme="light"] .settings-card:hover { background: rgba(254, 252, 249, 0.48); }
+.settings-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--serif);
+    letter-spacing: .04em;
+    margin-bottom: 10px;
+    cursor: default;
+}
+.settings-label input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--primary); }
+.settings-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-top: 8px;
+}
+
+/* ---- 底部导航（全尺寸显示；游戏屏由 .hidden 隐藏） ---- */
+.bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(64px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--bg-panel);
+    border-top: 1px solid var(--card-border);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    z-index: 6;
+}
+.bottom-nav button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+    transition: color .15s;
+    padding: 6px 0 4px;
+    border-radius: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    text-decoration: none;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+}
+.bottom-nav button:active { opacity: 0.7; }
+.bottom-nav button .i {
+    font-size: 22px;
+    line-height: 1;
+    display: block;
+    /* 优先使用本机 emoji 字体，确保跨平台图标一致 */
+    font-family: "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Segoe UI Emoji", sans-serif;
+}
+.bottom-nav button.on {
+    color: var(--primary-light);
+    font-weight: 600;
+}
+.bottom-nav button.on::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 22px;
+    height: 2px;
+    background: var(--primary);
+    border-radius: 0 0 2px 2px;
+}
+
+/* 移动端布局调整（底部导航已在基准规则中全尺寸显示） */
+@media (max-width: 767px) {
+    /* 世界列表移动端：留白 14px + 卡片单列 + 底部留白防遮挡 */
+    #worldListContent { padding: 10px 14px calc(72px + env(safe-area-inset-bottom)); grid-template-columns: 1fr; }
+    .section-head { padding: 12px 14px 2px; }
+    .world-actions-grid {
+        padding: 0 14px !important;
+        max-width: 100% !important;
+        margin: 4px 0 0 !important;
+        grid-template-columns: 1fr;
+    }
+    /* 手机端卡片：footer 强制可见；样式对齐 PC 端（通透底、细边框），保留触控尺寸 */
+    .wc-foot {
+        display: flex !important;
+        min-height: 54px !important;
+        padding: 14px !important;
+        border-top: 1px solid rgba(201, 168, 124, 0.14) !important;
+        background: transparent !important;
+    }
+    [data-theme="light"] .wc-foot { border-top-color: rgba(158, 125, 78, 0.22) !important; }
+    .wc-foot .btn {
+        flex: none !important;
+        padding: 11px 18px !important;
+        font-size: 13.5px !important;
+        min-height: 40px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    /* 首页适配：底部导航出现时，内容区改为可滚动 flex，导航固定底栏 */
+    .home-screen {
+        justify-content: flex-start;
+        min-height: auto;
+        height: 100%;
+        height: 100dvh;
+        padding: 0;
+        overflow: hidden; /* 只让 content 滚动，避免双层滚动条 */
+    }
+    .home-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        overflow-y: auto;
+        margin: 0;
+        padding: 36px 22px;
+    }
+    /* 底部固定导航不遮挡任何屏的内容 */
+    .list-content { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+    .home-content { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+    .settings-content { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+}

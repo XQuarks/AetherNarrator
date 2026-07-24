@@ -71,7 +71,7 @@ export function sanitizeWorldConfig(raw) {
     if (!raw || typeof raw !== "object") return {};
     const out = {};
     // 允许的顶层键（其余一律丢弃）
-    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices"];
+    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags"];
     for (const k of ALLOWED) {
         if (k in raw && raw[k] !== undefined) out[k] = raw[k];
     }
@@ -84,6 +84,13 @@ export function sanitizeWorldConfig(raw) {
     else out.initial_choices = out.initial_choices.slice(0, 8)
         .map(c => ({ text: (c && typeof c.text === "string") ? c.text.slice(0, 500) : "" }))
         .filter(c => c.text);
+    // tags：作品标签数组（AI 自由生成，不受固定词表限制）。短字符串、去重、限量
+    if (!Array.isArray(out.tags)) out.tags = [];
+    else out.tags = dedupeStrings(
+        out.tags
+            .map(t => (typeof t === "string" ? t.trim() : ""))
+            .filter(t => t && t.length <= 20)
+    ).slice(0, 8);
     // lore_kb：{ ip, snippets[] }
     if (out.lore_kb && typeof out.lore_kb === "object") {
         const snippets = Array.isArray(out.lore_kb.snippets) ? out.lore_kb.snippets.slice(0, 50) : [];
@@ -415,10 +422,7 @@ export function analyzeWorldTags(name, desc, hero, type, ipName) {
     const clues = [name || "", desc || "", hero || "", ipName || ""].join(" ");
     const tags = [];
 
-    // 来源（固定排在第一个）
-    tags.push(type === "ip" ? "已有IP" : "原创");
-
-    // 题材分类
+    // 题材分类（仅题材标签；来源「原创/已有 IP」由渲染层的 type 徽章统一展示，不再重复写入）
     const genreRules = [
         { pattern: /修仙|修真|仙|道|玄|渡劫|飞升|筑基|金丹|元婴/, tag: "修仙" },
         { pattern: /武侠|江湖|武林|门派|剑|侠|轻功|内功/, tag: "武侠" },
@@ -446,8 +450,17 @@ export function analyzeWorldTags(name, desc, hero, type, ipName) {
         }
     }
 
-    // 去重并限制数量（来源 + 最多 4 个题材标签）
-    return tags.slice(0, 5);
+    // 去重并限制数量（最多 4 个题材标签）
+    return tags.slice(0, 4);
+}
+
+// ★ 作品标签选择：优先采用 AI 自由生成的标签（不受 18 关键词限制），
+// 兜底回退到关键词正则匹配（兼容旧模型 / 离线场景）。
+export function pickWorldTags(generated, meta) {
+    if (generated && Array.isArray(generated.tags) && generated.tags.length) {
+        return generated.tags;
+    }
+    return analyzeWorldTags(meta.name, meta.desc, meta.hero, meta.type, meta.ipName);
 }
 
 export function dedupeStrings(arr) {
@@ -479,6 +492,16 @@ export function parseResponse(content) {
             throw new Error("AI 返回的 JSON 解析失败：" + e2.message + "\n原始内容：" + content.slice(0, 500));
         }
     }
+}
+
+// ★ 氛围提示（atmosphere）净化：仅接受非空字符串，压缩空白并限长。
+//   用于 LLM 每轮可选输出的环境变化/危机预警短句（docs/ui-redesign）。
+//   非法值（null/数字/空串/空白）一律归一为 null，保证旧存档与异常响应安全。
+export function sanitizeAtmosphere(v) {
+    if (typeof v !== "string") return null;
+    const t = v.replace(/\s+/g, " ").trim();
+    if (!t) return null;
+    return t.slice(0, 60);
 }
 
 // ★ Plan A：跨分块合并同名 lore 条目——同一条目在多处出现时汇总内容、并集触发词/链接，

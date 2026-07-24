@@ -12,7 +12,7 @@
       若需在受控环境彻底去掉 'unsafe-inline'，请先迁移所有静态 HTML onclick 为事件委托，
       再运行 tools/recompute-csp-hash.js 生成 hash-source 版 CSP。
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
     <title>以太叙事 · AetherNarrator</title>
     <!-- ★ P1.2.3: transformers.js 为单文件 ESM，必须以 module 方式加载；经典 script 会因 export 语法报错且全局 transformers 永不定义，向量 RAG 永远降级为关键词 -->
     <!-- ★ P0-3-E 内置化：transformers 运行时与中文模型随项目发布，不再从 jsdelivr 加载 -->
@@ -38,9 +38,11 @@
 </head>
 <body>
 
+<!-- 全局背景光点层：单个 fixed canvas，覆盖所有界面（首页/世界/存档/设置/游戏） -->
+<canvas id="bgMotes"></canvas>
+
 <!-- ================= 主界面 ================= -->
 <div class="screen home-screen active" id="homeScreen">
-    <canvas id="homeMotes"></canvas>
     <div class="mist"></div>
     <div class="vignette"></div>
 
@@ -53,7 +55,7 @@
         <h1 class="home-title rise"><span class="glyph">以太叙事</span><span class="title-sheen">以太叙事</span></h1>
         <p class="home-subtitle-en rise">AetherNarrator</p>
         <div class="divider rise"><span class="line"></span><span class="rune"></span><span class="line r"></span></div>
-        <p class="home-subtitle rise">一本会自己生长的冒险书 · 故事只存于你的设备 · 它记得你写下的每个名字</p>
+        <p class="home-subtitle rise">AI文字冒险书</p>
 
         <div class="menu-grid">
             <button class="menu-btn primary-btn rise d1" data-action="showWorldList">
@@ -83,38 +85,37 @@
     </div>
 </div>
 
-<!-- ================= 选项弹窗 ================= -->
-<div class="modal-overlay" id="settingsModal">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
-        <div class="modal-header">
-            <h2 id="settingsModalTitle">选项</h2>
-            <button class="modal-close" data-action="closeModal" data-modal="settingsModal">×</button>
+<!-- ================= 选项页（独立页面，非弹窗） ================= -->
+<div class="screen" id="settingsScreen">
+    <header class="topbar">
+        <div>
+            <div class="title">选项</div>
+            <div class="sub">API、存档与世界管理</div>
         </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>字体大小</label>
-                <div class="font-size-controls">
-                    <button class="font-size-btn" data-action="changeFontSize" data-size="small" id="fontSmall">小</button>
-                    <button class="font-size-btn" data-action="changeFontSize" data-size="normal" id="fontNormal">中</button>
-                    <button class="font-size-btn" data-action="changeFontSize" data-size="large" id="fontLarge">大</button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>AI 创造性（温度）</label>
-                <input type="range" id="temperatureSlider" min="0" max="1" step="0.1" value="0.5" data-action="updateTempLabel" data-event="input">
-                <div class="hint" id="tempLabel">0.5 — 剧情模式（稳定连贯）</div>
-            </div>
-            <div class="form-group">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                    <input type="checkbox" id="loreRequireConfirm" data-action="toggleLoreRequireConfirm" data-event="change" style="width:auto;">
-                    <span>知识库修订需我手动确认</span>
-                </label>
-                <div class="hint">开启后，AI 回写知识库（含记忆晋升）会弹窗让你确认应用或忽略；关闭时自动同意并提示「知识库已更新」。</div>
+    </header>
+    <div class="list-content settings-content">
+        <div class="settings-card">
+            <label class="settings-label">字体大小</label>
+            <div class="font-size-controls">
+                <button class="font-size-btn" data-action="changeFontSize" data-size="small" id="fontSmall">小</button>
+                <button class="font-size-btn" data-action="changeFontSize" data-size="normal" id="fontNormal">中</button>
+                <button class="font-size-btn" data-action="changeFontSize" data-size="large" id="fontLarge">大</button>
             </div>
         </div>
-        <div class="modal-footer">
-            <button class="btn" data-action="exportDebugLog" style="flex:1">导出调试日志</button>
-            <button class="btn primary full-width" data-action="closeModal" data-modal="settingsModal">完成</button>
+        <div class="settings-card">
+            <label class="settings-label">AI 创造性（温度）</label>
+            <input type="range" id="temperatureSlider" min="0" max="1" step="0.1" value="0.5" data-action="updateTempLabel" data-event="input">
+            <div class="settings-hint" id="tempLabel">0.5 — 剧情模式（稳定连贯）</div>
+        </div>
+        <div class="settings-card">
+            <label class="settings-label">
+                <input type="checkbox" id="loreRequireConfirm" data-action="toggleLoreRequireConfirm" data-event="change" style="width:auto;">
+                知识库修订需我手动确认
+            </label>
+            <div class="settings-hint">开启后，AI 回写知识库（含记忆晋升）会弹窗让你确认；关闭时自动同意并提示「知识库已更新」。</div>
+        </div>
+        <div class="settings-card" style="text-align:center;">
+            <button class="btn primary" data-action="exportDebugLog" style="padding:12px 20px;font-size:13px;">导出调试日志</button>
         </div>
     </div>
 </div>
@@ -139,52 +140,62 @@
 
 <!-- ================= 世界列表 ================= -->
 <div class="screen" id="worldListScreen">
-    <div class="nav-header">
-        <button class="back-btn" data-action="goHome">←</button>
-        <h2 class="title">选择世界</h2>
+    <header class="topbar">
+        <div>
+            <div class="title">选择世界</div>
+            <div class="sub" id="worldListSub"></div>
+        </div>
+    </header>
+    <div class="section-head"><h2>快速入口</h2></div>
+    <div class="world-actions-grid">
+        <button class="action-tile" data-action="showCreateWorldModal">
+            <span class="at-icon">＋</span>
+            <span class="at-text"><span class="at-title">创建新世界</span><span class="at-desc">输入 IP 或原创世界观</span></span>
+        </button>
+        <button class="action-tile" data-action="triggerWorldPackImport">
+            <span class="at-icon">📥</span>
+            <span class="at-text"><span class="at-title">导入世界</span><span class="at-desc">从文件导入（含知识库）</span></span>
+        </button>
     </div>
-    <div class="create-world-bar" data-action="showCreateWorldModal">
-        <span class="create-icon">+</span>
-        <span class="create-label">创建新世界</span>
-        <span class="create-desc">输入 IP 或原创世界观</span>
-    </div>
-    <div class="create-world-bar import-world-bar" data-action="triggerWorldPackImport">
-        <span class="create-icon">📥</span>
-        <span class="create-label">导入世界</span>
-        <span class="create-desc">从文件导入（含知识库）</span>
-    </div>
+    <div class="section-head"><h2>全部世界</h2></div>
     <div class="list-content" id="worldListContent"></div>
 </div>
 
 <!-- ================= 存档列表 ================= -->
 <div class="screen" id="saveListScreen">
-    <div class="nav-header">
-        <button class="back-btn" data-action="goHome">←</button>
-        <h2 class="title">读取存档</h2>
-    </div>
+    <header class="topbar">
+        <div>
+            <div class="title">读取存档</div>
+            <div class="sub" id="saveListSub">继续你的旅程</div>
+        </div>
+    </header>
     <div class="list-content" id="saveListContent"></div>
 </div>
 
 <!-- ================= 游戏界面 ================= -->
 <div class="screen game-screen" id="gameScreen">
-    <canvas id="gameMotes"></canvas>
     <div class="mist"></div>
     <div class="vignette"></div>
-    <div class="game-header">
-        <div>
+    <div class="game-header topbar">
+        <button class="icon-btn" data-action="goHome" title="返回">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="game-header-meta">
             <div class="world-name" id="gameWorldName">未知世界</div>
             <div class="day-info" id="gameDayInfo">第 1 天 · 早晨<span class="cache-indicator hidden" id="cacheIndicator" title="缓存命中/未命中 token 数"></span></div>
             <div class="timeline-switch" id="timelineSwitch"></div>
         </div>
-        <div class="header-actions">
-            <button data-action="showStatusPanel">角色</button>
-            <button data-action="toggleTheme" id="gameThemeToggle" title="切换白天/夜间模式">
-                <svg class="theme-icon-sun" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                <svg class="theme-icon-moon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            </button>
-            <button data-action="goHome">返回主界面</button>
-            <button data-action="showGameSettings" style="font-size:18px;line-height:1;padding:4px 8px;">⚙</button>
-        </div>
+        <div class="spacer"></div>
+        <button class="icon-btn" data-action="toggleTheme" id="gameThemeToggle" title="切换日间/夜间模式">
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <button class="icon-btn" data-action="showStatusPanel" title="角色状态">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </button>
+        <button class="icon-btn" data-action="showGameSettings" title="游戏设置">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
     </div>
     <div class="death-banner hidden" id="deathBanner">
         <span class="death-banner-icon">&#x2620;</span>
@@ -199,9 +210,10 @@
                 <span class="loading-time">0.0s</span>
             </div>
             <div class="input-row">
-                <input type="text" id="playerInput" placeholder="输入你想做的事..." aria-label="输入你想做的事" inputmode="text" enterkeyhint="send" autocomplete="off" autocorrect="off" autocapitalize="none">
+                <textarea id="playerInput" rows="1" placeholder="输入你想做的事..." aria-label="输入你想做的事" inputmode="text" enterkeyhint="send" autocomplete="off" autocorrect="off" autocapitalize="none"></textarea>
                 <button class="send-btn" data-action="submitInput">发送</button>
             </div>
+            <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
         </div>
     </div>
 </div>
@@ -731,12 +743,31 @@
         tick();
         return resize;
       }
+      // 单个全局背景光点 canvas，覆盖所有界面（含游戏屏）
       const resizers = [
-        initMotes(document.getElementById('homeMotes')),
-        initMotes(document.getElementById('gameMotes'))
+        initMotes(document.getElementById('bgMotes'))
       ].filter(Boolean);
       window.addEventListener('resize', () => resizers.forEach(r => r()));
     })();
     </script>
+
+    <nav class="bottom-nav" id="globalBottomNav">
+        <button data-action="goHome">
+            <svg class="i" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+            首页
+        </button>
+        <button data-action="showWorldList">
+            <svg class="i" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            世界
+        </button>
+        <button data-action="showSaveList">
+            <svg class="i" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            存档
+        </button>
+        <button data-action="showSettingsScreen">
+            <svg class="i" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            设置
+        </button>
+    </nav>
 </body>
 </html>

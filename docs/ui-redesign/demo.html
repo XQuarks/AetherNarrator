@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>以太叙事 · UI 重设计 Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   以太叙事 UI 重设计 Demo
+   - 保留品牌基因：暗色羊皮纸底 + 金棕主色 + 衬线中文
+   - 响应式：>=768px 桌面布局 / <768px 移动布局
+   - 本文件为独立演示，不影响正式项目
+   ============================================================ */
+
+/* ---------- Design Tokens ---------- */
+:root{
+  --bg:#1B1813;
+  --bg-2:#221E18;
+  --panel:rgba(38,34,27,.72);
+  --panel-solid:#26221B;
+  --panel-border:rgba(201,168,124,.14);
+  --text:#E4DACA;
+  --text-2:rgba(228,218,202,.64);
+  --text-3:rgba(228,218,202,.40);
+  --primary:#C9A87C;
+  --primary-strong:#DDBE92;
+  --primary-ink:#2A2118;
+  --danger:#C97C7C;
+  --ok:#9CC98C;
+  --radius-s:8px; --radius-m:12px; --radius-l:18px;
+  --shadow:0 8px 32px rgba(0,0,0,.35);
+  --read-width:720px;            /* 阅读列宽：长文最佳体验 */
+  --header-h:56px;
+  --composer-h:76px;
+  --blur:saturate(140%) blur(14px);
+  --serif:"Noto Serif SC","Songti SC",serif;
+  --sans:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+[data-theme="light"]{
+  --bg:#F3EFE4;
+  --bg-2:#EDE7D8;
+  --panel:rgba(252,249,243,.82);
+  --panel-solid:#FCF9F3;
+  --panel-border:rgba(158,125,78,.22);
+  --text:#383226;
+  --text-2:rgba(56,50,38,.66);
+  --text-3:rgba(56,50,38,.42);
+  --primary:#9E7D4E;
+  --primary-strong:#8A6B3E;
+  --primary-ink:#FCF9F3;
+  --danger:#B05656;
+  --ok:#5F8F52;
+  --shadow:0 8px 28px rgba(90,72,40,.14);
+}
+
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:var(--serif);
+  background:#111009;
+  color:var(--text);
+  overflow:hidden;
+}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea,select{font-family:inherit;color:inherit}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:rgba(201,168,124,.22);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- Demo 控制条（非产品设计一部分） ---------- */
+.demo-bar{
+  height:48px;display:flex;align-items:center;gap:10px;padding:0 14px;
+  background:#0C0B08;border-bottom:1px solid rgba(201,168,124,.18);
+  font-family:var(--sans);font-size:12px;color:#BFB49E;
+  position:relative;z-index:50;flex-wrap:nowrap;overflow-x:auto;
+}
+.demo-bar .tag{background:#C9A87C;color:#221E18;font-weight:700;border-radius:4px;padding:2px 7px;white-space:nowrap}
+.demo-bar .grp{display:flex;gap:4px;align-items:center;white-space:nowrap}
+.demo-bar .grp::before{content:attr(data-label);color:#7d7462;margin:0 4px 0 10px;font-size:11px}
+.demo-bar button{
+  padding:4px 10px;border-radius:6px;border:1px solid rgba(201,168,124,.25);
+  color:#D9CFC0;font-size:12px;font-family:var(--sans);transition:.15s;
+}
+.demo-bar button:hover{border-color:#C9A87C}
+.demo-bar button.on{background:#C9A87C;color:#221E18;font-weight:700;border-color:#C9A87C}
+
+/* ---------- 演示舞台 / 设备框 ---------- */
+.stage{height:calc(100% - 48px);display:flex;justify-content:center;align-items:stretch;padding:0;transition:.3s}
+.stage.mobile{padding:18px 0}
+.device{
+  width:100%;height:100%;position:relative;overflow:hidden;
+  background:var(--bg);color:var(--text);transition:width .35s ease,border-radius .35s;
+  display:flex;flex-direction:column;
+}
+.stage.mobile .device{
+  width:390px;border-radius:28px;border:1px solid rgba(201,168,124,.3);
+  box-shadow:0 24px 80px rgba(0,0,0,.6);height:calc(100% - 0px);
+}
+
+/* ---------- 氛围层 ---------- */
+.ambient{position:absolute;inset:0;pointer-events:none;z-index:0}
+.ambient::before{ /* 星尘 */
+  content:"";position:absolute;inset:0;
+  background-image:
+    radial-gradient(1.4px 1.4px at 18% 22%,rgba(228,218,202,.5),transparent 60%),
+    radial-gradient(1px 1px at 66% 12%,rgba(228,218,202,.35),transparent 60%),
+    radial-gradient(1.2px 1.2px at 82% 44%,rgba(228,218,202,.4),transparent 60%),
+    radial-gradient(1px 1px at 34% 66%,rgba(228,218,202,.3),transparent 60%),
+    radial-gradient(1.6px 1.6px at 52% 84%,rgba(228,218,202,.35),transparent 60%),
+    radial-gradient(1px 1px at 8% 78%,rgba(228,218,202,.3),transparent 60%);
+}
+.ambient::after{ /* 顶部光晕 + 暗角 */
+  content:"";position:absolute;inset:0;
+  background:
+    radial-gradient(ellipse 90% 46% at 50% -12%,rgba(201,168,124,.13),transparent 70%),
+    radial-gradient(ellipse 130% 100% at 50% 55%,transparent 55%,rgba(0,0,0,.42));
+}
+[data-theme="light"] .ambient::after{
+  background:
+    radial-gradient(ellipse 90% 46% at 50% -12%,rgba(158,125,78,.12),transparent 70%),
+    radial-gradient(ellipse 130% 100% at 50% 55%,transparent 60%,rgba(120,95,55,.10));
+}
+
+/* ---------- 屏幕通用 ---------- */
+.screen{position:absolute;inset:0;display:none;flex-direction:column;z-index:1}
+.screen.active{display:flex}
+.scroll{flex:1;overflow-y:auto;overscroll-behavior:contain}
+
+/* 顶栏（游戏/列表通用） */
+.topbar{
+  height:var(--header-h);flex:none;display:flex;align-items:center;gap:10px;
+  padding:0 14px;padding-top:env(safe-area-inset-top);
+  background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border-bottom:1px solid var(--panel-border);z-index:5;
+}
+.topbar .title{font-weight:700;font-size:16px;letter-spacing:.06em}
+.topbar .sub{font-size:11.5px;color:var(--text-2);margin-top:1px;font-family:var(--sans)}
+.icon-btn{
+  width:36px;height:36px;flex:none;display:grid;place-items:center;border-radius:10px;
+  border:1px solid var(--panel-border);color:var(--text-2);font-size:16px;transition:.15s;
+}
+.icon-btn:hover{color:var(--primary-strong);border-color:var(--primary)}
+.spacer{flex:1}
+
+/* ---------- 01 首页 ---------- */
+.home-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 20px;text-align:center}
+.brand-est{font-size:11px;letter-spacing:.5em;color:var(--text-3);font-family:var(--sans)}
+.brand{font-size:clamp(38px,7vw,54px);font-weight:900;letter-spacing:.18em;margin:14px 0 4px;
+  background:linear-gradient(180deg,var(--primary-strong),var(--primary) 70%);
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.brand-en{font-size:12px;letter-spacing:.42em;color:var(--text-3);font-family:var(--sans);text-transform:uppercase}
+.brand-div{display:flex;align-items:center;gap:10px;margin:20px 0;color:var(--primary);opacity:.7}
+.brand-div::before,.brand-div::after{content:"";width:56px;height:1px;background:linear-gradient(90deg,transparent,var(--primary))}
+.brand-div::after{transform:scaleX(-1)}
+.slogan{font-size:13.5px;line-height:1.9;color:var(--text-2);max-width:340px}
+.menu{display:flex;flex-direction:column;gap:12px;width:min(440px,100%);margin-top:34px}
+.menu-card{
+  display:flex;align-items:center;gap:14px;text-align:left;padding:15px 18px;
+  background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--panel-border);border-radius:var(--radius-m);transition:.18s;
+}
+.menu-card:hover{transform:translateY(-2px);border-color:var(--primary);box-shadow:var(--shadow)}
+.menu-card .ico{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:10px;
+  background:rgba(201,168,124,.12);color:var(--primary-strong);font-size:18px}
+.menu-card .t{font-size:15.5px;font-weight:700;letter-spacing:.05em}
+.menu-card .d{font-size:12px;color:var(--text-2);margin-top:2px;font-family:var(--sans)}
+.menu-card .arrow{margin-left:auto;color:var(--text-3);transition:.18s}
+.menu-card:hover .arrow{color:var(--primary);transform:translateX(3px)}
+.menu-card.primary{border-color:rgba(201,168,124,.5);background:linear-gradient(180deg,rgba(201,168,124,.16),rgba(201,168,124,.07))}
+.foot-note{margin-top:30px;font-size:11px;color:var(--text-3);font-family:var(--sans);line-height:2}
+
+/* ---------- 02 世界列表 ---------- */
+.section-head{display:flex;align-items:center;gap:10px;padding:14px 18px 6px;max-width:960px;width:100%;margin:0 auto}
+.section-head h2{font-size:14px;color:var(--text-2);font-weight:600;letter-spacing:.1em}
+.world-scroll{padding:6px 18px calc(24px + env(safe-area-inset-bottom));}
+.world-grid{max-width:960px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.action-tile{
+  display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:var(--radius-m);
+  border:1.5px dashed rgba(201,168,124,.4);color:var(--primary-strong);transition:.15s;text-align:left;
+}
+.action-tile:hover{background:rgba(201,168,124,.08);border-color:var(--primary)}
+.action-tile .plus{font-size:20px}
+.action-tile .t{font-weight:700;font-size:14.5px}
+.action-tile .d{font-size:11.5px;color:var(--text-2);font-family:var(--sans)}
+.world-card{
+  background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--panel-border);border-radius:var(--radius-l);overflow:hidden;
+  display:flex;flex-direction:column;transition:.18s;
+}
+.world-card:hover{transform:translateY(-2px);border-color:rgba(201,168,124,.45);box-shadow:var(--shadow)}
+.wc-cover{height:64px;display:flex;align-items:flex-end;padding:10px 14px;position:relative;
+  background:linear-gradient(120deg,rgba(201,168,124,.22),rgba(201,168,124,.04));}
+.wc-cover .glyph{font-size:30px;font-weight:900;color:var(--primary-strong);opacity:.9;line-height:1}
+.wc-cover .badge{position:absolute;top:10px;right:12px;font-size:10.5px;font-family:var(--sans);
+  padding:2px 8px;border-radius:99px;background:rgba(201,168,124,.18);color:var(--primary-strong);border:1px solid rgba(201,168,124,.3)}
+.wc-body{padding:12px 16px 10px;flex:1}
+.wc-title{font-size:16.5px;font-weight:700;letter-spacing:.03em}
+.wc-desc{font-size:12.5px;color:var(--text-2);line-height:1.75;margin-top:6px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wc-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{font-size:10.5px;font-family:var(--sans);padding:2.5px 9px;border-radius:99px;
+  border:1px solid var(--panel-border);color:var(--text-2)}
+.chip.accent{color:var(--primary-strong);border-color:rgba(201,168,124,.4)}
+.wc-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--panel-border)}
+.btn{
+  padding:8px 16px;border-radius:9px;font-size:13px;font-weight:600;letter-spacing:.04em;
+  border:1px solid var(--panel-border);color:var(--text-2);transition:.15s;
+}
+.btn:hover{color:var(--primary-strong);border-color:var(--primary)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.btn.primary:hover{background:var(--primary-strong)}
+.btn.ghost-danger:hover{color:var(--danger);border-color:var(--danger)}
+
+/* ---------- 03 游戏界面 ---------- */
+.game-header-meta{min-width:0}
+.game-header-meta .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.game-log{flex:1;overflow-y:auto;padding:26px 18px 16px;scroll-behavior:smooth}
+.log-col{max-width:var(--read-width);margin:0 auto;display:flex;flex-direction:column;gap:22px}
+.log-meta{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text-3);font-family:var(--sans);letter-spacing:.06em}
+.log-meta::after{content:"";flex:1;height:1px;background:var(--panel-border)}
+.narrative{font-size:16px;line-height:2.05;letter-spacing:.02em;text-align:justify}
+.narrative p+p{margin-top:.9em}
+.player-act{
+  align-self:flex-end;max-width:85%;padding:10px 16px;border-radius:14px 14px 4px 14px;
+  background:rgba(201,168,124,.13);border:1px solid rgba(201,168,124,.28);
+  font-size:14px;line-height:1.8;color:var(--primary-strong);
+}
+.player-act .who{display:block;font-size:10.5px;color:var(--text-3);font-family:var(--sans);margin-bottom:3px}
+.sys-note{align-self:center;font-size:12px;color:var(--danger);font-family:var(--sans);
+  padding:6px 14px;border:1px dashed rgba(201,124,124,.4);border-radius:99px}
+.choices{display:flex;flex-wrap:wrap;gap:9px;max-width:var(--read-width);margin:2px auto 0;padding:0 18px 10px}
+.choice-chip{
+  padding:9px 16px;border-radius:99px;border:1px solid rgba(201,168,124,.4);
+  background:var(--panel);font-size:13.5px;color:var(--primary-strong);transition:.15s;text-align:left;
+}
+.choice-chip:hover{background:rgba(201,168,124,.16);transform:translateY(-1px)}
+/* 底部输入区 */
+.composer{
+  flex:none;border-top:1px solid var(--panel-border);
+  background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+}
+.composer-inner{max-width:var(--read-width);margin:0 auto;display:flex;align-items:flex-end;gap:9px}
+.composer textarea{
+  flex:1;resize:none;border:1px solid var(--panel-border);border-radius:14px;
+  background:rgba(0,0,0,.14);padding:11px 14px;font-size:15px;line-height:1.55;
+  max-height:120px;outline:none;transition:border .15s;font-family:var(--serif);color:var(--text);
+}
+[data-theme="light"] .composer textarea{background:rgba(255,255,255,.5)}
+.composer textarea:focus{border-color:var(--primary)}
+.send-btn{
+  height:42px;padding:0 20px;border-radius:12px;background:var(--primary);color:var(--primary-ink);
+  font-weight:700;font-size:14px;letter-spacing:.06em;transition:.15s;flex:none;
+}
+.send-btn:hover{background:var(--primary-strong)}
+.composer-hint{max-width:var(--read-width);margin:6px auto 0;font-size:10.5px;color:var(--text-3);font-family:var(--sans)}
+
+/* 角色抽屉：桌面右侧 / 移动底部弹层 */
+.drawer-mask{position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:.25s;z-index:8}
+.drawer{
+  position:absolute;top:0;right:0;bottom:0;width:min(400px,92%);z-index:9;
+  background:var(--panel-solid);border-left:1px solid var(--panel-border);
+  transform:translateX(102%);transition:transform .3s cubic-bezier(.32,.72,.28,1);
+  display:flex;flex-direction:column;box-shadow:var(--shadow);
+}
+.drawer.open{transform:none}
+.drawer-mask.show{opacity:1;pointer-events:auto}
+.drawer-head{flex:none;display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--panel-border)}
+.drawer-head .t{font-weight:700;font-size:15.5px}
+.tabs{flex:none;display:flex;gap:2px;padding:8px 12px;border-bottom:1px solid var(--panel-border);overflow-x:auto}
+.tab{flex:none;padding:7px 13px;border-radius:8px;font-size:13px;color:var(--text-2);transition:.15s;white-space:nowrap}
+.tab.on{background:rgba(201,168,124,.14);color:var(--primary-strong);font-weight:700}
+.drawer-body{flex:1;overflow-y:auto;padding:14px 16px calc(20px + env(safe-area-inset-bottom))}
+.stat-card{border:1px solid var(--panel-border);border-radius:var(--radius-m);padding:12px 14px;margin-bottom:12px;background:rgba(201,168,124,.04)}
+.stat-card h4{font-size:12px;color:var(--text-3);font-family:var(--sans);font-weight:400;letter-spacing:.1em;margin-bottom:8px}
+.kv{display:flex;justify-content:space-between;font-size:13.5px;padding:5px 0}
+.kv .k{color:var(--text-2)}
+.bar{height:6px;border-radius:3px;background:rgba(201,168,124,.14);overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--primary),var(--primary-strong))}
+.attr-desc{font-size:12.5px;color:var(--text-2);line-height:1.8;margin-top:6px}
+
+/* ---------- 04 知识库 ---------- */
+.lore-layout{flex:1;display:flex;min-height:0}
+.lore-col{height:100%;overflow-y:auto}
+.lore-tree{width:230px;flex:none;border-right:1px solid var(--panel-border);padding:12px 10px;background:rgba(0,0,0,.08)}
+[data-theme="light"] .lore-tree{background:rgba(158,125,78,.05)}
+.tree-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13.5px;color:var(--text-2);cursor:pointer;transition:.12s}
+.tree-item:hover{background:rgba(201,168,124,.08)}
+.tree-item.on{background:rgba(201,168,124,.16);color:var(--primary-strong);font-weight:600}
+.tree-item .dot{width:6px;height:6px;border-radius:50%;background:var(--text-3);flex:none}
+.tree-item.on .dot{background:var(--primary)}
+.tree-group{font-size:11px;color:var(--text-3);font-family:var(--sans);letter-spacing:.12em;padding:12px 10px 5px}
+.lore-note{flex:1;padding:20px 26px;min-width:0}
+.lore-note h3{font-size:20px;font-weight:700;margin-bottom:4px}
+.lore-note .note-meta{font-size:11px;color:var(--text-3);font-family:var(--sans);margin-bottom:14px}
+.lore-note .md{font-size:14.5px;line-height:2;color:var(--text);max-width:640px}
+.lore-note .md p+p{margin-top:.8em}
+.kw{color:var(--primary-strong);border-bottom:1px dashed rgba(201,168,124,.5);padding-bottom:1px}
+.lore-links{width:220px;flex:none;border-left:1px solid var(--panel-border);padding:14px 12px}
+.link-card{display:block;width:100%;text-align:left;padding:10px 12px;border:1px solid var(--panel-border);border-radius:10px;margin-bottom:8px;transition:.15s}
+.link-card:hover{border-color:var(--primary)}
+.link-card .lt{font-size:13px;font-weight:600}
+.link-card .ld{font-size:11px;color:var(--text-3);font-family:var(--sans);margin-top:2px}
+/* 移动端知识库分段控制 */
+.seg{display:none;flex:none;gap:4px;padding:8px 12px;border-bottom:1px solid var(--panel-border);background:var(--panel)}
+.seg button{flex:1;padding:8px 0;border-radius:8px;font-size:13px;color:var(--text-2)}
+.seg button.on{background:rgba(201,168,124,.16);color:var(--primary-strong);font-weight:700}
+
+/* ---------- 移动端底部导航（首页/列表用） ---------- */
+.bottom-nav{
+  display:none;flex:none;height:calc(58px + env(safe-area-inset-bottom));
+  padding-bottom:env(safe-area-inset-bottom);
+  background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border-top:1px solid var(--panel-border);z-index:6;
+}
+.bottom-nav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  font-size:10.5px;color:var(--text-3);font-family:var(--sans)}
+.bottom-nav button .i{font-size:19px}
+.bottom-nav button.on{color:var(--primary-strong)}
+
+/* ---------- 弹窗（示例样式） ---------- */
+.modal-demo{position:absolute;inset:0;z-index:20;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.5)}
+.modal-demo.show{display:flex}
+.modal-box{width:min(460px,100%);background:var(--panel-solid);border:1px solid var(--panel-border);
+  border-radius:var(--radius-l);box-shadow:var(--shadow);overflow:hidden;animation:pop .25s ease}
+@keyframes pop{from{transform:translateY(14px);opacity:0}}
+.modal-box .m-head{display:flex;align-items:center;padding:16px 18px 10px}
+.modal-box .m-head .t{font-size:16px;font-weight:700}
+.modal-box .m-body{padding:6px 18px 14px;font-size:13.5px;line-height:1.9;color:var(--text-2)}
+.modal-box .m-foot{display:flex;justify-content:flex-end;gap:9px;padding:12px 16px;border-top:1px solid var(--panel-border)}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--text-2);margin-bottom:6px;font-family:var(--sans)}
+.field input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--panel-border);
+  background:rgba(0,0,0,.14);font-size:14px;outline:none;color:var(--text)}
+[data-theme="light"] .field input{background:rgba(255,255,255,.5)}
+.field input:focus{border-color:var(--primary)}
+
+/* ---------- Toast ---------- */
+.toast{
+  position:absolute;left:50%;bottom:96px;transform:translate(-50%,16px);z-index:30;
+  background:var(--panel-solid);border:1px solid var(--primary);color:var(--primary-strong);
+  padding:9px 20px;border-radius:99px;font-size:13px;font-family:var(--sans);
+  opacity:0;pointer-events:none;transition:.25s;box-shadow:var(--shadow);white-space:nowrap;
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ============================================================
+   响应式：手机（设备框 ≤768px 即启用，真实媒体查询兜底）
+   ============================================================ */
+.device.is-mobile .hide-m{display:none!important}
+.device.is-mobile .bottom-nav{display:flex}
+.device.is-mobile .seg{display:flex}
+/* 知识库：三栏 → 分段切换 */
+.device.is-mobile .lore-layout{position:relative}
+.device.is-mobile .lore-tree,
+.device.is-mobile .lore-links{
+  position:absolute;inset:0;width:100%;border:none;background:var(--bg);z-index:2;display:none;
+}
+.device.is-mobile .lore-layout.show-tree .lore-tree{display:block}
+.device.is-mobile .lore-layout.show-links .lore-links{display:block}
+.device.is-mobile .lore-layout.show-tree .lore-note,
+.device.is-mobile .lore-layout.show-links .lore-note{visibility:hidden}
+/* 角色抽屉：右侧抽屉 → 底部弹层 */
+.device.is-mobile .drawer{
+  top:auto;left:0;right:0;width:100%;height:82%;
+  border-left:none;border-top:1px solid var(--panel-border);
+  border-radius:20px 20px 0 0;transform:translateY(104%);
+}
+.device.is-mobile .drawer.open{transform:none}
+.device.is-mobile .world-grid{grid-template-columns:1fr}
+.device.is-mobile .narrative{font-size:15.5px}
+.device.is-mobile .game-log{padding:18px 14px 12px}
+/* 真实手机浏览器兜底（不用设备框时） */
+@media (max-width:767px){
+  .stage:not(.mobile) .device .hide-m{display:none!important}
+  .stage:not(.mobile) .device .bottom-nav{display:flex}
+  .stage:not(.mobile) .device .seg{display:flex}
+  .stage:not(.mobile) .device .lore-layout{position:relative}
+  .stage:not(.mobile) .device .lore-tree,
+  .stage:not(.mobile) .device .lore-links{position:absolute;inset:0;width:100%;border:none;background:var(--bg);z-index:2;display:none}
+  .stage:not(.mobile) .device .lore-layout.show-tree .lore-tree{display:block}
+  .stage:not(.mobile) .device .lore-layout.show-links .lore-links{display:block}
+  .stage:not(.mobile) .device .lore-layout.show-tree .lore-note,
+  .stage:not(.mobile) .device .lore-layout.show-links .lore-note{visibility:hidden}
+  .stage:not(.mobile) .device .drawer{top:auto;left:0;right:0;width:100%;height:82%;border-left:none;border-top:1px solid var(--panel-border);border-radius:20px 20px 0 0;transform:translateY(104%)}
+  .stage:not(.mobile) .device .drawer.open{transform:none}
+  .stage:not(.mobile) .device .world-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- ======== Demo 控制条（不属于产品设计） ======== -->
+<div class="demo-bar">
+  <span class="tag">UI 重设计 Demo</span>
+  <div class="grp" data-label="界面">
+    <button data-screen="home" class="on">首页</button>
+    <button data-screen="worlds">世界列表</button>
+    <button data-screen="game">游戏</button>
+    <button data-screen="lore">知识库</button>
+  </div>
+  <div class="grp" data-label="设备">
+    <button id="devDesktop" class="on">🖥 桌面</button>
+    <button id="devMobile">📱 手机</button>
+  </div>
+  <div class="grp" data-label="主题">
+    <button id="thDark" class="on">🌙 深色</button>
+    <button id="thLight">☀️ 浅色</button>
+  </div>
+</div>
+
+<div class="stage" id="stage">
+<div class="device" id="device">
+  <div class="ambient"></div>
+
+  <!-- ============ 01 首页 ============ -->
+  <section class="screen active" id="scr-home">
+    <div class="scroll" style="display:flex;flex-direction:column">
+      <div class="home-wrap">
+        <div class="brand-est">EST · 2026</div>
+        <h1 class="brand">以太叙事</h1>
+        <div class="brand-en">AetherNarrator</div>
+        <div class="brand-div">◆</div>
+        <p class="slogan">一本会自己生长的冒险书。<br>故事只存于你的设备，它记得你写下的每个名字。</p>
+        <nav class="menu">
+          <button class="menu-card primary" onclick="go('worlds')">
+            <span class="ico">✦</span>
+            <span><span class="t">进入世界</span><span class="d" style="display:block">选择或创建一个世界，开始你的冒险</span></span>
+            <span class="arrow">›</span>
+          </button>
+          <button class="menu-card" onclick="toast('演示：存档列表与正式版一致')">
+            <span class="ico">❖</span>
+            <span><span class="t">读取存档</span><span class="d" style="display:block">继续上一次的旅程</span></span>
+            <span class="arrow">›</span>
+          </button>
+          <button class="menu-card" onclick="openModal()">
+            <span class="ico">⚿</span>
+            <span><span class="t">API 配置</span><span class="d" style="display:block">连接你的 AI 模型（弹窗样式示例）</span></span>
+            <span class="arrow">›</span>
+          </button>
+          <button class="menu-card" onclick="toast('演示：选项弹窗沿用同一弹窗体系')">
+            <span class="ico">⚙</span>
+            <span><span class="t">选项</span><span class="d" style="display:block">字体 · 显示 · 知识库确认</span></span>
+            <span class="arrow">›</span>
+          </button>
+        </nav>
+        <div class="foot-note">内容由 AI 生成，仅供参考 · 零后端，数据仅存于本地浏览器</div>
+      </div>
+    </div>
+    <!-- 移动端底部导航（桌面隐藏） -->
+    <nav class="bottom-nav">
+      <button class="on"><span class="i">⌂</span>首页</button>
+      <button onclick="go('worlds')"><span class="i">✦</span>世界</button>
+      <button onclick="toast('演示：存档列表')"><span class="i">❖</span>存档</button>
+      <button onclick="openModal()"><span class="i">⚙</span>设置</button>
+    </nav>
+  </section>
+
+  <!-- ============ 02 世界列表 ============ -->
+  <section class="screen" id="scr-worlds">
+    <header class="topbar">
+      <button class="icon-btn" onclick="go('home')">‹</button>
+      <div><div class="title">选择世界</div><div class="sub">3 个世界 · 2 个存档进行中</div></div>
+      <div class="spacer"></div>
+      <button class="icon-btn" title="搜索" onclick="toast('演示：搜索世界')">🔍</button>
+    </header>
+    <div class="scroll world-scroll">
+      <div class="section-head"><h2>快速入口</h2></div>
+      <div class="world-grid" style="margin-bottom:18px">
+        <button class="action-tile" onclick="toast('演示：创建世界向导（4 步）')">
+          <span class="plus">＋</span><span><span class="t">创建新世界</span><br><span class="d">输入 IP 或原创世界观</span></span>
+        </button>
+        <button class="action-tile" onclick="toast('演示：导入世界包文件')">
+          <span class="plus">📥</span><span><span class="t">导入世界</span><br><span class="d">从文件导入（含知识库）</span></span>
+        </button>
+      </div>
+      <div class="section-head"><h2>全部世界</h2></div>
+      <div class="world-grid">
+        <article class="world-card">
+          <div class="wc-cover"><span class="glyph">克</span><span class="badge">已有 IP</span></div>
+          <div class="wc-body">
+            <div class="wc-title">克苏鲁的呼唤</div>
+            <p class="wc-desc">1920 年代，安吉尔教授去世后，你在遗物中发现一个锁闭的盒子——里面有一块奇特的粘土浮雕，描绘着无法名状之物……</p>
+            <div class="wc-tags"><span class="chip">克苏鲁神话</span><span class="chip">恐怖</span><span class="chip accent">进行中 · 第 12 天</span></div>
+          </div>
+          <div class="wc-foot">
+            <button class="btn primary" onclick="go('game')">▶ 继续游玩</button>
+            <div class="spacer"></div>
+            <button class="btn" onclick="go('lore')">知识库</button>
+            <button class="btn ghost-danger" onclick="toast('演示：删除需二次确认（自定义弹窗）')">删除</button>
+          </div>
+        </article>
+        <article class="world-card">
+          <div class="wc-cover"><span class="glyph">阈</span><span class="badge">原创</span></div>
+          <div class="wc-body">
+            <div class="wc-title">都市怪谈 · 阈限空间</div>
+            <p class="wc-desc">你从现实中卡了出来。淡黄的走廊、陈旧的霉味、永不停息的荧光灯嗡鸣——这里是后室，一个没有尽头的迷宫……</p>
+            <div class="wc-tags"><span class="chip">都市怪谈</span><span class="chip">生存恐怖</span><span class="chip">探索</span></div>
+          </div>
+          <div class="wc-foot">
+            <button class="btn primary" onclick="go('game')">开始游玩</button>
+            <div class="spacer"></div>
+            <button class="btn" onclick="go('lore')">知识库</button>
+            <button class="btn ghost-danger" onclick="toast('演示：删除需二次确认（自定义弹窗）')">删除</button>
+          </div>
+        </article>
+        <article class="world-card">
+          <div class="wc-cover"><span class="glyph">双</span><span class="badge">原创</span></div>
+          <div class="wc-body">
+            <div class="wc-title">双界 · 现实与异界</div>
+            <p class="wc-desc">白日里你是 2003 年都市上班族；意识沉入另一界，你便是大周天历 3024 年的一名修士。两个世界的时间各自流淌……</p>
+            <div class="wc-tags"><span class="chip">双界穿梭</span><span class="chip">修真</span><span class="chip accent">进行中 · 大周天历</span></div>
+          </div>
+          <div class="wc-foot">
+            <button class="btn primary" onclick="go('game')">▶ 继续游玩</button>
+            <div class="spacer"></div>
+            <button class="btn" onclick="go('lore')">知识库</button>
+            <button class="btn ghost-danger" onclick="toast('演示：删除需二次确认（自定义弹窗）')">删除</button>
+          </div>
+        </article>
+      </div>
+    </div>
+    <nav class="bottom-nav">
+      <button onclick="go('home')"><span class="i">⌂</span>首页</button>
+      <button class="on"><span class="i">✦</span>世界</button>
+      <button onclick="toast('演示：存档列表')"><span class="i">❖</span>存档</button>
+      <button onclick="openModal()"><span class="i">⚙</span>设置</button>
+    </nav>
+  </section>
+
+  <!-- ============ 03 游戏界面 ============ -->
+  <section class="screen" id="scr-game">
+    <header class="topbar">
+      <button class="icon-btn" onclick="go('worlds')" title="返回">‹</button>
+      <div class="game-header-meta">
+        <div class="title">克苏鲁的呼唤</div>
+        <div class="sub">1920 年代 · 深冬 · 1926年2月2日 · 周二 · 清晨</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="icon-btn hide-m" title="主题" onclick="flipTheme()">☀</button>
+      <button class="icon-btn" title="角色" onclick="toggleDrawer(true)">👤</button>
+      <button class="icon-btn" title="设置" onclick="toast('演示：游戏设置弹窗')">⚙</button>
+    </header>
+
+    <div class="game-log" id="gameLog">
+      <div class="log-col">
+        <div class="log-meta">开场 · 1926年2月2日 · 周二 · 清晨</div>
+        <div class="narrative">
+          <p>1926 年的冬天比往年更冷。波士顿查尔斯河面上结了一层薄冰，寒风吹过鹅卵石铺就的街道，卷起零星的雪屑。</p>
+          <p>你在书房里举起那把从叔祖父安吉尔教授戒指上取下的铜钥匙，犹豫了片刻，然后将它插进了那个锁闭的锡盒。咔哒一声，锁簧弹开。盒子里不是什么金银珠宝——只有一块奇特的粘土浮雕，以及一叠杂乱无章的手稿。</p>
+          <p>它描绘的似乎是一个怪物——章鱼般的头颅、触须丛生的面孔、如同龙一般带鳞的身体。这东西蹲在一块刻满无法辨认字符的石基上，仿佛在等待某个遥远的时刻。</p>
+        </div>
+        <div class="player-act"><span class="who">你</span>我环顾四周，试图理清此刻的处境。</div>
+        <div class="log-meta">第 1 天 · 上午</div>
+        <div class="narrative">
+          <p>书房里很安静，只有壁炉里木柴燃烧的噼啪声。窗外，铅灰色的天空低低地压着波士顿的屋顶。手稿最上面一页的标题让你愣住了：<b>「克苏鲁教派」</b>。</p>
+          <p>你隐约记得安吉尔教授去世前几个月，确实在信中暗示过他在研究某个无法公开讨论的话题。这叠笔记就在你手中——它讲述了年轻的雕塑家亨利·威尔科克斯的古怪梦境、新奥尔良沼泽中的血腥仪式、格陵兰冰原上爱斯基摩人共同的音节呼唤同一个名字——Cthulhu。</p>
+        </div>
+        <div class="sys-note">⚠ 理智轻微波动：窗外的风声里似乎混入了别的什么</div>
+      </div>
+    </div>
+
+    <div class="choices" id="choices">
+      <button class="choice-chip" onclick="pickChoice(this)">① 仔细研读《克苏鲁教派》手稿</button>
+      <button class="choice-chip" onclick="pickChoice(this)">② 把浮雕包起来，带去大学请人鉴定</button>
+      <button class="choice-chip" onclick="pickChoice(this)">③ 先查安吉尔教授生前的书信往来</button>
+    </div>
+
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea id="playerInput" rows="1" placeholder="输入你想做的事……（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button class="send-btn" onclick="sendMsg()">发送</button>
+      </div>
+      <div class="composer-hint">自由输入行动，或点上方选项快速推进 · AI 正在记住你的每个决定</div>
+    </div>
+
+    <!-- 角色抽屉 -->
+    <div class="drawer-mask" id="drawerMask" onclick="toggleDrawer(false)"></div>
+    <aside class="drawer" id="drawer">
+      <div class="drawer-head">
+        <span class="t">角色状态</span>
+        <div class="spacer"></div>
+        <button class="icon-btn" onclick="toggleDrawer(false)">✕</button>
+      </div>
+      <div class="tabs" id="statusTabs">
+        <button class="tab on">属性</button><button class="tab">背景</button><button class="tab">状态</button>
+        <button class="tab">关系</button><button class="tab">物品</button><button class="tab">目标</button>
+        <button class="tab">记忆</button><button class="tab">时间线</button>
+      </div>
+      <div class="drawer-body">
+        <div class="stat-card">
+          <h4>基本信息</h4>
+          <div class="kv"><span class="k">姓名</span><span>调查员</span></div>
+          <div class="kv"><span class="k">年龄</span><span>30</span></div>
+          <div class="kv"><span class="k">当前地点</span><span>波士顿 · 私人书房</span></div>
+          <div class="kv"><span class="k">时间</span><span>1926年2月2日 · 清晨</span></div>
+        </div>
+        <div class="stat-card">
+          <h4>生存状态</h4>
+          <div class="kv"><span class="k">❤ 生命</span><span>82 / 100</span></div><div class="bar"><i style="width:82%"></i></div>
+          <div class="kv" style="margin-top:10px"><span class="k">🧠 理智</span><span>64 / 100</span></div><div class="bar"><i style="width:64%"></i></div>
+          <div class="kv" style="margin-top:10px"><span class="k">⚡ 体力</span><span>91 / 100</span></div><div class="bar"><i style="width:91%"></i></div>
+        </div>
+        <div class="stat-card">
+          <h4>胆识</h4>
+          <p class="attr-desc">你读过不少恐怖故事，自认为对流血和死亡已有心理准备——但真正的恐惧远超你的想象。</p>
+        </div>
+        <div class="stat-card">
+          <h4>观察</h4>
+          <p class="attr-desc">你善于从字里行间看出隐藏的意义，从散落的碎片拼接完整的图景。</p>
+        </div>
+        <div class="stat-card">
+          <h4>理智</h4>
+          <p class="attr-desc">你的理智是你最强大的武器，也是最脆弱的防线。每一次目睹不可名状之物，它都会受到侵蚀。</p>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ============ 04 知识库 ============ -->
+  <section class="screen" id="scr-lore">
+    <header class="topbar">
+      <button class="icon-btn" onclick="go('worlds')">‹</button>
+      <div><div class="title">知识库 · 克苏鲁的呼唤</div><div class="sub">Obsidian 风三栏 · 移动端自动折叠为分段切换</div></div>
+      <div class="spacer"></div>
+      <button class="icon-btn" title="图谱" onclick="toast('演示：图谱视图由 force-graph 渲染')">🕸</button>
+      <button class="icon-btn" title="时间体系" onclick="toast('演示：时间体系视图')">🕰</button>
+      <button class="btn primary" style="flex:none" onclick="toast('演示：保存知识库')">保存</button>
+    </header>
+    <div class="seg">
+      <button id="segTree" onclick="loreSeg('tree')">📁 文件</button>
+      <button id="segNote" class="on" onclick="loreSeg('note')">📝 笔记</button>
+      <button id="segLinks" onclick="loreSeg('links')">🔗 关联</button>
+    </div>
+    <div class="lore-layout" id="loreLayout">
+      <div class="lore-col lore-tree">
+        <input placeholder="🔍 搜索条目…" style="width:100%;padding:8px 12px;border-radius:9px;border:1px solid var(--panel-border);background:rgba(0,0,0,.14);font-size:13px;outline:none;margin-bottom:8px;color:var(--text)">
+        <div class="tree-group">人物</div>
+        <div class="tree-item on"><span class="dot"></span>安吉尔教授</div>
+        <div class="tree-item"><span class="dot"></span>亨利·威尔科克斯</div>
+        <div class="tree-item"><span class="dot"></span>调查员（主角）</div>
+        <div class="tree-group">地点</div>
+        <div class="tree-item"><span class="dot"></span>波士顿 · 私人书房</div>
+        <div class="tree-item"><span class="dot"></span>新奥尔良沼泽</div>
+        <div class="tree-item"><span class="dot"></span>拉莱耶（梦境）</div>
+        <div class="tree-group">概念</div>
+        <div class="tree-item"><span class="dot"></span>克苏鲁教派</div>
+        <div class="tree-item"><span class="dot"></span>旧日支配者</div>
+      </div>
+      <div class="lore-col lore-note">
+        <h3>安吉尔教授</h3>
+        <div class="note-meta">人物 · 更新于 1926-02-02 · 触发：关键词 + 向量</div>
+        <div class="md">
+          <p>乔治·甘默尔·安吉尔，布朗大学闪米特语言学荣誉教授，古代铭文领域的权威。故事开始时已经去世——正是他的遗物，那只锁闭的锡盒，拉开了整个故事的帷幕。</p>
+          <p>他生前最后数月一直在秘密研究某个「无法公开讨论」的话题，与<span class="kw">克苏鲁教派</span>和年轻雕塑家<span class="kw">亨利·威尔科克斯</span>的怪梦有关。他的手稿《克苏鲁教派》现由玩家持有。</p>
+          <p>已知关联地点：<span class="kw">波士顿 · 私人书房</span>、<span class="kw">新奥尔良沼泽</span>（调查记录）。</p>
+        </div>
+      </div>
+      <div class="lore-col lore-links">
+        <div class="tree-group">出链</div>
+        <button class="link-card"><span class="lt">克苏鲁教派</span><span class="ld" style="display:block">概念 · 手稿主题</span></button>
+        <button class="link-card"><span class="lt">亨利·威尔科克斯</span><span class="ld" style="display:block">人物 · 受访者</span></button>
+        <div class="tree-group">反链</div>
+        <button class="link-card"><span class="lt">调查员（主角）</span><span class="ld" style="display:block">人物 · 遗产继承人</span></button>
+        <button class="link-card"><span class="lt">波士顿 · 私人书房</span><span class="ld" style="display:block">地点 · 遗物所在地</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 弹窗示例（API 配置） -->
+  <div class="modal-demo" id="modalDemo">
+    <div class="modal-box">
+      <div class="m-head"><span class="t">API 配置</span><div class="spacer"></div><button class="icon-btn" onclick="closeModal()">✕</button></div>
+      <div class="m-body">
+        <div class="field"><label>模型厂商</label>
+          <input value="DeepSeek" readonly>
+        </div>
+        <div class="field"><label>API Key</label>
+          <input type="password" placeholder="sk-……（仅存本地浏览器）">
+        </div>
+        <div class="field"><label>模型名称</label>
+          <input placeholder="deepseek-chat">
+        </div>
+        弹窗统一：圆角 18px、毛玻璃遮罩、底部按钮右对齐。移动端自动变为底部弹层（同角色抽屉）。
+      </div>
+      <div class="m-foot">
+        <button class="btn" onclick="closeModal()">取消</button>
+        <button class="btn primary" onclick="closeModal();toast('演示：配置已保存')">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+</div>
+
+<script>
+/* ---------- Demo 控制（不属于产品逻辑） ---------- */
+const stage=document.getElementById('stage'),device=document.getElementById('device');
+const screenBtns=[...document.querySelectorAll('.demo-bar [data-screen]')];
+function go(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('scr-'+name).classList.add('active');
+  screenBtns.forEach(b=>b.classList.toggle('on',b.dataset.screen===name));
+  toggleDrawer(false);
+}
+screenBtns.forEach(b=>b.onclick=()=>go(b.dataset.screen));
+
+function setMobile(m){
+  stage.classList.toggle('mobile',m);
+  device.classList.toggle('is-mobile',m);
+  document.getElementById('devDesktop').classList.toggle('on',!m);
+  document.getElementById('devMobile').classList.toggle('on',m);
+}
+document.getElementById('devDesktop').onclick=()=>setMobile(false);
+document.getElementById('devMobile').onclick=()=>setMobile(true);
+
+function setTheme(t){
+  document.documentElement.dataset.theme=t;
+  document.getElementById('thDark').classList.toggle('on',t==='dark');
+  document.getElementById('thLight').classList.toggle('on',t==='light');
+}
+document.getElementById('thDark').onclick=()=>setTheme('dark');
+document.getElementById('thLight').onclick=()=>setTheme('light');
+function flipTheme(){setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark')}
+
+/* 真实窄屏自动切移动样式 */
+const mq=matchMedia('(max-width:767px)');
+mq.addEventListener?.('change',()=>{device.classList.toggle('is-mobile',mq.matches||stage.classList.contains('mobile'))});
+
+/* ---------- 通用小组件 ---------- */
+let toastTimer;
+function toast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2000);
+}
+function openModal(){document.getElementById('modalDemo').classList.add('show')}
+function closeModal(){document.getElementById('modalDemo').classList.remove('show')}
+document.getElementById('modalDemo').addEventListener('click',e=>{if(e.target.id==='modalDemo')closeModal()});
+
+/* ---------- 游戏屏交互 ---------- */
+function toggleDrawer(open){
+  document.getElementById('drawer').classList.toggle('open',open);
+  document.getElementById('drawerMask').classList.toggle('show',open);
+}
+const input=document.getElementById('playerInput');
+input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,120)+'px'});
+input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
+function appendLog(who,text){
+  const col=document.querySelector('#gameLog .log-col');
+  const div=document.createElement('div');
+  if(who==='me'){div.className='player-act';div.innerHTML='<span class="who">你</span>'+text.replace(/</g,'&lt;')}
+  else{div.className='narrative';div.innerHTML='<p>'+text+'</p>'}
+  col.appendChild(div);
+  const log=document.getElementById('gameLog');log.scrollTop=log.scrollHeight;
+}
+function sendMsg(){
+  const v=input.value.trim();if(!v)return;
+  appendLog('me',v);input.value='';input.style.height='auto';
+  document.getElementById('choices').style.display='none';
+  setTimeout(()=>appendLog('ai','（演示）你做出了行动。正式版中，这里会调用 LLM 流式生成下一段剧情，并同步更新角色状态与时间。'),450);
+}
+function pickChoice(btn){
+  appendLog('me',btn.textContent.replace(/^[①②③④]\s*/,''));
+  document.getElementById('choices').style.display='none';
+  setTimeout(()=>appendLog('ai','（演示）选项已写入剧情。新设计中选项 chips 固定在输入区上方，生成后自动让位，避免遮挡阅读。'),450);
+}
+
+/* ---------- 知识库移动端分段 ---------- */
+function loreSeg(which){
+  const layout=document.getElementById('loreLayout');
+  layout.classList.remove('show-tree','show-links');
+  if(which==='tree')layout.classList.add('show-tree');
+  if(which==='links')layout.classList.add('show-links');
+  ['segTree','segNote','segLinks'].forEach(id=>document.getElementById(id).classList.remove('on'));
+  document.getElementById(which==='tree'?'segTree':which==='links'?'segLinks':'segNote').classList.add('on');
+}
+
+/* 状态 tabs 演示 */
+document.getElementById('statusTabs').addEventListener('click',e=>{
+  if(e.target.classList.contains('tab')){
+    document.querySelectorAll('#statusTabs .tab').forEach(t=>t.classList.remove('on'));
+    e.target.classList.add('on');
+  }
+});
+/* 树选中演示 */
+document.querySelectorAll('.lore-tree .tree-item').forEach(it=>it.onclick=()=>{
+  document.querySelectorAll('.lore-tree .tree-item').forEach(i=>i.classList.remove('on'));
+  it.classList.add('on');
+});
+</script>
+</body>
+</html>

@@ -13,7 +13,7 @@ import { saveWorlds } from "./storage.js";
 import { isEnhancementContextCurrent } from "./worldview.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { markPromotedRecords } from "./promotion.js"; // ★ B6：晋升后标记原记忆 promoted
-import { callLoreRevisionLLM, extractLoreFromSource, callRegenerateOpeningLLM } from "./llm.js";
+import { callLoreRevisionLLM, extractLoreFromSource, callRegenerateOpeningLLM, callOptimizeOpeningLLM } from "./llm.js";
 import { invalidateSystemPromptCache } from "./prompt.js";
 import { invalidateLoreAnn } from "./ann-index.js";
 import { renderLoreMarkdown } from "./markdown.js"; // ★ 步骤 B：Obsidian 风 markdown 渲染封装
@@ -301,8 +301,9 @@ function renderOpeningFixActions() {
         <div class="opening-fix-btns">
             <button class="btn-secondary-sm" data-action="regenerateOpening" ${disabled}>🔄 重新生成开场白</button>
             <button class="btn-secondary-sm" data-action="convertOpeningToPlaceholders" ${disabled}>🏷 改成占位符版</button>
+            <button class="btn-secondary-sm btn-accent-sm" data-action="optimizeOpening" ${disabled}>✨ 剧情向优化</button>
         </div>
-        <div class="opening-fix-note">消耗一次 LLM API 调用；生成后预览 diff，确认才写回。</div>
+        <div class="opening-fix-note">消耗一次 LLM API 调用；生成后预览 diff，确认才写回。「剧情向优化」会重写得更抓人、更有张力，但不改设定与时间锚点。</div>
     </div>`;
 }
 
@@ -324,12 +325,29 @@ export async function regenerateOpening(mode) {
     }
 }
 
+// ★ 新功能：开场白剧情向优化（复用 openingFix 弹窗预览/确认写回流程）
+export async function optimizeOpening() {
+    if (!S.currentWorld) { showToast("未找到当前世界", "warn"); return; }
+    const oldOpening = S.currentWorld.opening_narrative;
+    if (!oldOpening || !oldOpening.trim()) { showToast("当前世界没有可优化的开场白（可能尚未生成）", "warn"); return; }
+    showToast("AI 正在优化开场白剧情…", "info", 3000);
+    try {
+        const res = await callOptimizeOpeningLLM(S.currentWorld, oldOpening);
+        S._openingFixBuffer = { oldOpening, newOpening: res.newOpening, mode: "optimize" };
+        renderOpeningFixModal();
+        showModal("openingFixModal");
+    } catch (e) {
+        console.warn("开场白剧情优化生成失败：", e && e.message);
+        showToast("生成失败：" + (e && e.message || "未知错误"), "error");
+    }
+}
+
 // 渲染开场白修复预览模态（旧 vs 新 diff）
 export function renderOpeningFixModal() {
     const el = document.getElementById("openingFixBody");
     if (!el || !S._openingFixBuffer) return;
     const b = S._openingFixBuffer;
-    const modeLabel = b.mode === "toPlaceholders" ? "改成占位符版" : "重新生成开场白";
+    const modeLabel = b.mode === "toPlaceholders" ? "改成占位符版" : b.mode === "optimize" ? "剧情向优化" : "重新生成开场白";
     el.innerHTML = `
         <p class="muted">修复方式：<b>${escapeHtml(modeLabel)}</b>（消耗一次 LLM API 调用）</p>
         <div class="opening-diff">
@@ -380,6 +398,9 @@ function renderKBPane(list) {
     const noteHtml = note ? renderNotePanel(note, S._loreActiveIndex, spoilerClass) : `<div class="lore-empty">请选择左侧笔记，或点上方「＋ 添加条目」新建。</div>`;
     const backHtml = note ? renderBacklinksPanel(note, list, S._loreActiveIndex) : "";
 
+    if (!S._loreSeg) S._loreSeg = "note";
+    const segBtn = (seg, label) => `<button type="button" class="lore-seg-btn${S._loreSeg === seg ? " active" : ""}" data-seg="${seg}" role="tab" aria-selected="${S._loreSeg === seg ? "true" : "false"}">${label}</button>`;
+
     return `
       <div class="lore-obsidian">
         <div class="lore-obs-toolbar">
@@ -389,18 +410,43 @@ function renderKBPane(list) {
         ${spoilerBtn}
         ${revisionHint}
         ${warnHtml}
+        <div class="lore-seg" role="tablist" aria-label="知识库栏目切换">
+            ${segBtn("tree", "📂 文件")}
+            ${segBtn("note", "📝 笔记")}
+            ${segBtn("backlinks", "🔗 关联")}
+        </div>
         <div class="lore-obs-cols">
-            <details class="lore-col-aside lore-tree-wrap" open>
+            <details class="lore-col-aside lore-tree-wrap" data-seg="tree"${S._loreSeg === "tree" ? " open" : ""}>
                 <summary>📂 文件树（${list.length} 条）</summary>
                 <aside class="lore-tree">${tree}</aside>
             </details>
-            <section class="lore-note">${noteHtml}</section>
-            <details class="lore-col-aside lore-backlinks-wrap"${note ? " open" : ""}>
+            <section class="lore-note" data-seg="note"${S._loreSeg === "note" ? " seg-show" : ""}>${noteHtml}</section>
+            <details class="lore-col-aside lore-backlinks-wrap" data-seg="backlinks"${S._loreSeg === "backlinks" ? " open" : ""}>
                 <summary>🔗 关联（出链 ${(note && note.links ? note.links.length : 0)} · 入链 ${list.filter(s => (s.links || []).some(l => note && l.target === note.id)).length}）</summary>
                 <aside class="lore-backlinks">${backHtml}</aside>
             </details>
         </div>
       </div>`;
+}
+
+// ★ 知识库三栏手机端分段切换（文件 / 笔记 / 关联）
+function switchLoreSeg(seg) {
+    if (!seg) return;
+    S._loreSeg = seg;
+    const cols = document.querySelector(".lore-obs-cols");
+    if (!cols) return;
+    // 切换按钮高亮
+    cols.parentElement.querySelectorAll(".lore-seg-btn").forEach(b => {
+        const on = b.dataset.seg === seg;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    // 切换栏目可见性（仅手机端生效，桌面端 CSS 强制全显示）
+    cols.querySelectorAll("[data-seg]").forEach(el => {
+        const on = el.dataset.seg === seg;
+        el.classList.toggle("seg-show", on);
+        if (el.tagName === "DETAILS") el.open = on;
+    });
 }
 
 // ★ 图谱视图
@@ -479,6 +525,11 @@ function bindLoreBodyDelegation() {
     if (!body || _loreBodyDelegated) return;
     _loreBodyDelegated = true;
     body.addEventListener("click", (e) => {
+        const seg = e.target.closest(".lore-seg-btn");
+        if (seg && seg.dataset.seg) {
+            switchLoreSeg(seg.dataset.seg);
+            return;
+        }
         const vt = e.target.closest(".lore-view-tab");
         if (vt && vt.dataset.loreView) {
             S._loreView = vt.dataset.loreView;

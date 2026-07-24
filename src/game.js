@@ -3,7 +3,7 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
-import { analyzeWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeWorldConfig, validateStateShape } from "./utils.js";
+import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
 import { ensureCurrentDate, compareCalendar, advanceCalendarTime } from "./calendar.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
@@ -150,7 +150,7 @@ export async function generateWorld() {
             hero,
             ip_name: ipName,
             createdAt: new Date().toISOString().split("T")[0],
-            tags: analyzeWorldTags(name, desc, hero, type, ipName),
+            tags: pickWorldTags(generated, { name, desc, hero, type, ipName }),
             schema: generated.schema || defaultWorldSchema(name + " " + desc),
             initial_state: generated.initial_state,
             lore_kb: loreKb,
@@ -672,6 +672,7 @@ export async function submitInput() {
     const input = inputEl.value.trim();
     if (!input) return;
     inputEl.value = "";
+    inputEl.style.height = ""; // 重置多行输入框的自动增高
     renderChoices([]); // 发送时立即隐藏选项
     await processTurn(input);
 }
@@ -858,7 +859,9 @@ export async function processTurn(input) {
                 period: S.gameState.current_date.period,
                 day: stepOf(S.gameState.current_date),
                 tcd: deepClone(S.gameState.current_date),
-                key_facts: resp.key_facts || []
+                key_facts: resp.key_facts || [],
+                // ★ 氛围提示（环境变化/危机预警，纯氛围文字，无硬数值；多数回合为 null）
+                atmosphere: sanitizeAtmosphere(resp.atmosphere)
             };
             S.conversationHistory.push(entry);
 

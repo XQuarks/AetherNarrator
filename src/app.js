@@ -9,9 +9,9 @@ import { applyFontSize, applyTheme, changeFontSize, toggleTheme, updateTempLabel
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
-import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, cwNext, cwPrev } from "./render.js";
+import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, cwNext, cwPrev } from "./render.js";
 import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreRequireConfirm, togglePinMemory, triggerMemoryPackImport, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore, switchTimeline } from "./game.js";
-import { syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix } from "./lore-ui.js";
+import { syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening } from "./lore-ui.js";
 
 async function init() {
     applyTheme();
@@ -126,6 +126,7 @@ const ACTIONS = {
     showWorldList: () => showWorldList(),
     showSaveList: () => showSaveList(),
     showSettingsModal: () => showSettingsModal(),
+    showSettingsScreen: () => showSettingsScreen(),
     showCreateWorldModal: () => showCreateWorldModal(),
     showStatusPanel: () => showStatusPanel(),
     exportStory: () => exportStory(),
@@ -215,6 +216,8 @@ const ACTIONS = {
     // ★ S5-4' + S5-7：开场白时间冲突一键修复
     regenerateOpening: () => regenerateOpening("regenerate"),
     convertOpeningToPlaceholders: () => regenerateOpening("toPlaceholders"),
+    // ★ 新功能：开场白剧情向优化（复用 openingFix 弹窗确认写回）
+    optimizeOpening: () => optimizeOpening(),
     applyOpeningFix: () => applyOpeningFix(),
     rejectOpeningFix: () => rejectOpeningFix(),
 };
@@ -252,7 +255,16 @@ const playerInputEl = document.getElementById("playerInput");
 
 if (playerInputEl) {
     playerInputEl.addEventListener("keydown", (e) => {
-        if (!e.isComposing && e.key === "Enter") submitInput();
+        // Enter 发送，Shift+Enter 换行（输入框已改为多行 textarea）
+        if (!e.isComposing && e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submitInput();
+        }
+    });
+    // 多行输入框自动增高（上限由 CSS max-height 控制）
+    playerInputEl.addEventListener("input", () => {
+        playerInputEl.style.height = "auto";
+        playerInputEl.style.height = Math.min(playerInputEl.scrollHeight, 120) + "px";
     });
 }
 

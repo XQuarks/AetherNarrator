@@ -350,12 +350,26 @@ export function mockGenerateWorld(name, type, desc, hero, ipName) {
         opening_narrative = `你从漫长的昏睡中醒来，发现自己躺在一间陌生的房间里。窗外透进来的光线带着你不熟悉的色调——偏暖、偏沉，像是某个你从未到过的地方的傍晚。空气中有一股若有若无的气味，说不上是好闻还是难闻，只是和记忆里所有已知的气味都不一样。\n\n你坐起身来，四处打量。桌上放着一张字条，上面写着你的名字和一句话：「你来的时间比预期的早了半天，先去楼下看看吧。」\n\n你不知道写下这行字的人是谁，也不清楚"预期"指的是什么。但直觉告诉你，此刻走出去或许比留在原地更安全——或者说，更有趣。`;
     }
 
+    let tags;
+    if (isMagicSchool) tags = ["魔法学院", "分院仪式", "校园奇幻", "成长历练"];
+    else if (isXianxia) tags = ["修仙世界", "修行成长", "宗门奇遇", "江湖历练"];
+    else {
+        tags = ["自由探索"];
+        const clue = name + " " + desc;
+        if (/赛博|朋克|机械|未来|星际|ai|人工智能/.test(clue)) tags.push("赛博朋克");
+        if (/末日|丧尸|废土|生存|灾变/.test(clue)) tags.push("末世求生");
+        if (/克苏鲁|恐怖|诡异|怪谈|灵异/.test(clue)) tags.push("克苏鲁式恐怖");
+        if (/恋爱|甜宠|校园/.test(clue)) tags.push("青春恋爱");
+        if (tags.length < 2) tags.push("开放世界");
+    }
+
     return {
         schema,
         initial_state,
         lore_kb: { ip: name, snippets: lore_snippets },
         system_prompt,
-        opening_narrative
+        opening_narrative,
+        tags
     };
 }
 
@@ -569,6 +583,7 @@ export function mockLLM(input, retrieved) {
 
     let narrative = "";
     let choices = [];
+    let atmosphere = null; // 氛围提示示例（仅部分分支给出，演示环境/危机低语）
     let changes = { attributes: {}, relationships: {}, skills: {}, inventory: [], completed_events: [] };
 
     if (input.includes("休息") || input.includes("睡觉")) {
@@ -607,6 +622,7 @@ export function mockLLM(input, retrieved) {
         const places = (getWorldLoreKB().snippets || []).filter(s => s.category === "地点");
         const place = places.length ? places[0].title : "附近的集市";
         narrative = `你沿着${loc}的小路走去，来到了${place}。这里人来人往，烟火气扑面而来。你注意到一个摊位前围了不少人。`;
+        atmosphere = "环境变化：身后的喧嚣渐次远去，前方的路愈发陌生";
         changes.current_location = place;
         changes.attributes = { perception: "一路走下来，你学会从嘈杂中分辨出对自己有用的声响。" };
         changes.skills = { "观察": "你开始懂得，热闹背后的安静角落往往藏着更多东西。" };
@@ -618,6 +634,7 @@ export function mockLLM(input, retrieved) {
         ];
     } else if (input.includes("死") || input.includes("自杀")) {
         narrative = `你做出了一个无法挽回的决定。周围的世界骤然安静下来，${loc}的灯火在视野中逐渐模糊，直至黑暗吞没一切。`;
+        atmosphere = "终局：世界的轮廓正在一点点剥落";
         changes.is_alive = false;
         changes.death_reason = "主动放弃生命";
         choices = [];
@@ -638,6 +655,7 @@ export function mockLLM(input, retrieved) {
         is_forced_plot: false,
         next_period: getNextPeriod(S.gameState.current_date.period),
         comment: "模拟响应",
+        atmosphere,
         key_facts: summarizeFactsFromChanges(input, narrative, changes)
     };
 }
@@ -1050,6 +1068,85 @@ ${instruction}`;
         const cleaned = content.trim();
         if (!cleaned) throw new Error("API 返回空开场白");
         return { newOpening: cleaned, mode };
+    } finally {
+        clearTimeout(timeoutId);
+        S.auxiliaryControllers.delete(controller);
+    }
+}
+
+// ★ 新功能：剧情向优化开场白 —— 把平淡的开场白改写成更有钩子、更有张力的版本，
+// 但不改动任何世界观设定，也不偏离给定时间锚点（建议用占位符表达时间）。
+// 仿 callRegenerateOpeningLLM：自建 fetch 流，不污染主对话；支持模拟模式（确定性的占位符文本便于预览/测试）。
+export async function callOptimizeOpeningLLM(world, oldOpening, opts = {}) {
+    const tc = normalizeTimeConfig((getWorldSchema(world) || {}).time_config);
+    const era = tc.era_label || (world && world.era_label) || "";
+    const season = tc.season || "";
+    const start = tc.calendar_start;
+    const startDateStr = start ? `${start.year}年${start.month}月${start.date}日` : "未设定起点";
+    const worldName = world && world.name ? world.name : "未知世界";
+    const worldDesc = world && world.desc ? world.desc.slice(0, 600) : "";
+    const tone = (world && world.system_prompt ? world.system_prompt.split("\n")[0] : "").slice(0, 300);
+    // 知识库关键设定（贴合调性用，严禁新增设定）
+    let loreText = "";
+    if (world && world.lore_kb && Array.isArray(world.lore_kb.snippets)) {
+        loreText = world.lore_kb.snippets.slice(0, 4).map(s => `- ${s.title}：${(s.content || "").slice(0, 160)}`).join("\n");
+    }
+    const focus = (opts && opts.focus) || "";
+    const isMulti = tc.mode === "multiverse";
+
+    // 模拟 / 测试模式：返回确定性文本（含占位符便于校验）
+    if (isMockMode()) {
+        return { newOpening: `（AI优化·剧情向）{era_label}的{season}，{calendar_date}。你刚在一道从未有过的拉扯中睁开眼——两界同时向你伸手。故事，从这一刻的取舍开始。`, mode: "optimize" };
+    }
+
+    const { baseUrl, corsProxy, apiKey, model: readModel } = readApiInputs();
+    const model = readModel || "deepseek-v4-flash";
+    if (!baseUrl || !apiKey) throw new Error("请填写 Base URL 与 API Key，或开启模拟模式。");
+    const apiUrl = buildApiUrl(baseUrl, corsProxy);
+
+    const instruction = `请把上面的开场白改写成「剧情向」的优化版本：更有钩子、更有张力，但不改动任何世界观设定，也不偏离给定时间锚点。
+要求：
+1. 开篇即钩子：从一个具体时刻、动作或悬念切入，不要平铺世界观设定。
+2. 立刻建立张力与 stakes：让读者感到「这件事必须马上做/选」。${isMulti ? "多世界/双界尤其要点出「两边都催着你」的拉扯感。" : ""}
+3. show, don't tell：用感官细节（气味、声音、身体感受）代替抽象形容。
+4. 结尾抛出一个把玩家推进剧情的抉择或悬念问题。
+5. 时间锚点严格对齐上方「当前时间锚点」；建议用占位符 {calendar_date}、{era_label}、{season} 表达时间，避免写死。
+6. 不新增世界观设定，不偏离已有调性。${focus ? "侧重方向：" + focus + "。" : ""}
+只输出改写后的开场白纯文本，不要任何解释或前缀。`;
+
+    const prompt = `你是文字 RPG 世界的「开场白剧情优化」助手。任务是把一段平淡的开场白，改写成更有钩子、更有张力的版本，但不改动世界观设定。
+
+# 世界名称
+${worldName}
+# 世界观简介
+${worldDesc}
+# 叙事风格定位
+${tone}
+# 关键设定（来自知识库，供贴合调性，不要新增设定）
+${loreText || "（无）"}
+# 当前时间锚点（必须严格遵守，不得冲突）
+纪元：${era}；季节：${season}；起始日期：${startDateStr}
+# 原开场白
+${oldOpening || "（无）"}
+# 任务
+${instruction}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 40000);
+    S.auxiliaryControllers.add(controller);
+    try {
+        const resp = await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+            body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0.8, max_tokens: 1400, stream: false }),
+            signal: controller.signal
+        });
+        if (!resp.ok) throw new Error("开场白优化请求失败：" + resp.status);
+        const data = await resp.json();
+        const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+        const cleaned = content.trim();
+        if (!cleaned) throw new Error("API 返回空开场白");
+        return { newOpening: cleaned, mode: "optimize" };
     } finally {
         clearTimeout(timeoutId);
         S.auxiliaryControllers.delete(controller);

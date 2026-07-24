@@ -11,6 +11,21 @@ import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
 export function showScreen(id) {
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
     document.getElementById(id).classList.add("active");
+    // 同步更新全局底部导航高亮 + 显隐
+    const screenToNavAction = {
+        homeScreen: "goHome",
+        worldListScreen: "showWorldList",
+        saveListScreen: "showSaveList",
+        settingsScreen: "showSettingsScreen",
+    };
+    const targetAction = screenToNavAction[id];
+    const nav = document.getElementById("globalBottomNav");
+    if (nav) {
+        nav.classList.toggle("hidden", !targetAction);  // 游戏屏等不显示底部导航
+        nav.querySelectorAll("button").forEach(b => {
+            b.classList.toggle("on", b.dataset.action === targetAction);
+        });
+    }
 }
 
 export function setBackgroundInert(on) {
@@ -54,12 +69,19 @@ export function showApiModal() {
 }
 
 export function showSettingsModal() {
-    showModal("settingsModal");
+    // 已改为独立页面 showSettingsScreen，此函数保留兼容旧调用（如从主界面菜单进入）
+    showSettingsScreen();
+}
+function updateSettingsValues() {
     updateFontSizeButtons();
     document.getElementById("temperatureSlider").value = S.temperatureSetting;
     updateTempLabel();
     const lrc = document.getElementById("loreRequireConfirm");
     if (lrc) lrc.checked = S.loreRequireConfirm;
+}
+export function showSettingsScreen() {
+    showScreen("settingsScreen");
+    updateSettingsValues();
 }
 
 let cwStep = 1;
@@ -263,6 +285,15 @@ export function toggleWorldPrefix(enabled, el) {
 
 export function renderWorldList() {
     const container = document.getElementById("worldListContent");
+    // 顶栏副标题：世界数 + 进行中存档数（照 demo「3 个世界 · 2 个存档进行中」）
+    const subEl = document.getElementById("worldListSub");
+    if (subEl) {
+        const activeWorldIds = new Set();
+        for (const s of S.saves) {
+            if (!s.state || s.state.is_alive !== false) activeWorldIds.add(s.worldId);
+        }
+        subEl.textContent = `${S.worlds.length} 个世界 · ${activeWorldIds.size} 个存档进行中`;
+    }
     if (!S.worlds.length) {
         container.innerHTML = `
             <div class="empty-state">
@@ -280,24 +311,50 @@ export function renderWorldList() {
     if (sorted.length > 0) newestTime = new Date(sorted[0].createdAt).getTime();
     const newestId = (now - newestTime) < newThreshold ? sorted[0].id : null;
 
+    // 为每个世界查找是否有存档（决定卡片底部按钮用"继续"还是"开始"）
+    const saveMap = new Map();
+    for (const s of S.saves) {
+        if (!saveMap.has(s.worldId) || new Date(s.lastPlayed) > new Date(saveMap.get(s.worldId).lastPlayed)) {
+            saveMap.set(s.worldId, s);
+        }
+    }
+
     container.innerHTML = sorted.map((w, i) => {
         const isNew = w.id === newestId;
-        const delay = i * 0.07; // 依次延迟 0/0.07/0.14/... 秒
+        const delay = i * 0.07;
+        const hasSave = saveMap.has(w.id);
+        const firstChar = (w.name || "?")[0];
         return `
-        <div class="list-item world-list-item${isNew ? " new-world" : ""}" data-action="showWorldDetail" data-id="${w.id}" tabindex="0" role="button" aria-label="打开世界：${escapeHtml(w.name)}" style="animation: fadeSlideIn 0.4s ease-out ${delay}s both;">
-            <div class="item-title">${escapeHtml(w.name)}${isNew ? '<span class="new-badge">新</span>' : ""}</div>
-            <div class="item-meta">${escapeHtml(w.desc)}</div>
-            <div class="item-tags">
-                ${w.tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}
-                <span class="tag accent">${w.type === "ip" ? "已有 IP" : "原创"}</span>
+        <article class="world-card${isNew ? " new-world" : ""}" data-action="showWorldDetail" data-id="${w.id}" tabindex="0" style="animation: fadeSlideIn 0.4s ease-out ${delay}s both;">
+            <div class="wc-cover">
+                <span class="wc-glyph">${escapeHtml(firstChar)}</span>
+                <span class="wc-badge${w.type === "ip" ? "" : " wc-badge-original"}">${w.type === "ip" ? "已有 IP" : "原创"}</span>
             </div>
-            <button class="delete-world-btn" data-action="deleteWorld" data-id="${w.id}">删除</button>
-        </div>
+            <div class="wc-body">
+                <div class="wc-title">${escapeHtml(w.name)}${isNew ? '<span class="new-badge">新</span>' : ""}</div>
+                <div class="wc-desc">${escapeHtml(w.desc || "")}</div>
+                <div class="wc-tags">
+                    ${(w.tags || []).slice(0, 3).map(t => `<span class="wc-chip">${escapeHtml(t)}</span>`).join("")}
+                    ${hasSave ? '<span class="wc-chip wc-chip-status">进行中</span>' : ""}
+                </div>
+            </div>
+            <div class="wc-foot">
+                <button class="btn primary" data-action="showWorldDetail" data-id="${w.id}">▶ ${hasSave ? "继续游玩" : "进入世界"}</button>
+                <div class="wc-foot-spacer"></div>
+                <button class="btn ghost-danger" data-action="deleteWorld" data-id="${w.id}">删除</button>
+            </div>
+        </article>
     `}).join("");
 }
 
 export function renderSaveList() {
     const container = document.getElementById("saveListContent");
+    const subEl = document.getElementById("saveListSub");
+    if (subEl) {
+        const total = S.saves.length;
+        const active = S.saves.filter(s => s.state && s.state.is_alive !== false).length;
+        subEl.textContent = total === 0 ? "继续你的旅程" : `${total} 个存档 · ${active} 个进行中`;
+    }
     if (!S.saves.length) {
         container.innerHTML = `
             <div class="empty-state">
@@ -834,6 +891,25 @@ export function highlightItems(text) {
     return html;
 }
 
+/**
+ * 把剧情文本渲染为带段落结构的 HTML。
+ * - 按空行（\n\n）拆分为独立段落 <p>，段间距由 CSS 的 `p + p` 规则控制；
+ * - 段落内的单个换行保留为 <br>，避免被浏览器折叠；
+ * - 物品高亮（highlightItems）在转义后生效，且高亮不会破坏已插入的 <br>。
+ * 注意：highlightItems 内部会先 escapeHtml，\n 不会被转义，故可在其后安全替换。
+ */
+export function renderNarrative(text, isWarning) {
+    if (isWarning) return escapeHtml(text || "");
+    const blocks = (text || "")
+        .split(/\n{2,}/)
+        .map(b => b.trim())
+        .filter(b => b.length);
+    if (!blocks.length) return escapeHtml(text || "");
+    return blocks
+        .map(b => `<p>${highlightItems(b).replace(/\n/g, "<br>")}</p>`)
+        .join("");
+}
+
 export function renderLog(reset) {
     const log = document.getElementById("gameLog");
     if (reset) { S.renderedEntryCount = 0; log.innerHTML = '<div class="choices-row in-log" id="choicesArea"></div>'; }
@@ -851,7 +927,8 @@ export function renderLog(reset) {
                 <span>${metaLabel} · ${escapeHtml(entry.tcd ? formatTimeLabel(entry.tcd, getTimeConfig().timeConfig) : formatTimeShort(entry.day, entry.period, entry.clock))}</span>
             </div>
             ${entry.player ? `<div class="player-text">${escapeHtml(entry.player)}</div>` : ""}
-            <div class="narrative">${entry.isWarning ? escapeHtml(entry.narrative) : highlightItems(entry.narrative)}</div>
+            <div class="narrative">${renderNarrative(entry.narrative, entry.isWarning)}</div>
+            ${entry.atmosphere ? `<div class="log-whisper"><span>◈ ${escapeHtml(entry.atmosphere)}</span></div>` : ""}
         </div>
         `;
         log.insertBefore(createElementFromHTML(html), document.getElementById("choicesArea"));
@@ -874,8 +951,7 @@ export function startTypewriter(index) {
     // ★ P3.2.17: 尊重 prefers-reduced-motion — 直接出全文，跳过逐字动画
     const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReduced) {
-        narrativeEl.innerHTML = "";
-        narrativeEl.textContent = fullText;
+        narrativeEl.innerHTML = renderNarrative(fullText, data.isWarning);
         S.typingIndex = index;
         return new Promise(resolve => { S.typingResolver = resolve; finishTyping(); });
     }
@@ -884,6 +960,7 @@ export function startTypewriter(index) {
     narrativeEl.innerHTML = "";
     narrativeEl.classList.add("typing");
     log.classList.add("typing-active");
+    entry.querySelector(".log-whisper")?.classList.add("hidden"); // 氛围提示等打字结束再出现
     S.typingIndex = index;
 
     return new Promise(resolve => {
@@ -924,9 +1001,10 @@ export function finishTyping() {
             const narrativeEl = entry.querySelector(".narrative");
             const data = S.conversationHistory[S.typingIndex];
             const fullText = data.narrative || "";
-            // 完成后替换为带物品高亮的 HTML
-            narrativeEl.innerHTML = data.isWarning ? escapeHtml(fullText) : highlightItems(fullText);
+            // 完成后替换为带物品高亮 + 段落结构的 HTML
+            narrativeEl.innerHTML = renderNarrative(fullText, data.isWarning);
             narrativeEl.classList.remove("typing");
+            entry.querySelector(".log-whisper")?.classList.remove("hidden"); // 显示氛围提示
         }
         log.classList.remove("typing-active");
     }
@@ -948,7 +1026,10 @@ export function stopTypewriter() {
         const log = document.getElementById("gameLog");
         const entries = log.querySelectorAll(".log-entry");
         const entry = entries[S.typingIndex];
-        if (entry) entry.querySelector(".narrative")?.classList.remove("typing");
+        if (entry) {
+            entry.querySelector(".narrative")?.classList.remove("typing");
+            entry.querySelector(".log-whisper")?.classList.remove("hidden"); // 中断时也确保氛围提示不丢失
+        }
         log.classList.remove("typing-active");
     }
     S.typingIndex = -1;
@@ -962,7 +1043,11 @@ export function renderChoices(choices) {
         area.innerHTML = "";
         return;
     }
-    area.innerHTML = choices.map((c, i) => `<button class="choice-chip" data-action="chooseOption" data-index="${i}">${escapeHtml(c.text)}</button>`).join("");
+    const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
+    area.innerHTML = choices.map((c, i) => {
+        const num = i < CIRCLED.length ? CIRCLED[i] : (i + 1) + ".";
+        return `<button class="choice-chip" data-action="chooseOption" data-index="${i}"><span class="choice-index">${num}</span>${escapeHtml(c.text)}</button>`;
+    }).join("");
 }
 
 export function checkDeathBanner() {
