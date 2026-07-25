@@ -28,16 +28,15 @@ function makeWorld(over) {
         name: "测试世界",
         desc: "一个用于审稿测试的世界。",
         lore_kb: { snippets: [{ id: "s1", category: "事件", title: "某事件", content: "1620 年爆发了一场战役。", activation_keys: ["战役"] }] },
-        schema: { time_config: { calendar_mode: "gregorian", calendar_start: { year: 1620, month: 1, date: 1 }, season: "冬季", era_label: "大航海时代" } },
+        schema: { time_config: { calendar_mode: "gregorian", calendar_start: { year: 1620, month: 1, date: 1 }, era_label: "大航海时代" } },
         rules: [],
         ...over
     };
 }
 
-test("S5-5 buildCriticTimeContext：gregorian 含年份/季节/纪元/历法标签", () => {
+test("S5-5 buildCriticTimeContext：gregorian 含年份/纪元/历法标签", () => {
     const ctx = buildCriticTimeContext(makeWorld());
     assert.ok(ctx.includes("1620"), "应含起始年份 1620");
-    assert.ok(ctx.includes("冬"), "应含季节 冬");
     assert.ok(ctx.includes("大航海时代"), "应含纪元标签 大航海时代");
     assert.ok(ctx.includes("公历"), "应含历法标签 公历");
 });
@@ -91,7 +90,7 @@ test("S5-5 callWorldCriticLLM：detectTimeConflict 命中时注入「已知时�
     // 开场白写死 1999，但 calendar_start 1620 → detectTimeConflict 命中
     const w = makeWorld({
         opening_narrative: "1999 年的冬天，故事开始。",
-        schema: { time_config: { calendar_mode: "gregorian", calendar_start: { year: 1620, month: 1, date: 1 }, season: "冬季", era_label: "大航海时代" } }
+        schema: { time_config: { calendar_mode: "gregorian", calendar_start: { year: 1620, month: 1, date: 1 }, era_label: "大航海时代" } }
     });
     await callWorldCriticLLM(w.lore_kb, w);
     assert.ok(captured.includes("已知时间冲突线索"), "detectTimeConflict 命中应注入「已知时间冲突线索」章节");

@@ -51,7 +51,6 @@ export const S = {
   _restartWorldId: null, // ★ 修复：重新开始确认弹窗暂存目标世界 id（原生 confirm 在沙箱被吞，改用自定义弹窗）
   _loreRevisionBuffer: null, // ★ B5：AI 修订后待审阅的知识库条目缓冲
   lastLoreReviewMsgCount: 0,  // ★ B5：上次回写时的对话条数，用于触发阈值判断
-  loreSpoilerHidden: true,     // ★ B8：知识库防剧透——默认隐藏正文，玩家手动解除
   loreRequireConfirm: _lsGet("aigame_lore_confirm", "false") === "true", // ★ 知识晋升确认开关：默认关=自动同意+提示；开=弹窗手动确认
 };
 
@@ -88,7 +87,7 @@ export const DEFAULT_PERIOD_LABELS = {
 };
 
 // ============================================================
-// 时间系统统一配置（E 工作流：纪元 / 历法 / 时钟 / 季节）
+// 时间系统统一配置（E 工作流：纪元 / 历法 / 时钟）
 // 设计：世界生成时 AI 一次性按 IP 产出 schema.time_config，运行时纯本地渲染，零额外 token。
 // ============================================================
 export const DEFAULT_TIME_CONFIG = {
@@ -99,7 +98,6 @@ export const DEFAULT_TIME_CONFIG = {
     mode: "single",           // single | multiverse（Phase 2 双世界穿梭）
     timelines: null,          // {<id>:{calendar_mode,calendar_start,current_date,...}}（multiverse 用，Phase 2 细化）
     clock_mode: "period",     // period(时段标签) | clock(具体时钟) | none(不显示时刻)
-    season: "",               // 春/夏/秋/冬/自定义，可为空，用于驱动节日/氛围（E11）
     weather: "",              // 当前天气，可随剧情变化
     show: true,               // 是否展示时间（false 等同 hidden）
     deadlines: []             // 世界级截止（方案 B：dated 模式用 {year,month,date,period}；day 模式用 {step,period}）
@@ -171,7 +169,6 @@ export function normalizeTimeConfig(raw) {
                             : null,
                         current_date: (l.current_date && typeof l.current_date === "object") ? l.current_date : null,
                         era_label: typeof l.era_label === "string" ? l.era_label.slice(0, 40) : "",
-                        season: typeof l.season === "string" ? l.season.slice(0, 10) : "",
                         weather: typeof l.weather === "string" ? l.weather.slice(0, 20) : ""
                     };
                     if (l.custom_calendar && Array.isArray(l.custom_calendar.months) && l.custom_calendar.months.length) {
@@ -197,7 +194,6 @@ export function normalizeTimeConfig(raw) {
         }
         const clkModes = ["period", "none"]; // 仅允许「时段标签」或「不显示」；禁用「具体时钟」以免界面出现具体小时
         if (clkModes.includes(raw.clock_mode)) cfg.clock_mode = raw.clock_mode;
-        if (typeof raw.season === "string" && raw.season.trim()) cfg.season = raw.season.slice(0, 10);
         if (typeof raw.weather === "string" && raw.weather.trim()) cfg.weather = raw.weather.slice(0, 20);
         if (typeof raw.show === "boolean") cfg.show = raw.show;
         if (Array.isArray(raw.deadlines)) {

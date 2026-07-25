@@ -89,7 +89,6 @@ function summarizeTimeConfig(cfg) {
     if (c.era_label) parts.push(`纪元：${c.era_label}`);
     parts.push(`历法：${CALENDAR_LABELS[c.calendar_mode] || c.calendar_mode}`);
     parts.push(`时钟：${CLOCK_LABELS[c.clock_mode] || c.clock_mode}`);
-    if (c.season) parts.push(`季节：${c.season}`);
     if (c.weather) parts.push(`天气：${c.weather}`);
     parts.push(`界面显示：${c.show ? "开启" : "关闭"}`);
     return parts.join(" · ");
@@ -131,7 +130,6 @@ function renderTimeConfigSection(mode) {
             <div class="form-group"><label>纪元 / 年份</label><input id="tc_era" maxlength="40" value="${escapeHtml(cfg.era_label || "")}" placeholder="例如：大清乾隆年间" data-action="timeConfigChanged" data-event="input"></div>
             <div class="form-group"><label>历法</label><select id="tc_calendar" data-action="timeConfigChanged" data-event="change">${calOpts}</select></div>
             <div class="form-group"><label>时钟</label><select id="tc_clock">${clkOpts}</select></div>
-            <div class="form-group"><label>季节</label><input id="tc_season" maxlength="10" value="${escapeHtml(cfg.season || "")}" placeholder="例如：仲春" data-action="timeConfigChanged" data-event="input"></div>
             <div class="form-group"><label>当前天气</label><input id="tc_weather" maxlength="20" value="${escapeHtml(cfg.weather || "")}" placeholder="例如：细雨"></div>
             <div class="form-group time-cfg-show"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="tc_show" style="width:auto;" ${cfg.show !== false ? "checked" : ""}><span>在界面显示世界时间</span></label></div>
             ${startRow}
@@ -178,7 +176,7 @@ function buildLoreTree(list, activeIdx) {
 }
 
 // 中：笔记面板（标题 / 正文 Markdown 预览↔编辑 / 属性侧栏）
-function renderNotePanel(note, idx, spoilerClass) {
+function renderNotePanel(note, idx) {
     const preview = S._loreNotePreview !== false;
     const mode = note.trigger_mode || (note.activation_keys && note.activation_keys.length ? "keyword" : "always");
     const pos = ["system", "author_note", "before_user", "after_user"].includes(note.insert_at) ? note.insert_at : "before_user";
@@ -187,10 +185,8 @@ function renderNotePanel(note, idx, spoilerClass) {
     const catOpts = ["规则", "世界观", "地点", "人物", "事件", "物品", "势力", "冲突", "补充"].map(c => `<option value="${c}">${c}</option>`).join("");
 
     const contentArea = preview
-        ? (S.loreSpoilerHidden
-            ? `<div class="lore-md lore-spoiler">🔒 内容已隐藏（点击左上角「🔓 已显示全部」可查看）</div>`
-            : `<div class="lore-md">${renderLoreMarkdown(note.content)}</div>`)
-        : `<textarea id="le_content_${idx}" class="lore-note-textarea${spoilerClass}" placeholder="正文（支持 Markdown 与 [[双链]]，如 [[荣国府]]）">${escapeHtml(note.content || "")}</textarea>`;
+        ? `<div class="lore-md">${renderLoreMarkdown(note.content)}</div>`
+        : `<textarea id="le_content_${idx}" class="lore-note-textarea" placeholder="正文（支持 Markdown 与 [[双链]]，如 [[荣国府]]）">${escapeHtml(note.content || "")}</textarea>`;
 
     return `
         <div class="lore-note-head">
@@ -261,7 +257,7 @@ export function syncTimeConfigFromDOM() {
     tc.calendar_mode = document.getElementById("tc_calendar")?.value || "day";
     readCalendarStartFromDOM(tc);
     tc.clock_mode = document.getElementById("tc_clock")?.value || "period";
-    tc.season = document.getElementById("tc_season")?.value.trim().slice(0, 10);
+    delete tc.season;
     tc.weather = document.getElementById("tc_weather")?.value.trim().slice(0, 20);
     tc.show = !!document.getElementById("tc_show")?.checked;
     if (!S.currentWorld.schema) S.currentWorld.schema = {};
@@ -269,7 +265,7 @@ export function syncTimeConfigFromDOM() {
 }
 
 // S5-4：编辑卡时间冲突徽章实时刷新（只读 schema，不重渲染卡片，避免输入框丢焦点）
-// 由 app.js 的 data-action="timeConfigChanged" 在改起始日期/历法/纪元/季节时调用。
+// 由 app.js 的 data-action="timeConfigChanged" 在改起始日期/历法/纪元时调用。
 export function updateTimeConflictBadge() {
     updateStartDateWarn(); // 方案 22：起始日期实时校验提示随同刷新
     const el = document.getElementById("timeConflictBadge");
@@ -417,12 +413,9 @@ function renderKBPane(list) {
     const warnHtml = warns.length
         ? `<details class="lore-warn"><summary>⚠ 质量提示（${warns.length}）— 点击展开/收起</summary><ul>${warns.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul></details>`
         : `<div class="lore-ok">✓ 未发现明显质量问题</div>`;
-    const spoilerBtn = `<div class="spoiler-toggle" data-action="toggleLoreSpoiler">${S.loreSpoilerHidden ? "🔒 内容已隐藏（点击查看）" : "🔓 已显示全部"}</div>`;
-    const spoilerClass = S.loreSpoilerHidden ? " lore-spoiler" : "";
-
     const tree = buildLoreTree(list, S._loreActiveIndex);
     const note = (S._loreActiveIndex >= 0 && list[S._loreActiveIndex]) ? list[S._loreActiveIndex] : null;
-    const noteHtml = note ? renderNotePanel(note, S._loreActiveIndex, spoilerClass) : `<div class="lore-empty">请选择左侧笔记，或点上方「＋ 添加条目」新建。</div>`;
+    const noteHtml = note ? renderNotePanel(note, S._loreActiveIndex) : `<div class="lore-empty">请选择左侧笔记，或点上方「＋ 添加条目」新建。</div>`;
     const backHtml = note ? renderBacklinksPanel(note, list, S._loreActiveIndex) : "";
 
     if (!S._loreSeg) S._loreSeg = "note";
@@ -433,8 +426,14 @@ function renderKBPane(list) {
         <div class="lore-obs-toolbar">
             <input id="loreSearch" class="lore-search" value="${escapeHtml(S._loreSearchTerm || "")}" placeholder="🔍 搜索标题 / 内容…">
             <button class="btn-secondary-sm" data-action="addLoreEntry">＋ 添加条目</button>
+            <div class="dropdown">
+                <button class="btn-secondary-sm" data-action="toggleDropdown" aria-haspopup="true" aria-expanded="false">⋯ 更多</button>
+                <div class="dropdown-menu">
+                    <button class="dropdown-item" id="extractSourceBtn" data-action="extractAndMergeSourceLore">📥 从源文档补抽</button>
+                    <button class="dropdown-item" data-action="triggerWorldCritic">🤖 审稿检查</button>
+                </div>
+            </div>
         </div>
-        ${spoilerBtn}
         ${revisionHint}
         ${warnHtml}
         <div class="lore-seg" role="tablist" aria-label="知识库栏目切换">
@@ -443,20 +442,20 @@ function renderKBPane(list) {
             ${segBtn("backlinks", "🔗 关联")}
         </div>
         <div class="lore-obs-cols">
-            <details class="lore-col-aside lore-tree-wrap" data-seg="tree"${S._loreSeg === "tree" ? " open" : ""}>
-                <summary>📂 文件树（${list.length} 条）</summary>
-                <aside class="lore-tree">${tree}</aside>
-            </details>
-            <section class="lore-note" data-seg="note"${S._loreSeg === "note" ? " seg-show" : ""}>${noteHtml}</section>
-            <details class="lore-col-aside lore-backlinks-wrap" data-seg="backlinks"${S._loreSeg === "backlinks" ? " open" : ""}>
-                <summary>🔗 关联（出链 ${(note && note.links ? note.links.length : 0)} · 入链 ${list.filter(s => (s.links || []).some(l => note && l.target === note.id)).length}）</summary>
-                <aside class="lore-backlinks">${backHtml}</aside>
-            </details>
+            <div class="lore-col-aside lore-tree-wrap${S._loreSeg === "tree" ? " seg-show" : ""}" data-seg="tree">
+                <div class="lore-col-head">📂 文件树（${list.length} 条）</div>
+                <div class="lore-tree">${tree}</div>
+            </div>
+            <section class="lore-note${S._loreSeg === "note" ? " seg-show" : ""}" data-seg="note">${noteHtml}</section>
+            <div class="lore-col-aside lore-backlinks-wrap${S._loreSeg === "backlinks" ? " seg-show" : ""}" data-seg="backlinks">
+                <div class="lore-col-head">🔗 关联（出链 ${(note && note.links ? note.links.length : 0)} · 入链 ${list.filter(s => (s.links || []).some(l => note && l.target === note.id)).length}）</div>
+                <div class="lore-backlinks">${backHtml}</div>
+            </div>
         </div>
       </div>`;
 }
 
-// ★ 知识库三栏手机端分段切换（文件 / 笔记 / 关联）
+// ★ 知识库三栏手机端分段切换（文件 / 笔记 / 关联），通过 .seg-show 类控制可见段
 function switchLoreSeg(seg) {
     if (!seg) return;
     S._loreSeg = seg;
@@ -472,7 +471,6 @@ function switchLoreSeg(seg) {
     cols.querySelectorAll("[data-seg]").forEach(el => {
         const on = el.dataset.seg === seg;
         el.classList.toggle("seg-show", on);
-        if (el.tagName === "DETAILS") el.open = on;
     });
 }
 
@@ -640,6 +638,8 @@ export function openLoreReview(mode = "save", focusId = null) {
     if (!S.currentWorld) { showToast("请先选择一个世界", "warn"); return; }
     S._loreEditingWorldDefault = mode === "world";
     S._loreView = "kb"; // 每次打开默认进入知识库视图
+    // ★ 记忆式分段：仅在首次（从未切过）时给默认「笔记」段，之后保留用户上次停留的段位
+    if (!S._loreSeg) S._loreSeg = "note";
     const title = document.getElementById("loreReviewModalTitle");
     if (title) title.textContent = mode === "world" ? "默认知识库" : "当前存档知识库（Obsidian 风）";
     // ★ 步骤二：时间体系已作为卡片直接渲染在初览面板顶部（renderTimeConfigSection）；world 模式可编辑，save 模式只读锁定
@@ -725,7 +725,7 @@ export async function saveLoreReview() {
         tc.calendar_mode = document.getElementById("tc_calendar")?.value || "day";
         readCalendarStartFromDOM(tc);
         tc.clock_mode = document.getElementById("tc_clock")?.value || "period";
-        tc.season = (document.getElementById("tc_season")?.value || "").trim().slice(0, 10);
+        delete tc.season;
         tc.weather = (document.getElementById("tc_weather")?.value || "").trim().slice(0, 20);
         tc.show = !!document.getElementById("tc_show")?.checked;
         if (!S.currentWorld.schema) S.currentWorld.schema = defaultWorldSchema(S.currentWorld.name);
@@ -886,12 +886,6 @@ export async function extractAndMergeSourceLore(worldId) {
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = "📥 从源文档补抽"; }
     }
-}
-
-// ★ B8：防剧透遮罩开关
-export function toggleLoreSpoiler() {
-    S.loreSpoilerHidden = !S.loreSpoilerHidden;
-    renderLoreReviewBody();
 }
 
 // ★ C：世界观图谱总览（力导向布局 canvas，布局/绘制分离 + 缩放平移 + 类别着色 + 点击开笔记）
@@ -1505,7 +1499,7 @@ function renderRuleEditorBody() {
             </div>
         </div>`;
     });
-    body.innerHTML = html;
+    body.innerHTML = `<div class="rule-toolbar"><button class="btn-secondary-sm" data-action="addRule">＋ 添加规则</button></div>` + html;
 }
 
 export function openRuleEditor(worldId) {

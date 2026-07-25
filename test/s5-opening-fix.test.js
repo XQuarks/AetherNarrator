@@ -16,7 +16,7 @@ function makeWorld(over) {
         desc: "20 世纪初的波士顿，诡秘的低语在街巷间蔓延。",
         era_label: "二十世纪",
         opening_narrative: "1926 年的冬天，波士顿被迷雾笼罩。",
-        schema: { time_config: { calendar_mode: "gregorian", calendar_start: { year: 1999, month: 1, date: 22 }, season: "冬季", era_label: "二十世纪" } },
+        schema: { time_config: { calendar_mode: "gregorian", calendar_start: { year: 1999, month: 1, date: 22 }, era_label: "二十世纪" } },
         ...over
     };
 }

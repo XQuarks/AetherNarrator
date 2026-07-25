@@ -386,86 +386,108 @@ export function renderSaveList() {
     `}).join("");
 }
 
+let _detailTabBound = {};
+function bindDetailTabs(bodyId) {
+    const body = document.getElementById(bodyId);
+    if (!body || typeof body.addEventListener !== "function" || _detailTabBound[bodyId]) return;
+    _detailTabBound[bodyId] = true;
+    body.addEventListener("click", (e) => {
+        const tab = e.target.closest(".detail-tab");
+        if (!tab) return;
+        const name = tab.dataset.detailTab;
+        body.querySelectorAll(".detail-tab").forEach(t => t.classList.toggle("active", t === tab));
+        body.querySelectorAll(".detail-tab-content").forEach(c => c.classList.toggle("active", c.dataset.detailTabContent === name));
+    });
+}
+
 export function showWorldDetail(worldId) {
     abortCurrentRequest();
     S.currentWorld = S.worlds.find(w => w.id === worldId);
     if (!S.currentWorld) return;
     document.getElementById("detailWorldTitle").textContent = S.currentWorld.name;
     const schema = getWorldSchema(S.currentWorld);
+    const w = S.currentWorld;
+    const id = w.id;
+
+    // 知识库统计（默认知识库）
+    const snippets = (w.lore_kb && w.lore_kb.snippets) || (S.activeLoreKB && S.activeLoreKB.snippets) || [];
+    const catColors = ["#C9A87C", "#7BAA92", "#6B9BD1", "#C56B5E", "#B98FC9", "#C9A455", "#5AA8B0", "#A89070"];
+    const catCount = {};
+    snippets.forEach(s => { const c = s.category || "未分类"; catCount[c] = (catCount[c] || 0) + 1; });
+    const cats = Object.keys(catCount);
+    const catBar = cats.length ? cats.map((c, i) => `<span class="cat-seg" style="flex:${catCount[c]};background:${catColors[i % catColors.length]}"></span>`).join("") : `<span class="cat-seg" style="flex:1;background:var(--card-border)"></span>`;
+    const catLegend = cats.map((c, i) => `<span class="cat-legend-item"><span class="cat-dot" style="background:${catColors[i % catColors.length]}"></span>${escapeHtml(c)} ${catCount[c]}</span>`).join("");
+    const loreCount = snippets.length;
+
+    // 规则
+    const rules = Array.isArray(w.rules) ? w.rules : [];
+    const ruleNames = rules.slice(0, 5).map((r, i) => `<div class="form-group" style="margin-bottom:8px"><label>${escapeHtml(r.name || ("规则 " + (i + 1)))}</label><p style="margin:0;font-size:13px;color:var(--text-secondary)">${r.enabled === false ? "已停用" : "启用中"}</p></div>`).join("");
+
+    // 时间体系
+    const tc = schema.time_config || {};
+    const modeLabel = { gregorian: "公历", lunar: "农历", custom: "自定义历法", none: "无（步数制）" }[tc.mode] || tc.mode || "—";
+    const startDate = tc.calendar_start ? (tc.calendar_start.month || "?") + "月" + (tc.calendar_start.date || "?") + "日" : "—";
+
     document.getElementById("detailWorldBody").innerHTML = `
-        <div class="form-group">
-            <label>世界类型</label>
-            <p style="margin:0;font-size:15px;">${S.currentWorld.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p>
+        <div class="detail-tabs">
+            <button class="detail-tab active" data-detail-tab="overview">概览</button>
+            <button class="detail-tab" data-detail-tab="lore">知识库</button>
+            <button class="detail-tab" data-detail-tab="rules">规则</button>
+            <button class="detail-tab" data-detail-tab="time">时间体系</button>
         </div>
-        ${S.currentWorld.ip_name ? `
-        <div class="form-group">
-            <label>作品名称</label>
-            <p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(S.currentWorld.ip_name)}</p>
-        </div>` : ""}
-        <div class="form-group">
-            <label>世界观描述</label>
-            <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(S.currentWorld.desc)}</p>
+        <div class="detail-tab-content active" data-detail-tab-content="overview">
+            <div class="form-group"><label>世界类型</label><p style="margin:0;font-size:15px;">${w.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p></div>
+            ${w.ip_name ? `<div class="form-group"><label>作品名称</label><p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(w.ip_name)}</p></div>` : ""}
+            <div class="form-group"><label>世界观描述</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.desc)}</p></div>
+            ${w.hero ? `<div class="form-group"><label>主角设定</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.hero)}</p></div>` : ""}
+            <div class="form-group"><label>进度系统</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${escapeHtml(schema.progression_path_label)} / ${escapeHtml(schema.progression_label)}</p></div>
+            <div class="form-group"><label>创建时间</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${w.createdAt}</p></div>
+            ${w.opening_narrative ? `<div class="form-group"><label>开场白预览</label><p style="margin:0;font-size:14px;line-height:1.8;color:var(--text-secondary);white-space:pre-line;">${escapeHtml(w.opening_narrative.slice(0, 200))}${w.opening_narrative.length > 200 ? "..." : ""}</p></div>` : ""}
+            ${w.style_ref ? `<div class="form-group"><label>文风参考</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${w.style_ref === "original" ? "参考原版文风" : w.style_ref === "custom" ? "自定义文风：" + escapeHtml(w.custom_style || "未填写") : "不参考文风"}</p></div>` : ""}
+            ${w.plot_freedom ? `<div class="form-group"><label>剧情自由度</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${["", "严格遵循原著", "以原著为主", "适中发散", "自由发挥", "完全自由"][w.plot_freedom] || "适中发散"}</p></div>` : ""}
+            ${w.custom_prefix ? `<div class="form-group"><label>特殊要求</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.custom_prefix)}</p></div>` : ""}
+            ${w.source_content ? `<div class="form-group"><label>源文件</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">已上传（${Math.ceil(w.source_content.length / 1024)} KB）</p></div>` : ""}
         </div>
-        ${S.currentWorld.hero ? `
-        <div class="form-group">
-            <label>主角设定</label>
-            <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(S.currentWorld.hero)}</p>
-        </div>` : ""}
-        <div class="form-group">
-            <label>进度系统</label>
-            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${escapeHtml(schema.progression_path_label)} / ${escapeHtml(schema.progression_label)}</p>
+        <div class="detail-tab-content" data-detail-tab-content="lore">
+            <div class="stat-grid"><div class="stat-card"><div class="stat-num">${loreCount}</div><div class="stat-label">知识库条目</div></div></div>
+            ${cats.length ? `<div class="cat-bar">${catBar}</div><div class="cat-legend">${catLegend}</div>` : `<p class="muted">暂无分类数据</p>`}
+            <button class="btn secondary" data-action="editWorldLore" data-id="${id}">编辑知识库</button>
         </div>
-        <div class="form-group">
-            <label>创建时间</label>
-            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${S.currentWorld.createdAt}</p>
+        <div class="detail-tab-content" data-detail-tab-content="rules">
+            ${rules.length ? ruleNames + `<button class="btn secondary" data-action="openRuleEditor" data-id="${id}">编辑规则</button>` : `<p class="muted">该世界还没有规则。</p><button class="btn secondary" data-action="openRuleEditor" data-id="${id}">编辑规则</button>`}
         </div>
-        ${S.currentWorld.opening_narrative ? `
-        <div class="form-group">
-            <label>开场白预览</label>
-            <p style="margin:0;font-size:14px;line-height:1.8;color:var(--text-secondary);white-space:pre-line;">${escapeHtml(S.currentWorld.opening_narrative.slice(0, 200))}${S.currentWorld.opening_narrative.length > 200 ? "..." : ""}</p>
-        </div>` : ""}
-        ${S.currentWorld.style_ref ? `
-        <div class="form-group">
-            <label>文风参考</label>
-            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${S.currentWorld.style_ref === "original" ? "参考原版文风" : S.currentWorld.style_ref === "custom" ? "自定义文风：" + escapeHtml(S.currentWorld.custom_style || "未填写") : "不参考文风"}</p>
-        </div>` : ""}
-        ${S.currentWorld.plot_freedom ? `
-        <div class="form-group">
-            <label>剧情自由度</label>
-            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${["", "严格遵循原著", "以原著为主", "适中发散", "自由发挥", "完全自由"][S.currentWorld.plot_freedom] || "适中发散"}</p>
-        </div>` : ""}
-        ${S.currentWorld.custom_prefix ? `
-        <div class="form-group">
-            <label>特殊要求</label>
-            <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(S.currentWorld.custom_prefix)}</p>
-        </div>` : ""}
-        ${S.currentWorld.source_content ? `
-        <div class="form-group">
-            <label>源文件</label>
-            <p style="margin:0;font-size:14px;color:var(--text-secondary);">已上传（${Math.ceil(S.currentWorld.source_content.length / 1024)} KB）</p>
-        </div>` : ""}
+        <div class="detail-tab-content" data-detail-tab-content="time">
+            <div class="form-group"><label>纪元</label><p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(tc.era_label || "—")}</p></div>
+            <div class="form-group"><label>历法</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${modeLabel}</p></div>
+            <div class="form-group"><label>起始日期</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${startDate}</p></div>
+            <p class="muted">时间体系的编辑入口在「知识库 → 时间体系」页签中。</p>
+        </div>
     `;
 
-    // ★ P0: 区分新游戏 / 继续，避免静默覆盖存档
-    const hasSave = S.saves.some(s => s.worldId === S.currentWorld.id);
+    const hasSave = S.saves.some(s => s.worldId === w.id);
     const footer = document.getElementById("detailModalFooter");
     if (hasSave) {
         footer.innerHTML = `
-            <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
-            <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">默认知识库</button>
-            <button class="btn secondary" data-action="openRuleEditor" data-id="${S.currentWorld.id}">世界规则</button>
-            <button class="btn secondary" data-action="showExportWorldChoice" data-id="${S.currentWorld.id}">导出世界</button>
-            <button class="btn primary" data-action="continueLatestSave" data-id="${S.currentWorld.id}">继续游戏</button>
-            <button class="btn secondary" data-action="confirmRestart" data-id="${S.currentWorld.id}">重新开始</button>`;
+            <div class="dropdown dropdown-up">
+                <button class="btn secondary" data-action="toggleDropdown">更多 ▾</button>
+                <div class="dropdown-menu">
+                    <button class="dropdown-item" data-action="showExportWorldChoice" data-id="${id}">导出世界</button>
+                    <button class="dropdown-item" data-action="confirmRestart" data-id="${id}">重新开始</button>
+                </div>
+            </div>
+            <button class="btn primary" data-action="continueLatestSave" data-id="${id}">继续游戏</button>`;
     } else {
         footer.innerHTML = `
-            <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
-            <button class="btn secondary" data-action="editWorldLore" data-id="${S.currentWorld.id}">默认知识库</button>
-            <button class="btn secondary" data-action="openRuleEditor" data-id="${S.currentWorld.id}">世界规则</button>
-            <button class="btn secondary" data-action="showExportWorldChoice" data-id="${S.currentWorld.id}">导出世界</button>
+            <div class="dropdown dropdown-up">
+                <button class="btn secondary" data-action="toggleDropdown">更多 ▾</button>
+                <div class="dropdown-menu">
+                    <button class="dropdown-item" data-action="showExportWorldChoice" data-id="${id}">导出世界</button>
+                </div>
+            </div>
             <button class="btn primary" data-action="startGame" data-opts='{"resetBehavior":true}'>开始游玩</button>`;
     }
 
+    bindDetailTabs("detailWorldBody");
     showModal("worldDetailModal");
 }
 
@@ -503,37 +525,50 @@ export function renderSaveDetail(saveId) {
     }
 
     S.currentWorld = world; // ★ 世界存在时才赋值（修复误把上一个世界带入的隐患）
+
+    // 进度数据派生
+    const saveSnips = (save.lore_kb && save.lore_kb.snippets) || [];
+    const worldSnips = (world.lore_kb && world.lore_kb.snippets) || [];
+    const addedCount = saveSnips.filter(s => !worldSnips.some(x => x.id === s.id)).length;
+    const behaviorCount = (save.behavior_records && save.behavior_records.length) || 0;
+    const eventCount = (save.state && save.state.triggered_event_ids && save.state.triggered_event_ids.length) || 0;
+    const curStep = (save.state && save.state.current_date && save.state.current_date.step) || 0;
+
     body.innerHTML = `
-        <div class="form-group">
-            <label>所属世界</label>
-            <p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(save.worldName)}</p>
+        <div class="detail-tabs">
+            <button class="detail-tab active" data-detail-tab="overview">概览</button>
+            <button class="detail-tab" data-detail-tab="progress">进度数据</button>
+            <button class="detail-tab" data-detail-tab="lore">存档知识库</button>
         </div>
-        ${world ? `
-        <div class="form-group">
-            <label>世界类型</label>
-            <p style="margin:0;font-size:15px;">${world.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p>
-        </div>` : ""}
-        <div class="form-group">
-            <label>进度</label>
-            <p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(save.progress || "—")}</p>
+        <div class="detail-tab-content active" data-detail-tab-content="overview">
+            <div class="form-group"><label>所属世界</label><p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(save.worldName)}</p></div>
+            ${world ? `<div class="form-group"><label>世界类型</label><p style="margin:0;font-size:15px;">${world.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p></div>` : ""}
+            <div class="form-group"><label>进度</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(save.progress || "—")}</p></div>
+            <div class="form-group"><label>最后游玩</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${escapeHtml(save.updatedAt || "—")}</p></div>
+            <div class="form-group"><label>状态</label><p style="margin:0;font-size:14px;color:${isDead ? "var(--danger)" : "var(--text-secondary)"};">${isDead ? "☠ 已死亡（可查看，继续将进入死亡结局）" : "进行中"}</p></div>
         </div>
-        <div class="form-group">
-            <label>最后游玩</label>
-            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${escapeHtml(save.updatedAt || "—")}</p>
+        <div class="detail-tab-content" data-detail-tab-content="progress">
+            <div class="stat-grid">
+                <div class="stat-card"><div class="stat-num">${curStep}</div><div class="stat-label">当前步数</div></div>
+                <div class="stat-card"><div class="stat-num">${eventCount}</div><div class="stat-label">已完成事件</div></div>
+                <div class="stat-card"><div class="stat-num">${behaviorCount}</div><div class="stat-label">行为记忆</div></div>
+            </div>
         </div>
-        <div class="form-group">
-            <label>状态</label>
-            <p style="margin:0;font-size:14px;color:${isDead ? "var(--danger)" : "var(--text-secondary)"};">${isDead ? "☠ 已死亡（可查看，继续将进入死亡结局）" : "进行中"}</p>
-        </div>
-        <div class="form-group">
-            <label>知识库条目</label>
-            <p style="margin:0;font-size:14px;color:var(--text-secondary);">${save.lore_kb && save.lore_kb.snippets ? save.lore_kb.snippets.length : 0} 条（含本存档独立副本）</p>
+        <div class="detail-tab-content" data-detail-tab-content="lore">
+            <div class="stat-grid"><div class="stat-card"><div class="stat-num">${saveSnips.length}</div><div class="stat-label">存档知识库条目</div></div></div>
+            <p class="muted">比默认知识库多 ${addedCount} 条独立条目。</p>
+            <button class="btn secondary" data-action="editSaveLore" data-id="${save.id}">编辑存档知识库</button>
         </div>`;
     footer.innerHTML = `
         <button class="btn secondary" data-action="returnFromSaveDetail">返回</button>
-        <button class="btn secondary" data-action="editSaveLore" data-id="${save.id}">存档知识库</button>
-        <button class="btn secondary" data-action="showExportWorldChoice" data-id="${save.worldId}">导出世界</button>
+        <div class="dropdown dropdown-up">
+            <button class="btn secondary" data-action="toggleDropdown">更多 ▾</button>
+            <div class="dropdown-menu">
+                <button class="dropdown-item" data-action="showExportWorldChoice" data-id="${save.worldId}">导出世界</button>
+            </div>
+        </div>
         <button class="btn primary" data-action="loadSave" data-id="${save.id}">继续游戏</button>`;
+    bindDetailTabs("detailSaveBody");
     showModal("saveDetailModal");
 }
 

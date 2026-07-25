@@ -25,7 +25,7 @@ export function createCthulhuWorld() {
                 courage: "胆识", perception: "观察", patience: "定力", luck: "命运", will: "理智"
             },
             time_periods: { morning: "清晨", forenoon: "上午", afternoon: "午后", evening: "黄昏", night: "深夜" },
-            time_config: { era_label: "1920年代", calendar_mode: "gregorian", calendar_start: { month: 2, date: 2 }, clock_mode: "period", season: "深冬", show: true, deadlines: [] },
+            time_config: { era_label: "1920年代", calendar_mode: "gregorian", calendar_start: { month: 2, date: 2 }, clock_mode: "period", show: true, deadlines: [] },
             game_over_conditions: ["is_alive === false", "sanity <= 0"]
         },
         initial_state: {
@@ -171,7 +171,7 @@ export function createUrbanLegendWorld() {
                 courage: "勇气", perception: "警觉", patience: "耐心", luck: "运气", will: "意志"
             },
             time_periods: { morning: "感觉像早晨", forenoon: "大约上午", afternoon: "大约下午", evening: "黄昏时分", night: "无尽黑暗" },
-            time_config: { era_label: "", calendar_mode: "none", clock_mode: "period", season: "不明", show: false, deadlines: [] },
+            time_config: { era_label: "", calendar_mode: "none", clock_mode: "period", show: false, deadlines: [] },
             game_over_conditions: ["is_alive === false", "sanity <= 0"]
         },
         initial_state: {

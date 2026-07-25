@@ -1606,10 +1606,19 @@
             margin-bottom: 24px;
         }
 
-        ::-webkit-scrollbar { width: 4px; }
+        /* 滚动条统一美化：弹窗 / 列表 / 笔记面板通用 */
+        * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+        ::-webkit-scrollbar { width: 9px; height: 9px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
-        .game-log::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
+        ::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-thumb);
+            border-radius: 999px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+            transition: background .2s ease;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: var(--primary); background-clip: padding-box; }
+        ::-webkit-scrollbar-corner { background: transparent; }
 
         /* 主题切换按钮 */
         .theme-toggle-btn {
@@ -1661,10 +1670,6 @@
         .lore-links { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
         .lore-link-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: rgba(201,168,124,0.12); color: var(--primary); }
 
-        .spoiler-toggle { font-size: 12px; padding: 6px 10px; margin-bottom: 10px; border-radius: 6px; cursor: pointer; text-align: center; border: 1px dashed var(--card-border); color: var(--text-secondary); }
-        .spoiler-toggle:hover { border-color: var(--primary); color: var(--primary); }
-        .lore-spoiler { filter: blur(6px); user-select: none; pointer-events: none; }
-
         /* ================= 移动端适配 ================= */
         @media (max-width: 480px) {
             .home-title { font-size: 42px; letter-spacing: 10px; text-indent: 10px; }
@@ -1677,7 +1682,7 @@
             .status-content { padding: 12px; }
             .status-panel { max-width: 100%; }
             .modal { max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
-            button, .mem-act, .spoiler-toggle { min-height: 44px; }
+            button, .mem-act { min-height: 44px; }
         }
 
         /* ★ 步骤二：知识库初览中的"时间体系"卡片 */
@@ -1752,8 +1757,15 @@
 /* ===== 步骤 B：Obsidian 风三栏链状知识库 UI ===== */
 #loreReviewModal .modal { max-width: min(1180px, 96vw); }
 .lore-obsidian { display: flex; flex-direction: column; gap: 12px; max-height: 80vh; }
-/* 知识库三栏分段切换条：桌面隐藏，仅在手机端媒体查询中显示 */
-.lore-seg { display: none; }
+/* 知识库三栏分段切换条：PC 端也显示（点击仅高亮当前栏，桌面三栏并排始终可见） */
+.lore-seg { display: flex; gap: 6px; padding: 4px; background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m); }
+.lore-seg-btn { flex: 1; padding: 9px 8px; border: 1px solid transparent; border-radius: var(--radius-s); background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background .15s, color .15s; }
+.lore-seg-btn:hover { background: var(--card-hover); color: var(--text); }
+.lore-seg-btn.active { background: var(--bg-panel); color: var(--text); border-color: var(--card-border); box-shadow: var(--shadow-card); }
+/* PC 端：笔记内容在「文件」栏选中即显示，移除冗余的笔记分段按钮（手机端仍保留切换） */
+@media (min-width: 721px) {
+  .lore-seg-btn[data-seg="note"] { display: none; }
+}
 .lore-obs-toolbar { display: flex; gap: 8px; align-items: center; }
 .lore-search { flex: 1; background: var(--bg-panel); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 8px 12px; font-size: 13px; font-family: inherit; }
 .lore-search:focus { outline: none; border-color: var(--primary); }
@@ -1775,9 +1787,13 @@
 .muted { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 
 .lore-obs-cols { flex: 1; min-height: 0; display: flex; gap: 12px; }
-.lore-col-aside { display: contents; }
-.lore-col-aside > summary { display: none; }
-.lore-tree { width: 230px; flex: 0 0 230px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 10px; padding: 8px; background: var(--bg-sidebar); }
+/* 三栏：左（文件树）/ 中（笔记）/ 右（关联）。PC 端始终并排显示，移动端由 .seg-show 控制单栏可见。
+   之前用 display:contents + <details> 让 Chromium 把子元素拉进 flex 流，但实测 display:contents 在 <details> 上的子元素未提升成 flex item，导致三栏只剩中栏、左/右被中栏盖住。现改为裸 div 各占各的宽度。 */
+.lore-col-aside { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.lore-col-aside > .lore-col-head { display: none; }   /* PC 端隐藏，移动端在 .lore-seg 切换时作为分段标题露出 */
+.lore-tree-wrap { width: 230px; flex: 0 0 230px; }
+.lore-backlinks-wrap { width: 250px; flex: 0 0 250px; }
+.lore-tree { width: 100%; box-sizing: border-box; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--card-border); border-radius: 10px; padding: 8px; background: var(--bg-sidebar); }
 .lore-tree-empty { color: var(--text-secondary); font-size: 13px; padding: 12px; }
 .lore-tree-group { margin-bottom: 10px; }
 .lore-tree-group-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary); padding: 4px 6px; text-transform: uppercase; letter-spacing: .03em; }
@@ -1787,12 +1803,12 @@
 .lore-tree-item { padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text); display: flex; align-items: center; }
 .lore-tree-item:hover { background: rgba(201,168,124,0.10); }
 .lore-tree-item.active { background: rgba(201,168,124,0.20); color: var(--primary); font-weight: 600; }
-.lore-tree-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lore-tree-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 
 .lore-note { flex: 1; min-width: 0; max-height: 66vh; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; background: var(--bg-panel); display: block; }
 .lore-note > * + * { margin-top: 10px; }
 .lore-note-head { display: flex; gap: 8px; align-items: center; }
-.lore-note-title { flex: 1; font-size: 16px; font-weight: 600; background: transparent; border: none; border-bottom: 1px solid var(--card-border); color: var(--text); padding: 6px 2px; font-family: inherit; }
+.lore-note-title { flex: 1; font-size: 16px; font-weight: 600; background: transparent; border: none; border-bottom: 1px solid var(--card-border); color: var(--text); padding: 6px 2px; font-family: inherit; min-width: 0; }
 .lore-note-title:focus { outline: none; border-color: var(--primary); }
 .lore-note-cat { width: 110px; background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 6px 8px; font-size: 13px; font-family: inherit; }
 .lore-note-toolbar { display: flex; align-items: center; gap: 6px; }
@@ -1826,7 +1842,7 @@
 .lore-prop-wide { grid-column: 1 / -1; }
 .lore-prop .lore-inp { font-size: 13px; }
 
-.lore-backlinks { width: 250px; flex: 0 0 250px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: 10px; padding: 12px; background: var(--bg-sidebar); }
+.lore-backlinks { width: 100%; box-sizing: border-box; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--card-border); border-radius: 10px; padding: 12px; background: var(--bg-sidebar); }
 .lore-back-head { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .03em; margin: 4px 0 8px; display: flex; align-items: center; gap: 6px; }
 .lore-back-count { background: rgba(201,168,124,0.15); color: var(--primary); border-radius: 10px; padding: 0 7px; font-size: 11px; }
 .lore-back-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
@@ -1840,12 +1856,8 @@
 .lore-back-empty { font-size: 12px; color: var(--text-secondary); padding: 4px 2px; }
 .lore-empty { color: var(--text-secondary); font-size: 14px; padding: 30px 10px; text-align: center; }
 
-.lore-col-aside > summary::-webkit-details-marker { display: none; }
-.lore-col-aside > summary::before { content: "▸ "; color: var(--primary); }
-.lore-col-aside[open] > summary::before { content: "▾ "; }
-
 @media (max-width: 720px) {
-  /* 知识库三栏 → 手机端分段切换（文件 / 笔记 / 关联） */
+  /* 知识库三栏 → 手机端分段切换（文件 / 笔记 / 关联），由 .seg-show 类控制可见段 */
   .lore-seg {
     display: flex; gap: 6px; padding: 4px;
     background: var(--card); border: 1px solid var(--card-border);
@@ -1863,12 +1875,15 @@
 
   .lore-obs-cols { display: block; gap: 0; }
   .lore-obs-cols > [data-seg] { display: none; }
-  .lore-obs-cols > [data-seg].seg-show { display: block; }
-  .lore-col-aside > summary { display: none !important; }
-  .lore-col-aside > .lore-tree,
-  .lore-col-aside > .lore-backlinks { display: block !important; }
-  .lore-tree { width: auto; flex: none; max-height: 56vh; }
-  .lore-backlinks { width: auto; flex: none; max-height: 56vh; }
+  .lore-obs-cols > [data-seg].seg-show { display: flex; flex-direction: column; min-height: 240px; }
+  .lore-col-aside > .lore-col-head {
+    display: block;
+    font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: .03em;
+    padding: 0 2px 8px;
+  }
+  .lore-tree-wrap, .lore-backlinks-wrap { width: auto; flex: none; min-height: 240px; }
+  .lore-tree, .lore-backlinks { flex: 1; min-height: 240px; }
   .lore-note { max-height: none; min-height: 50vh; }
 }
 
@@ -1893,6 +1908,38 @@
 #loreGraphCanvas { display: block; width: 100%; height: 100%; cursor: grab; }
 #loreGraph { width: 100%; height: 100%; }
 #loreGraph canvas { display: block; }
+
+/* ===== 通用组件：下划线页签 / 下拉菜单 / 规则工具栏 ===== */
+.detail-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--card-border); margin-bottom: 16px; flex-wrap: wrap; }
+.detail-tab { padding: 8px 14px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; transition: color .15s, border-color .15s; margin-bottom: -1px; }
+.detail-tab:hover { color: var(--text); }
+.detail-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.detail-tab-content { display: none; }
+.detail-tab-content.active { display: block; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 4px 0 14px; }
+.stat-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 12px 14px; }
+.stat-card .stat-num { font-size: 22px; font-weight: 600; color: var(--primary); line-height: 1.1; }
+.stat-card .stat-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+.cat-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+.cat-seg { height: 100%; }
+.cat-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+.cat-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.cat-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+.rule-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+
+/* 下拉菜单 */
+.dropdown { position: relative; display: inline-flex; }
+.dropdown-menu { position: absolute; top: calc(100% + 6px); right: 0; min-width: 180px; background: var(--bg-panel); border: 1px solid var(--card-border); border-radius: var(--radius-m); box-shadow: var(--shadow-modal); padding: 6px; display: none; z-index: 60; flex-direction: column; gap: 2px; }
+.dropdown.open .dropdown-menu { display: flex; }
+.dropdown-item { text-align: left; background: none; border: none; color: var(--text); padding: 9px 12px; border-radius: var(--radius-s); font-size: 13px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.dropdown-item:hover { background: var(--card-hover); color: var(--primary); }
+.dropdown-item:disabled { opacity: .45; cursor: not-allowed; }
+.dropdown-item:disabled:hover { background: none; color: var(--text); }
+/* footer 内的下拉向上展开（避免超出弹窗底部） */
+.dropdown-up .dropdown-menu { top: auto; bottom: calc(100% + 6px); }
 .btn-icon { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--card-border);
   background: var(--bg-panel); color: var(--text); font-size: 20px; line-height: 1; cursor: pointer; flex: none;
   display: inline-flex; align-items: center; justify-content: center; transition: border-color .15s, background .15s; }

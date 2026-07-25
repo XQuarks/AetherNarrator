@@ -56,9 +56,9 @@ npm run check:load       # 浏览器加载桩校验（tools/load-check.mjs）
 | `s5-start-date.test.js` | `calendar.js`: `normalizeCurrentDate` | 5 | 纯函数 | UI 起始日期经 `calendar_start` 正确驱动开局 `current_date` |
 | `s5-required-fields.test.js` | `store.js`: `normalizeTimeConfig` | 9 | 纯函数 | 时间配置缺字段保底：custom 无月历表→day；multiverse 无 timelines→single；active_timeline 非法→取第一条；**gregorian/lunar 无 calendar_start 不再回退 day，保持 dated 模式**（年份归纪元后纪元-only 世界合法） |
 | `s5-authoritative-time.test.js` | `prompt.js`: `buildAuthoritativeTime/buildAuthorNote` | 5 | 设全局 `S` | 权威时间章节（gregorian/multiverse/none/continuous）每轮注入 |
-| `s5-conflict-lint.test.js` | `utils.js`: `detectTimeConflict/formatConflictMessage` | 11 | 纯函数 | 开场白时间冲突检测：改以 `era_label` 为锚点、同 decade 容错、克苏鲁式「1920年代」不误报、年份/季节/现代措辞/占位符豁免 |
+| `s5-conflict-lint.test.js` | `utils.js`: `detectTimeConflict/formatConflictMessage` | 10 | 纯函数 | 开场白时间冲突检测：改以 `era_label` 为锚点、同 decade 容错、克苏鲁式「1920年代」不误报、年份/现代措辞/占位符豁免 |
 | `s5-critic-time.test.js` | `utils.js`: `buildCriticTimeContext`；`llm.js`: `callWorldCriticLLM` | 5 | DOM stub + mock fetch | Critic 注入「权威时间锚点 + 冲突线索 + 第7条审查重点」 |
-| `s5-opening-tokens.test.js` | `utils.js`: `resolveOpeningTokens` | 9 | 纯函数 | `{era_label}/{season}/{calendar_date}` 等占位符按历法解析、非破坏性保留 |
+| `s5-opening-tokens.test.js` | `utils.js`: `resolveOpeningTokens` | 9 | 纯函数 | `{era_label}/{calendar_date}` 等占位符按历法解析、非破坏性保留 |
 | `s6-old-save-compat.test.js` | `calendar.js`: `normalizeCurrentDate/backfillCurrentDate/ensureCurrentDate`；`new-worlds.js`: 三个预设 | 9 | 纯函数 + 预设工厂 | 旧 `{day}` 存档回推/规范化不崩、新档存读一致；克苏鲁预设已改 `calendar_start` 仅 `{month,date}`、年从 `era_label「1920年代」`推导为 1920 |
 | `s7-flexible-start.test.js` | `calendar.js`: `deriveAnchorYear/validateStartDate/formatCalendarDate/normalizeCurrentDate/backfillCurrentDate`；`store.js`: `normalizeTimeConfig`；`utils.js`: `detectTimeConflict`；`theme.js`: `formatDateOnly/formatDeadlineLabel` | 26 | 纯函数 | 年份归纪元+柔性起始日期：anchor 推导（年代/硬年/无年）、克苏鲁式不误报、各粒度显示（年无关只月日/只月/全空）、日期校验（闰年/越界自动纠正）、无 year 截止、旧档硬年兼容 |
 

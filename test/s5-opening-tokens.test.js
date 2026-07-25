@@ -5,12 +5,11 @@ import { resolveOpeningTokens } from "../src/utils.js";
 
 // 公历：全部 token 解析
 test("S5-3 gregorian 全 token 解析", () => {
-    const cfg = { calendar_mode: "gregorian", era_label: "二十世纪", season: "冬季", calendar_start: { year: 1926, month: 2, date: 2 } };
+    const cfg = { calendar_mode: "gregorian", era_label: "二十世纪", calendar_start: { year: 1926, month: 2, date: 2 } };
     const cd = { year: 1926, month: 2, date: 2, period: "morning", step: 1 };
-    const text = "现在是{era_label}的{season}。{calendar_date}，波士顿……";
+    const text = "现在是{era_label}。{calendar_date}，波士顿……";
     const out = resolveOpeningTokens(text, cfg, cd);
     assert.ok(out.includes("二十世纪"), "era_label 应解析");
-    assert.ok(out.includes("冬季"), "season 应解析");
     assert.ok(out.includes("1926年2月2日"), "calendar_date 应解析为 1926年2月2日");
     assert.ok(!out.includes("{era_label}") && !out.includes("{calendar_date}"), "不应残留占位符");
 });
@@ -42,13 +41,12 @@ test("S5-3 custom_calendar 解析 calendar_date", () => {
     assert.ok(out.includes("星历 元月3日"), "应为 星历 元月3日，实际：" + out);
 });
 
-// period 模式：仅 era_label / season 解析，calendar token 保留原文（非破坏性）
+// period 模式：仅 era_label 解析，calendar token 保留原文（非破坏性）
 test("S5-3 period 模式仅配置级 token 解析，日历 token 保留", () => {
-    const cfg = { calendar_mode: "period", era_label: "修仙界", season: "春" };
+    const cfg = { calendar_mode: "period", era_label: "修仙界" };
     const cd = { day: 3, period: "morning", step: 3 };
-    const out = resolveOpeningTokens("{era_label}·{season}·{calendar_date}·{calendar_year}", cfg, cd);
+    const out = resolveOpeningTokens("{era_label}·{calendar_date}·{calendar_year}", cfg, cd);
     assert.ok(out.includes("修仙界"), "era_label 应解析");
-    assert.ok(out.includes("春"), "season 应解析");
     assert.ok(out.includes("{calendar_date}"), "calendar_date 在 period 模式应保留原文");
     assert.ok(out.includes("{calendar_year}"), "calendar_year 在 period 模式应保留原文");
 });

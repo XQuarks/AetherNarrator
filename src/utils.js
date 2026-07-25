@@ -226,12 +226,12 @@ export function escapeRegExp(str) {
 
 // ============================================================
 // S5-3 · 开场白占位符解析（纯函数，可在 Node 下单测）
-// 把 {era_label}/{season}/{calendar_date}/{calendar_year}/{calendar_month} 展开为当前时间。
-// - era_label / season 为配置级字段，任意历法模式都解析（缺则替换为空串）
+// 把 {era_label}/{calendar_date}/{calendar_year}/{calendar_month} 展开为当前时间。
+// - era_label 为配置级字段，任意历法模式都解析（缺则替换为空串）
 // - calendar_* 仅当 current_date 为 dated 形态（含 year）时解析；否则保留原始占位符（非破坏性，便于作者察觉）
 // text: 含占位符的开场白；timeConfig: 归一化后的 time_config；currentDate: 当前 current_date（开场通常用开局起点）
 // ============================================================
-const OPENING_TOKENS_RE = /\{(era_label|season|calendar_date|calendar_year|calendar_month)\}/g;
+const OPENING_TOKENS_RE = /\{(era_label|calendar_date|calendar_year|calendar_month)\}/g;
 
 export function resolveOpeningTokens(text, timeConfig, currentDate) {
     if (!text || typeof text !== "string") return text || "";
@@ -243,8 +243,6 @@ export function resolveOpeningTokens(text, timeConfig, currentDate) {
         switch (key) {
             case "era_label":
                 return cfg.era_label || "";
-            case "season":
-                return cfg.season || "";
             case "calendar_year":
                 return isDated ? String(cd.year) : m;
             case "calendar_month":
@@ -256,7 +254,7 @@ export function resolveOpeningTokens(text, timeConfig, currentDate) {
                 }
                 return m;
             default:
-                return m;
+                return "";
         }
     });
 }
@@ -274,19 +272,12 @@ export function createElementFromHTML(html) {
 // - 先剥 {..} 占位符（S5-3 用占位符的开场白不会误报）
 // - 年份锚点来自 era_label（年份归纪元），按 decade 容错（同 decade 不冲突，黎总拍板放宽）
 // - 不再扫描 era_label 本身（它现在是锚点来源，避免「1920年代」被当硬年份误报）
-// - era_label 无可解析年份（如「中世纪」）时跳过年份比对，仅做季节/现代措辞检查
+// - era_label 无可解析年份（如「中世纪」）时跳过年份比对，仅做现代措辞检查
 // - system_prompt 可能是数组（demo 世界），统一 join 成字符串再扫
 // ============================================================
 const TIME_CONFLICT_YEAR_RE = /\b(1[6-9]\d{2}|20\d{2})\b/g;
-const TIME_CONFLICT_SEASON_WORDS = ["孟春", "仲春", "季春", "春季", "春", "孟夏", "仲夏", "季夏", "夏季", "夏", "孟秋", "仲秋", "季秋", "秋季", "秋", "孟冬", "仲冬", "季冬", "冬季", "冬"];
 const TIME_CONFLICT_ABSOLUTE_RE = /如今|当代|现在|今年/;
 const TIME_CONFLICT_PLACEHOLDER_RE = /\{[^}]*\}/g;
-
-function seasonBaseOf(s) {
-    if (!s) return null;
-    for (const key of ["春", "夏", "秋", "冬"]) if (String(s).startsWith(key)) return key;
-    return null;
-}
 
 export function detectTimeConflict(world) {
     const schema = getWorldSchema(world) || {};
@@ -295,7 +286,6 @@ export function detectTimeConflict(world) {
     const eraLabel = cfg.era_label || "";
     const anchorYear = deriveAnchorYear(eraLabel); // 可能为 null（模糊纪元）
     const anchorDecade = (anchorYear != null) ? Math.floor(anchorYear / 10) : null;
-    const season = (cfg.season || "").trim();
 
     // 先剥占位符再扫描；system_prompt 可能为数组，统一成字符串。
     // 注意：不再把 era_label 纳入扫描（它已是锚点来源）。
@@ -315,30 +305,16 @@ export function detectTimeConflict(world) {
         if (anchorDecade != null && yd !== anchorDecade && !years.includes(y)) years.push(y);
     }
 
-    // 季节冲突（仅当配置了季节；按春/夏/秋/冬分族，避免「春」误伤「春季」）
-    let seasonConflict = null;
-    const base = seasonBaseOf(season);
-    if (base) {
-        for (const w of TIME_CONFLICT_SEASON_WORDS) {
-            if (fullText.includes(w)) {
-                const wb = seasonBaseOf(w);
-                if (wb && wb !== base) { seasonConflict = w; break; }
-            }
-        }
-    }
-
     // 现代措辞（历史世界：锚点年 < 2000）
     const absolutePhrase = TIME_CONFLICT_ABSOLUTE_RE.test(fullText) && anchorYear != null && anchorYear < 2000;
 
     const snippets = [];
     if (years.length) snippets.push(`年份 ${years.join("、")} 与纪元「${eraLabel}」不在同一 decade`);
-    if (seasonConflict) snippets.push(`季节「${seasonConflict}」与配置「${season}」不一致`);
     if (absolutePhrase) snippets.push("出现现代措辞（如今/当代/现在/今年）但纪元为历史年代");
 
     return {
-        conflict: years.length > 0 || seasonConflict !== null || absolutePhrase,
+        conflict: years.length > 0 || absolutePhrase,
         yearConflict: years.length ? { years } : null,
-        seasonConflict: seasonConflict ? { words: [seasonConflict] } : null,
         absolutePhrase,
         snippets
     };
@@ -353,8 +329,8 @@ export function formatConflictMessage(res) {
 // S5-5 · 审稿时间锚点构造（纯函数，可在 Node 下单测；无 DOM 依赖）
 // 从世界抽取「权威时间锚点」文本，喂给 callWorldCriticLLM 作为时间一致性审稿基准。
 // 设计要点（见 docs/20 §13 S5-5）：
-// - multiverse：优先取 active_timeline 的平铺时间字段（calendar_mode/calendar_start/era_label/season），回退顶层
-// - 无实质时间信息（无年份/纪元/季节）时返回空串，prompt 不增时间章节
+// - multiverse：优先取 active_timeline 的平铺时间字段（calendar_mode/calendar_start/era_label），回退顶层
+// - 无实质时间信息（无年份/纪元）时返回空串，prompt 不增时间章节
 // ============================================================
 function calendarModeLabel(mode) {
     return ({
@@ -376,7 +352,6 @@ export function buildCriticTimeContext(world) {
                 calendar_mode: line.calendar_mode,
                 calendar_start: line.calendar_start,
                 era_label: line.era_label,
-                season: line.season,
                 custom_calendar: line.custom_calendar
             });
         } else {
@@ -388,9 +363,8 @@ export function buildCriticTimeContext(world) {
     const dateStr = formatStartAnchor(tc.calendar_start);
     if (dateStr) parts.push("起始日期：" + dateStr);
     else if (!tc.era_label) parts.push("无绝对年份（day/none 模式）");
-    if (tc.season) parts.push("季节：" + tc.season);
-    // 无任何实质时间信息（无纪元/起始日期/季节）则不增章节
-    const hasAnchor = !!(tc.era_label || (tc.calendar_start && (Number.isFinite(tc.calendar_start.year) || Number.isFinite(tc.calendar_start.month) || Number.isFinite(tc.calendar_start.date))) || tc.season);
+    // 无任何实质时间信息（无纪元/起始日期）则不增章节
+    const hasAnchor = !!(tc.era_label || (tc.calendar_start && (Number.isFinite(tc.calendar_start.year) || Number.isFinite(tc.calendar_start.month) || Number.isFinite(tc.calendar_start.date))));
     if (!hasAnchor) return "";
     return parts.join(" / ");
 }

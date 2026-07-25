@@ -997,8 +997,8 @@ ${snippetsText}${timeBlock}${preBlock}
 5. 重复 / 近似重复：内容高度雷同的条目，建议合并。
 6. 事实错误：明显的时间/因果/设定错乱。
 7. 时间一致性（对照上方「权威时间锚点」）：
-   a. 知识库条目内写死年份/季节/现代措辞（如今/当代/现在/今年）与世界时间锚点时代不符 → 标记，优先把写死时间改写为占位符 {calendar_date}/{era_label}/{season}（与开场白占位符机制一致），而非硬改数字。
-   b. 两条设定对同一事件陈述的年份/季节互相矛盾（如 A 说战役在 1620，B 说在 1630）→ 标记冲突，按权威锚点或世界真相修订。
+   a. 知识库条目内写死年份/现代措辞（如今/当代/现在/今年）与世界时间锚点时代不符 → 标记，优先把写死时间改写为占位符 {calendar_date}/{era_label}（与开场白占位符机制一致），而非硬改数字。
+   b. 两条设定对同一事件陈述的年份互相矛盾（如 A 说战役在 1620，B 说在 1630）→ 标记冲突，按权威锚点或世界真相修订。
    c. 「已知时间冲突线索」列出的开场白/系统提示/纪元标签冲突，一并纳入建议：仅以文字提示作者（Critic 当前只改 lore_kb，世界级文本不在 diff schema 内），不要产出对 opening_narrative/system_prompt 的修订条目。
    d. 绝对史实（如「英伟达 1999 年上市」）属世界真相，不冲突，保留。
 
@@ -1061,7 +1061,6 @@ function isMockMode() {
 export async function callRegenerateOpeningLLM(world, newTimeConfig, oldOpening, mode) {
     const tc = normalizeTimeConfig(newTimeConfig);
     const era = tc.era_label || (world && world.era_label) || "";
-    const season = tc.season || "";
     const start = tc.calendar_start;
     const startDateStr = start
         ? formatCalendarDate({ year: start.year, month: start.month, date: start.date }, tc.calendar_mode || "gregorian", tc.custom_calendar, { showYear: Number.isFinite(start.year) })
@@ -1072,9 +1071,9 @@ export async function callRegenerateOpeningLLM(world, newTimeConfig, oldOpening,
     // 模拟 / 测试模式：返回确定性文本（含占位符便于校验，toPlaceholders 必含 {calendar_date}）
     if (isMockMode()) {
         if (mode === "toPlaceholders") {
-            return { newOpening: `现在是{era_label}的{season}，{calendar_date}，故事由此展开。`, mode };
+            return { newOpening: `现在是{era_label}的{calendar_date}，故事由此展开。`, mode };
         }
-        return { newOpening: `（AI生成）现在是{era_label}的{season}，{calendar_date}，新的篇章在${worldName}开启。`, mode };
+        return { newOpening: `（AI生成）现在是{era_label}的{calendar_date}，新的篇章在${worldName}开启。`, mode };
     }
 
     const { baseUrl, corsProxy, apiKey, model: readModel } = readApiInputs();
@@ -1083,15 +1082,15 @@ export async function callRegenerateOpeningLLM(world, newTimeConfig, oldOpening,
     const apiUrl = buildApiUrl(baseUrl, corsProxy);
 
     const instruction = mode === "toPlaceholders"
-        ? "请把原文里写死的具体年份、季节、日期等时间词，替换为占位符 {calendar_date}、{era_label}、{season}、{calendar_year}、{calendar_month}（保留其余文字与调性）。只输出改写后的开场白纯文本。"
-        : `请生成一段全新的开场白，贴合新的起始时间「${startDateStr}」，保留原文的世界观调性，只改与日期/季节相关的表述。只输出开场白纯文本，不要解释。`;
+        ? "请把原文里写死的具体年份、日期等时间词，替换为占位符 {calendar_date}、{era_label}、{calendar_year}、{calendar_month}（保留其余文字与调性）。只输出改写后的开场白纯文本。"
+        : `请生成一段全新的开场白，贴合新的起始时间「${startDateStr}」，保留原文的世界观调性，只改与日期相关的表述。只输出开场白纯文本，不要解释。`;
     const prompt = `你是文字 RPG 世界的开场白改写助手。
 # 世界名称
 ${worldName}
 # 世界观描述
 ${worldDesc}
 # 新起始时间
-纪元：${era}；季节：${season}；起始日期：${startDateStr}
+纪元：${era}；起始日期：${startDateStr}
 # 原文开场白
 ${oldOpening || "（无）"}
 # 任务
@@ -1125,7 +1124,6 @@ ${instruction}`;
 export async function callOptimizeOpeningLLM(world, oldOpening, opts = {}) {
     const tc = normalizeTimeConfig((getWorldSchema(world) || {}).time_config);
     const era = tc.era_label || (world && world.era_label) || "";
-    const season = tc.season || "";
     const start = tc.calendar_start;
     const startDateStr = start
         ? formatCalendarDate({ year: start.year, month: start.month, date: start.date }, tc.calendar_mode || "gregorian", tc.custom_calendar, { showYear: Number.isFinite(start.year) })
@@ -1143,7 +1141,7 @@ export async function callOptimizeOpeningLLM(world, oldOpening, opts = {}) {
 
     // 模拟 / 测试模式：返回确定性文本（含占位符便于校验）
     if (isMockMode()) {
-        return { newOpening: `（AI优化·剧情向）{era_label}的{season}，{calendar_date}。你刚在一道从未有过的拉扯中睁开眼——两界同时向你伸手。故事，从这一刻的取舍开始。`, mode: "optimize" };
+        return { newOpening: `（AI优化·剧情向）{era_label}的{calendar_date}。你刚在一道从未有过的拉扯中睁开眼——两界同时向你伸手。故事，从这一刻的取舍开始。`, mode: "optimize" };
     }
 
     const { baseUrl, corsProxy, apiKey, model: readModel } = readApiInputs();
@@ -1157,7 +1155,7 @@ export async function callOptimizeOpeningLLM(world, oldOpening, opts = {}) {
 2. 立刻建立张力与 stakes：让读者感到「这件事必须马上做/选」。${isMulti ? "多世界/双界尤其要点出「两边都催着你」的拉扯感。" : ""}
 3. show, don't tell：用感官细节（气味、声音、身体感受）代替抽象形容。
 4. 结尾抛出一个把玩家推进剧情的抉择或悬念问题。
-5. 时间锚点严格对齐上方「当前时间锚点」；建议用占位符 {calendar_date}、{era_label}、{season} 表达时间，避免写死。
+5. 时间锚点严格对齐上方「当前时间锚点」；建议用占位符 {calendar_date}、{era_label} 表达时间，避免写死。
 6. 不新增世界观设定，不偏离已有调性。${focus ? "侧重方向：" + focus + "。" : ""}
 只输出改写后的开场白纯文本，不要任何解释或前缀。`;
 
@@ -1172,7 +1170,7 @@ ${tone}
 # 关键设定（来自知识库，供贴合调性，不要新增设定）
 ${loreText || "（无）"}
 # 当前时间锚点（必须严格遵守，不得冲突）
-纪元：${era}；季节：${season}；起始日期：${startDateStr}
+纪元：${era}；起始日期：${startDateStr}
 # 原开场白
 ${oldOpening || "（无）"}
 # 任务

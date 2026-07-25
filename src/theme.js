@@ -72,7 +72,6 @@ export function getTimeConfig() {
         };
         // 展示字段：优先用该时间线自身，回退世界级
         if (line.era_label) effective.era_label = line.era_label;
-        if (line.season) effective.season = line.season;
         if (line.weather) effective.weather = line.weather;
     }
     if (schema && schema.time_periods && !schema.periods) {
@@ -161,7 +160,7 @@ export function periodClockFallback(period) {
     return String(h).padStart(2, "0") + ":00";
 }
 
-// 组合显示当前时间（E6）：纪元 · 季节 · 日期 · 时刻
+// 组合显示当前时间（E6）：纪元 · 日期 · 时刻
 export function formatWorldTime(state) {
     if (!state || !state.current_date) return "";
     const tc = getTimeConfig();
@@ -172,9 +171,8 @@ export function formatWorldTime(state) {
         return formatTimeLabel(state.current_date, cfg);
     }
     const parts = [];
-    if (cfg.era_label) parts.push(cfg.era_label);
-    if (cfg.season) parts.push(cfg.season);
-    if (cfg.weather) parts.push(cfg.weather);
+        if (cfg.era_label) parts.push(cfg.era_label);
+        if (cfg.weather) parts.push(cfg.weather);
     // 日期（dated 用原生年/月/日；period 用"第N天"）—— 方案 B：不再用 30 天折算
     parts.push(formatDateOnly(state.current_date, cfg));
     if (cfg.clock_mode === "clock") {

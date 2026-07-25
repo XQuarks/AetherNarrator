@@ -10,7 +10,7 @@ import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset }
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, cwNext, cwPrev } from "./render.js";
-import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreSpoiler, toggleLoreRequireConfirm, togglePinMemory, triggerMemoryPackImport, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore, switchTimeline } from "./game.js";
+import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreRequireConfirm, togglePinMemory, triggerMemoryPackImport, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore, switchTimeline } from "./game.js";
 import { syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening } from "./lore-ui.js";
 
 async function init() {
@@ -114,6 +114,15 @@ function dispatchEvent(e) {
 
 document.addEventListener("click", dispatchEvent);
 
+// 下拉菜单：点击菜单项或外部区域时自动关闭
+document.addEventListener("click", (e) => {
+    const openDds = document.querySelectorAll(".dropdown.open");
+    if (!openDds.length) return;
+    if (e.target.closest(".dropdown-item") || !e.target.closest(".dropdown")) {
+        openDds.forEach(d => d.classList.remove("open"));
+    }
+});
+
 document.addEventListener("change", dispatchEvent);
 
 document.addEventListener("input", dispatchEvent);
@@ -137,6 +146,8 @@ const ACTIONS = {
     saveApiConfig: () => saveApiConfig(),
     generateWorld: () => generateWorld(),
     cwNext: () => cwNext(),
+    // 下拉菜单开关（⋯ 更多）
+    toggleDropdown: (el) => { const dd = el.closest(".dropdown"); if (dd) dd.classList.toggle("open"); },
     cwPrev: () => cwPrev(),
     backToHomeAfterGameOver: () => backToHomeAfterGameOver(),
     reviewDeathScene: () => reviewDeathScene(),
@@ -196,7 +207,6 @@ const ACTIONS = {
     saveLoreReview: () => saveLoreReview(),
     confirmLoreRevision: () => confirmLoreRevision(),
     rejectLoreRevision: () => rejectLoreRevision(),
-    toggleLoreSpoiler: () => toggleLoreSpoiler(),
     toggleLoreRequireConfirm: (el) => toggleLoreRequireConfirm(el),
     toggleAIEnhanced: () => toggleAIEnhanced(),
     // ★ Phase 3：AI 审稿人（criticModal）

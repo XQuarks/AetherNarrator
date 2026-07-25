@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert";
 import { detectTimeConflict, formatConflictMessage } from "../src/utils.js";
 
-function makeWorld({ opening = "", system_prompt = "", era = "", calendar_mode = "gregorian", calendar_start = null, season = "" }) {
+function makeWorld({ opening = "", system_prompt = "", era = "", calendar_mode = "gregorian", calendar_start = null }) {
     return {
         schema: {
             opening_narrative: opening,
             system_prompt,
-            time_config: { calendar_mode, calendar_start, season, era_label: era }
+            time_config: { calendar_mode, calendar_start, era_label: era }
         }
     };
 }
@@ -24,16 +24,9 @@ test("S5-4 写死年份与纪元 decade 不一致 → 命中 yearConflict", () =
 });
 
 test("S5-4 用占位符 → 不命中（占位符豁免，且文本不含现代措辞/年份）", () => {
-    const w = makeWorld({ opening: "故事始于{era_label}的一个{season}清晨，雾气尚未散去。", era: "1990年代" });
+    const w = makeWorld({ opening: "故事始于{era_label}的一个清晨，雾气尚未散去。", era: "1990年代" });
     const r = detectTimeConflict(w);
     assert.strictEqual(r.conflict, false);
-});
-
-test("S5-4 季节不符 → seasonConflict", () => {
-    const w = makeWorld({ opening: "那是冬季最冷的一天。", era: "1990年代", season: "夏季" });
-    const r = detectTimeConflict(w);
-    assert.strictEqual(r.conflict, true);
-    assert.deepStrictEqual(r.seasonConflict.words, ["冬季"]);
 });
 
 test("S5-4 无年份文本 + 无起点(day) → 不命中", () => {
@@ -84,7 +77,7 @@ test("S5-4 同 decade 不冲突（1926 与 1920年代互通）", () => {
     assert.strictEqual(r.conflict, false);
 });
 
-test("S5-4 模糊纪元（无可解析年份）跳过年份比对，仅查季节/现代措辞", () => {
+test("S5-4 模糊纪元（无可解析年份）跳过年份比对，仅查现代措辞", () => {
     const w = makeWorld({ opening: "故事发生在久远的年代，英雄尚未登场。", era: "上古神话时代" });
     const r = detectTimeConflict(w);
     assert.strictEqual(r.conflict, false);

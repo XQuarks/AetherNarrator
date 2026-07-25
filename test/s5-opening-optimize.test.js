@@ -15,7 +15,7 @@ function makeWorld(over) {
         desc: "你是一名普通的现代青年，却拥有在两个世界之间往返的意识。",
         era_label: "公元2003年",
         opening_narrative: "公元 2003 年，江城。你被闹钟拽醒时，窗外还是灰蒙蒙的。",
-        schema: { time_config: { mode: "multiverse", era_label: "公元2003年", season: "春季", calendar_start: { year: 2003, month: 3, date: 15 } } },
+        schema: { time_config: { mode: "multiverse", era_label: "公元2003年", calendar_start: { year: 2003, month: 3, date: 15 } } },
         lore_kb: { snippets: [{ title: "双界时间各自流淌", content: "现实与异界是两条相互独立的时间线。" }] },
         ...over
     };
@@ -28,7 +28,6 @@ test("剧情向优化（模拟）：返回结构 {newOpening, mode:'optimize'} �
     assert.ok(typeof res.newOpening === "string" && res.newOpening.length > 0, "应返回非空新开场白");
     assert.ok(res.newOpening.includes("{calendar_date}"), "优化结果应含 {calendar_date} 占位符便于校验");
     assert.ok(res.newOpening.includes("{era_label}"), "优化结果应保持 {era_label} 占位符");
-    assert.ok(res.newOpening.includes("{season}"), "优化结果应保持 {season} 占位符");
 });
 
 test("剧情向优化：旧开场白为空也能生成（不抛错）", async () => {

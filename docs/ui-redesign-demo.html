@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<!-- ⚠️ 过时说明：本 Demo 中的「季节」相关 UI（如时间体系卡的「季节」输入框）已失效——季节机制已于方案 23（docs/23_彻底移除季节机制.md）彻底移除，源项目编辑卡已无「季节」输入框、顶栏不再显示季节。 -->
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>世界详情与知识库 UI 重构 Demo</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500&display=swap');
+
+:root {
+    --bg: #191510;
+    --bg-gradient: radial-gradient(ellipse at 50% -10%, #28221A 0%, #211B14 38%, #15110C 100%);
+    --bg-panel: #26221B;
+    --bg-sidebar: #221E18;
+    --card: rgba(217, 207, 192, 0.05);
+    --card-hover: rgba(217, 207, 192, 0.09);
+    --card-border: rgba(217, 207, 192, 0.12);
+    --card-border-hover: rgba(217, 207, 192, 0.20);
+    --text: #D9CFC0;
+    --text-secondary: rgba(217, 207, 192, 0.62);
+    --text-muted: rgba(217, 207, 192, 0.42);
+    --text-tertiary: rgba(217, 207, 192, 0.30);
+    --primary: #C9A87C;
+    --primary-light: #D8BC9A;
+    --success: #7BAA92;
+    --danger: #C56B5E;
+    --warning: #C9A455;
+    --separator: rgba(217, 207, 192, 0.08);
+    --scrollbar-thumb: rgba(217, 207, 192, 0.16);
+    --scrollbar-thumb-hover: rgba(201, 168, 124, 0.55);
+    --radius-s: 6px;
+    --radius-m: 8px;
+    --radius-l: 12px;
+    --shadow-card: 0 2px 8px rgba(0,0,0,0.18);
+    --shadow-modal: 0 4px 16px rgba(0,0,0,0.28);
+    --overlay-bg: rgba(10,8,5,0.55);
+    --btn-primary-text: #1A160F;
+    --serif: "Noto Serif SC", "Songti SC", Georgia, serif;
+    --sans: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+}
+
+[data-theme="light"] {
+    --bg: #F3EFE4;
+    --bg-gradient: radial-gradient(ellipse at 50% -10%, #FBF8F1 0%, #F6F2E9 40%, #EFEADD 100%);
+    --bg-panel: #FCF9F3;
+    --bg-sidebar: #F6F2E9;
+    --card: #FEFCF9;
+    --card-hover: #F8F4EA;
+    --card-border: #E2D9C8;
+    --card-border-hover: #C8BDA5;
+    --text: #383226;
+    --text-secondary: #8C8272;
+    --text-muted: #B0A895;
+    --text-tertiary: #C4BCAA;
+    --primary: #9E7D4E;
+    --primary-light: #B8955E;
+    --success: #5A8A6E;
+    --danger: #A85A4A;
+    --warning: #9A7A38;
+    --separator: #E8E0D0;
+    --scrollbar-thumb: rgba(140, 130, 110, 0.30);
+    --scrollbar-thumb-hover: rgba(158, 125, 78, 0.55);
+    --shadow-card: 0 1px 2px rgba(140,130,110,0.10);
+    --shadow-modal: 0 2px 16px rgba(140,130,110,0.15);
+    --overlay-bg: rgba(56,50,38,0.28);
+    --btn-primary-text: #FCF9F3;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: var(--bg-gradient);
+    min-height: 100vh;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ===== 滚动条统一美化（弹窗 / 列表 / 笔记面板通用） ===== */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background .2s ease;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ===== Demo 控制栏 ===== */
+.demo-bar {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--card-border);
+    padding: 10px 20px;
+    display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap;
+}
+.demo-bar-title { font-family: var(--serif); font-size: 15px; font-weight: 600; color: var(--primary); margin-right: auto; }
+.demo-bar-btn {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m);
+    color: var(--text-secondary); padding: 7px 14px; font-size: 13px; cursor: pointer; font-family: inherit;
+    transition: all .15s;
+}
+.demo-bar-btn:hover { border-color: var(--primary); color: var(--text); }
+.demo-bar-btn.active { background: var(--primary); color: var(--btn-primary-text); border-color: var(--primary); font-weight: 500; }
+.theme-toggle {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 50%;
+    width: 32px; height: 32px; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center;
+}
+
+/* ===== 弹窗基础 ===== */
+.modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: var(--overlay-bg);
+    align-items: center; justify-content: center;
+    padding: 20px;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+    background: var(--bg-panel);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-l);
+    box-shadow: var(--shadow-modal);
+    width: 100%; max-width: 560px;
+    max-height: calc(100vh - 40px);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+}
+.modal.modal-wide { max-width: 760px; }
+.modal.modal-xl { max-width: 920px; }
+
+.modal-header {
+    padding: 18px 20px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--separator);
+    flex-shrink: 0;
+}
+.modal-header h2 { font-family: var(--serif); font-size: 17px; font-weight: 600; }
+.modal-close {
+    background: none; border: none; color: var(--text-secondary);
+    font-size: 22px; cursor: pointer; padding: 0 4px; line-height: 1;
+}
+.modal-close:hover { color: var(--text); }
+.modal-body { padding: 18px 20px; overflow-y: auto; flex: 1; }
+.modal-footer {
+    padding: 12px 20px;
+    display: flex; align-items: center; gap: 8px; justify-content: flex-end;
+    border-top: 1px solid var(--separator);
+    flex-shrink: 0;
+}
+
+/* ===== 按钮 ===== */
+.btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 9px 18px; border-radius: var(--radius-m); border: 1px solid var(--card-border);
+    background: var(--card); color: var(--text); font-size: 14px; font-family: inherit;
+    cursor: pointer; transition: all .15s; white-space: nowrap;
+}
+.btn:hover { border-color: var(--card-border-hover); background: var(--card-hover); }
+.btn.primary { background: var(--primary); color: var(--btn-primary-text); border-color: var(--primary); font-weight: 500; }
+.btn.primary:hover { background: var(--primary-light); }
+.btn.secondary { background: var(--card); color: var(--text-secondary); }
+.btn.secondary:hover { color: var(--text); }
+.btn.danger { color: var(--danger); border-color: var(--danger); }
+.btn.danger:hover { background: rgba(197,107,94,0.1); }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.btn-icon {
+    width: 32px; height: 32px; padding: 0; border-radius: var(--radius-s);
+    background: var(--card); border: 1px solid var(--card-border); color: var(--text-secondary);
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    transition: all .15s;
+}
+.btn-icon:hover { border-color: var(--primary); color: var(--text); }
+
+/* ===== 页签（统一组件） ===== */
+.tabs {
+    display: flex; gap: 0;
+    border-bottom: 1px solid var(--separator);
+    margin-bottom: 16px;
+    overflow-x: auto;
+}
+.tab {
+    padding: 10px 16px; font-size: 14px; font-weight: 400; color: var(--text-secondary);
+    background: none; border: none; border-bottom: 2px solid transparent;
+    cursor: pointer; font-family: inherit; white-space: nowrap; transition: all .15s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 500; }
+
+/* 分段控制（Segmented Control） */
+.segmented {
+    display: inline-flex; gap: 2px; padding: 3px;
+    background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m);
+}
+.seg-btn {
+    padding: 6px 14px; border: 1px solid transparent; border-radius: var(--radius-s);
+    background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 400;
+    cursor: pointer; font-family: inherit; transition: all .15s;
+}
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active { background: var(--bg-panel); color: var(--text); border-color: var(--card-border); box-shadow: var(--shadow-card); }
+/* PC 端：笔记内容在「文件」栏选中即显示，移除冗余的笔记分段按钮（手机端仍保留切换） */
+@media (min-width: 721px) {
+  .seg-btn[data-kb-seg="note"] { display: none; }
+}
+
+/* ===== 下拉菜单 ===== */
+.dropdown { position: relative; display: inline-block; }
+.dropdown-menu {
+    display: none; position: absolute; right: 0; top: calc(100% + 4px); z-index: 10;
+    background: var(--bg-panel); border: 1px solid var(--card-border); border-radius: var(--radius-m);
+    box-shadow: var(--shadow-modal); min-width: 180px; padding: 4px;
+}
+.dropdown.open .dropdown-menu { display: block; }
+.dropdown-item {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 8px 12px; border: none; background: none; color: var(--text);
+    font-size: 13px; font-family: inherit; cursor: pointer; border-radius: var(--radius-s);
+    text-align: left; transition: background .15s;
+}
+.dropdown-item:hover { background: var(--card-hover); }
+.dropdown-item.danger { color: var(--danger); }
+.dropdown-divider { height: 1px; background: var(--separator); margin: 4px 0; }
+
+/* ===== 世界详情：概览内容 ===== */
+.detail-grid { display: flex; flex-direction: column; gap: 14px; }
+.detail-row { display: flex; gap: 12px; align-items: flex-start; }
+.detail-label { flex: 0 0 80px; font-size: 13px; color: var(--text-secondary); padding-top: 2px; }
+.detail-value { flex: 1; font-size: 14px; color: var(--text); line-height: 1.6; }
+.detail-value.muted { color: var(--text-secondary); }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: rgba(201,168,124,0.12); color: var(--primary); }
+.tag.success { background: rgba(123,170,146,0.12); color: var(--success); }
+
+/* ===== 世界详情：知识库概要卡片 ===== */
+.summary-card {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m);
+    padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.summary-card-head { display: flex; align-items: center; justify-content: space-between; }
+.summary-card-title { font-size: 15px; font-weight: 500; }
+.summary-card-stats { display: flex; gap: 16px; }
+.stat-item { display: flex; flex-direction: column; gap: 2px; }
+.stat-num { font-size: 22px; font-weight: 600; font-family: var(--serif); color: var(--primary); }
+.stat-label { font-size: 12px; color: var(--text-muted); }
+.cat-bar { display: flex; gap: 2px; height: 6px; border-radius: 3px; overflow: hidden; }
+.cat-bar-seg { height: 100%; }
+
+/* ===== 知识库三栏 ===== */
+.kb-shell { display: flex; flex-direction: column; gap: 12px; }
+.kb-toolbar { display: flex; gap: 8px; align-items: center; }
+.kb-search {
+    flex: 1; background: var(--bg-sidebar); border: 1px solid var(--card-border);
+    border-radius: var(--radius-m); color: var(--text); padding: 8px 12px; font-size: 13px; font-family: inherit;
+}
+.kb-search:focus { outline: none; border-color: var(--primary); }
+
+.kb-cols { display: flex; gap: 12px; min-height: 400px; }
+.kb-tree {
+    width: 200px; flex: 0 0 200px; overflow-y: auto;
+    border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 8px;
+    background: var(--bg-sidebar);
+}
+.kb-tree-group { margin-bottom: 10px; }
+.kb-tree-head { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; padding: 4px 6px; display: flex; align-items: center; gap: 6px; }
+.kb-tree-dot { width: 8px; height: 8px; border-radius: 50%; }
+.kb-tree-item { padding: 6px 8px; border-radius: var(--radius-s); cursor: pointer; font-size: 13px; color: var(--text); display: flex; align-items: center; }
+.kb-tree-item:hover { background: rgba(201,168,124,0.10); }
+.kb-tree-item.active { background: rgba(201,168,124,0.20); color: var(--primary); font-weight: 500; }
+.kb-tree-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.kb-note { flex: 1; min-width: 0; overflow-y: auto; max-height: 60vh; border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 14px; background: var(--bg-panel); }
+.kb-note-head { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.kb-note-title { flex: 1; font-size: 16px; font-weight: 500; background: transparent; border: none; border-bottom: 1px solid var(--card-border); color: var(--text); padding: 4px 2px; font-family: inherit; }
+.kb-note-title:focus { outline: none; border-color: var(--primary); }
+.kb-note-cat { width: 100px; background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: var(--radius-s); color: var(--text); padding: 5px 8px; font-size: 13px; font-family: inherit; }
+.kb-note-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.kb-note-meta { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.kb-note-body { font-size: 14px; line-height: 1.8; color: var(--text); }
+.kb-note-props { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--separator); }
+.kb-note-props-head { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; }
+.kb-prop { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.kb-prop label { flex: 0 0 70px; font-size: 12px; color: var(--text-muted); }
+.kb-prop input, .kb-prop select {
+    flex: 1; background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: var(--radius-s);
+    color: var(--text); padding: 5px 8px; font-size: 13px; font-family: inherit;
+}
+.kb-prop input:focus, .kb-prop select:focus { outline: none; border-color: var(--primary); }
+
+.kb-backlinks { width: 200px; flex: 0 0 200px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 10px; background: var(--bg-sidebar); }
+.kb-back-head { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px; }
+.kb-back-row { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 5px 8px; border-radius: var(--radius-s); background: var(--bg-panel); border: 1px solid var(--card-border); cursor: pointer; margin-bottom: 4px; }
+.kb-back-row:hover { border-color: var(--primary); }
+.kb-back-rel { color: var(--primary); font-size: 11px; }
+.kb-back-empty { font-size: 12px; color: var(--text-muted); padding: 4px 2px; }
+
+/* PC端分段切换条 */
+.kb-seg-bar {
+    display: flex; gap: 2px; padding: 3px;
+    background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m);
+    margin-bottom: 0;
+}
+
+/* 质量提示 */
+.quality-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-radius: var(--radius-m); font-size: 13px;
+    background: rgba(123,170,146,0.08); border: 1px solid rgba(123,170,146,0.2); color: var(--success);
+}
+.quality-bar.warn { background: rgba(201,164,85,0.08); border-color: rgba(201,164,85,0.2); color: var(--warning); }
+
+/* ===== 世界规则 ===== */
+.rule-item {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m);
+    padding: 12px 14px; margin-bottom: 8px;
+}
+.rule-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.rule-item-name { flex: 1; font-size: 14px; font-weight: 500; }
+.rule-item-type { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(201,168,124,0.12); color: var(--primary); }
+.rule-item-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+
+/* ===== 时间体系卡片 ===== */
+.time-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 16px; }
+.time-card-head { font-size: 14px; font-weight: 500; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.time-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.time-row label { flex: 0 0 90px; font-size: 13px; color: var(--text-secondary); }
+.time-row input, .time-row select {
+    flex: 1; background: var(--bg-sidebar); border: 1px solid var(--card-border); border-radius: var(--radius-s);
+    color: var(--text); padding: 6px 10px; font-size: 13px; font-family: inherit;
+}
+.time-conflict-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: var(--radius-s); font-size: 12px;
+    background: rgba(197,107,94,0.1); border: 1px solid rgba(197,107,94,0.3); color: var(--danger);
+}
+
+/* ===== 图谱占位 ===== */
+.graph-placeholder {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 400px; border: 1px dashed var(--card-border); border-radius: var(--radius-m);
+    color: var(--text-muted); font-size: 14px; flex-direction: column; gap: 8px;
+}
+
+/* ===== 存档详情 ===== */
+.save-progress { display: flex; gap: 16px; margin-bottom: 16px; }
+.save-progress-card { flex: 1; background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 14px; }
+.save-progress-num { font-size: 24px; font-weight: 600; font-family: var(--serif); color: var(--primary); }
+.save-progress-label { font-size: 12px; color: var(--text-muted); }
+
+/* ===== 响应式 ===== */
+@media (max-width: 720px) {
+    .kb-cols { flex-direction: column; }
+    .kb-tree, .kb-backlinks { width: 100%; flex: none; max-height: 200px; }
+    .modal { max-width: 100%; }
+    .modal.modal-wide, .modal.modal-xl { max-width: 100%; }
+}
+
+/* ===== 辅助 ===== */
+.hidden { display: none !important; }
+.muted { color: var(--text-secondary); }
+.flex-gap { display: flex; gap: 8px; align-items: center; }
+.spacer { flex: 1; }
+.section-title { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .03em; }
+</style>
+</head>
+<body>
+
+<!-- Demo 控制栏 -->
+<div class="demo-bar">
+    <span class="demo-bar-title">UI 重构 Demo</span>
+    <button class="demo-bar-btn active" data-demo="worldDetail">世界详情</button>
+    <button class="demo-bar-btn" data-demo="loreReview">知识库编辑</button>
+    <button class="demo-bar-btn" data-demo="saveDetail">存档详情</button>
+    <button class="demo-bar-btn" data-demo="ruleEditor">世界规则</button>
+    <button class="theme-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">◐</button>
+</div>
+
+<!-- ===== 1. 世界详情弹窗（重构后） ===== -->
+<div class="modal-overlay show" id="demo-worldDetail">
+<div class="modal modal-wide">
+    <div class="modal-header">
+        <h2>哈利波特</h2>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+        <!-- 统一页签 -->
+        <div class="tabs" id="worldDetailTabs">
+            <button class="tab active" data-wd-tab="overview">概览</button>
+            <button class="tab" data-wd-tab="lore">知识库 <span class="tag" style="margin-left:4px;padding:0 6px;font-size:11px;">42</span></button>
+            <button class="tab" data-wd-tab="rules">规则 <span class="tag" style="margin-left:4px;padding:0 6px;font-size:11px;">5</span></button>
+            <button class="tab" data-wd-tab="time">时间体系</button>
+        </div>
+
+        <!-- 概览 -->
+        <div class="wd-pane" data-wd-pane="overview">
+            <div class="detail-grid">
+                <div class="detail-row">
+                    <div class="detail-label">类型</div>
+                    <div class="detail-value">基于已有 IP / 小说</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">作品名</div>
+                    <div class="detail-value" style="color:var(--primary)">哈利波特</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">世界观</div>
+                    <div class="detail-value muted">魔法世界分为魔法界与麻瓜界，霍格沃茨魔法学校是核心舞台。魔法部管理魔法社会，伏地魔的阴影贯穿全书……</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">主角</div>
+                    <div class="detail-value muted">一名来自麻瓜家庭的少年，在11岁生日时收到霍格沃茨入学通知书，踏入魔法世界。</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">文风</div>
+                    <div class="detail-value">参考原版文风</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">自由度</div>
+                    <div class="detail-value">适中发散 — 在原著世界观内适度创新</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">开场白</div>
+                    <div class="detail-value muted" style="font-style:italic;">「国王十字车站的九又四分之三站台前，你推着行李车，深吸一口气，向着墙壁跑去……」</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 知识库概要 -->
+        <div class="wd-pane hidden" data-wd-pane="lore">
+            <div class="summary-card">
+                <div class="summary-card-head">
+                    <span class="summary-card-title">默认知识库</span>
+                    <span class="tag success">已生成向量</span>
+                </div>
+                <div class="summary-card-stats">
+                    <div class="stat-item"><span class="stat-num">42</span><span class="stat-label">总条目</span></div>
+                    <div class="stat-item"><span class="stat-num">8</span><span class="stat-label">分类</span></div>
+                    <div class="stat-item"><span class="stat-num">156</span><span class="stat-label">关联</span></div>
+                </div>
+                <div>
+                    <div class="section-title" style="margin-bottom:6px;">分类分布</div>
+                    <div class="cat-bar">
+                        <div class="cat-bar-seg" style="width:24%;background:var(--primary)" title="人物 10"></div>
+                        <div class="cat-bar-seg" style="width:19%;background:var(--success)" title="地点 8"></div>
+                        <div class="cat-bar-seg" style="width:17%;background:var(--warning)" title="事件 7"></div>
+                        <div class="cat-bar-seg" style="width:14%;background:var(--danger)" title="物品 6"></div>
+                        <div class="cat-bar-seg" style="width:12%;background:#8B7EC8" title="势力 5"></div>
+                        <div class="cat-bar-seg" style="width:14%;background:var(--text-muted)" title="其他 6"></div>
+                    </div>
+                </div>
+                <div class="flex-gap" style="justify-content:flex-end;">
+                    <button class="btn secondary btn-sm" onclick="switchDemo('loreReview')">✎ 编辑知识库</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 规则概要 -->
+        <div class="wd-pane hidden" data-wd-pane="rules">
+            <div class="summary-card">
+                <div class="summary-card-head">
+                    <span class="summary-card-title">世界规则</span>
+                </div>
+                <div class="rule-item">
+                    <div class="rule-item-head">
+                        <span class="rule-item-name">魔力消耗</span>
+                        <span class="rule-item-type">数值</span>
+                    </div>
+                    <div class="rule-item-desc">施法消耗魔力值，魔力值不足时无法施法，休息可恢复。</div>
+                </div>
+                <div class="rule-item">
+                    <div class="rule-item-head">
+                        <span class="rule-item-name">禁止杀戮</span>
+                        <span class="rule-item-type">禁止</span>
+                    </div>
+                    <div class="rule-item-desc">玩家不可主动杀死 NPC，重要 NPC 受剧情保护。</div>
+                </div>
+                <div class="rule-item">
+                    <div class="rule-item-head">
+                        <span class="rule-item-name">好感度系统</span>
+                        <span class="rule-item-type">关系</span>
+                    </div>
+                    <div class="rule-item-desc">NPC 好感度影响对话选项和剧情走向，好感度过低可能触发敌对。</div>
+                </div>
+                <div class="flex-gap" style="justify-content:flex-end;">
+                    <button class="btn secondary btn-sm" onclick="switchDemo('ruleEditor')">✎ 编辑规则</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 时间体系 -->
+        <div class="wd-pane hidden" data-wd-pane="time">
+            <div class="time-card">
+                <div class="time-card-head">🌐 世界时间体系</div>
+                <div class="time-row">
+                    <label>纪元</label>
+                    <input type="text" value="1990年代" readonly>
+                </div>
+                <div class="time-row">
+                    <label>历法</label>
+                    <select disabled><option>公历（月/日/星期）</option></select>
+                </div>
+                <div class="time-row">
+                    <label>起始日期</label>
+                    <input type="text" value="9月 / 1日" readonly>
+                </div>
+                <div class="time-row">
+                    <label>时钟</label>
+                    <select disabled><option>时段标签</option></select>
+                </div>
+                <div class="time-row">
+                    <label>季节</label>
+                    <input type="text" value="初秋" readonly>
+                </div>
+                <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">时间体系由 AI 在创建世界时自动判定，仅创建当次可调，游戏中不可实时修改。</p>
+            </div>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <!-- 左侧：更多操作下拉 -->
+        <div class="dropdown" id="wdMoreDropdown">
+            <button class="btn secondary btn-sm" onclick="this.parentElement.classList.toggle('open')">更多 ▾</button>
+            <div class="dropdown-menu">
+                <button class="dropdown-item">📥 导出世界</button>
+                <button class="dropdown-item">📄 导出剧情文本</button>
+                <div class="dropdown-divider"></div>
+                <button class="dropdown-item danger">↻ 重新开始</button>
+            </div>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn secondary" onclick="this.closest('.modal-overlay').classList.remove('show')">返回</button>
+        <button class="btn primary">▶ 继续游戏</button>
+    </div>
+</div>
+</div>
+
+<!-- ===== 2. 知识库编辑弹窗（重构后） ===== -->
+<div class="modal-overlay" id="demo-loreReview">
+<div class="modal modal-xl">
+    <div class="modal-header">
+        <h2>默认知识库 · 哈利波特</h2>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+        <!-- 顶部视图页签 -->
+        <div class="tabs" id="loreViewTabs">
+            <button class="tab active" data-lv-tab="kb">📚 知识库</button>
+            <button class="tab" data-lv-tab="graph">🔗 图谱</button>
+            <button class="tab" data-lv-tab="time">🕰 时间体系</button>
+        </div>
+
+        <!-- 知识库视图 -->
+        <div class="lv-pane" data-lv-pane="kb">
+            <div class="kb-shell">
+                <!-- 工具栏：搜索 + 添加 + 更多操作 -->
+                <div class="kb-toolbar">
+                    <input class="kb-search" placeholder="🔍 搜索标题 / 内容…">
+                    <button class="btn secondary btn-sm">＋ 添加条目</button>
+                    <div class="dropdown" id="kbMoreDropdown">
+                        <button class="btn-icon" onclick="this.parentElement.classList.toggle('open')" title="更多操作">⋯</button>
+                        <div class="dropdown-menu">
+                            <button class="dropdown-item">📥 从源文档补抽</button>
+                            <button class="dropdown-item">🤖 审稿检查</button>
+                            <div class="dropdown-divider"></div>
+                            <button class="dropdown-item">🔓 显示/隐藏全部</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 质量提示 -->
+                <div class="quality-bar">
+                    <span>✓</span>
+                    <span>未发现明显质量问题</span>
+                    <span style="margin-left:auto;font-size:12px;color:var(--text-muted);">42 条 · 8 分类 · 156 关联</span>
+                </div>
+
+                <!-- PC端分段切换条（修复：不再 display:none） -->
+                <div class="kb-seg-bar" id="kbSegBar">
+                    <button class="seg-btn active" data-kb-seg="tree">📂 文件</button>
+                    <button class="seg-btn" data-kb-seg="note">📝 笔记</button>
+                    <button class="seg-btn" data-kb-seg="backlinks">🔗 关联</button>
+                </div>
+
+                <!-- 三栏 -->
+                <div class="kb-cols" id="kbCols">
+                    <!-- 左：文件树 -->
+                    <div class="kb-tree" data-kb-col="tree">
+                        <div class="kb-tree-group">
+                            <div class="kb-tree-head"><span class="kb-tree-dot" style="background:var(--primary)"></span>人物 <span style="margin-left:auto;opacity:.6;">10</span></div>
+                            <div class="kb-tree-item" data-tree-idx="0"><span>哈利·波特</span></div>
+                            <div class="kb-tree-item active" data-tree-idx="1"><span>邓布利多</span></div>
+                            <div class="kb-tree-item" data-tree-idx="2"><span>伏地魔</span></div>
+                            <div class="kb-tree-item" data-tree-idx="3"><span>赫敏·格兰杰</span></div>
+                            <div class="kb-tree-item" data-tree-idx="4"><span>罗恩·韦斯莱</span></div>
+                        </div>
+                        <div class="kb-tree-group">
+                            <div class="kb-tree-head"><span class="kb-tree-dot" style="background:var(--success)"></span>地点 <span style="margin-left:auto;opacity:.6;">8</span></div>
+                            <div class="kb-tree-item" data-tree-idx="5"><span>霍格沃茨</span></div>
+                            <div class="kb-tree-item" data-tree-idx="6"><span>国王十字车站</span></div>
+                            <div class="kb-tree-item" data-tree-idx="7"><span>对角巷</span></div>
+                        </div>
+                        <div class="kb-tree-group">
+                            <div class="kb-tree-head"><span class="kb-tree-dot" style="background:var(--warning)"></span>事件 <span style="margin-left:auto;opacity:.6;">7</span></div>
+                            <div class="kb-tree-item" data-tree-idx="8"><span>分院仪式</span></div>
+                            <div class="kb-tree-item" data-tree-idx="9"><span>三强争霸赛</span></div>
+                        </div>
+                        <div class="kb-tree-group">
+                            <div class="kb-tree-head"><span class="kb-tree-dot" style="background:var(--danger)"></span>物品 <span style="margin-left:auto;opacity:.6;">6</span></div>
+                            <div class="kb-tree-item" data-tree-idx="10"><span>老魔杖</span></div>
+                            <div class="kb-tree-item" data-tree-idx="11"><span>隐形衣</span></div>
+                            <div class="kb-tree-item" data-tree-idx="12"><span>复活石</span></div>
+                        </div>
+                    </div>
+
+                    <!-- 中：笔记编辑 -->
+                    <div class="kb-note" data-kb-col="note">
+                        <div class="kb-note-head">
+                            <input class="kb-note-title" value="邓布利多" placeholder="笔记标题">
+                            <input class="kb-note-cat" list="catList" value="人物" placeholder="类别">
+                            <datalist id="catList"><option>规则</option><option>世界观</option><option>地点</option><option>人物</option><option>事件</option><option>物品</option><option>势力</option><option>冲突</option><option>补充</option></datalist>
+                        </div>
+                        <div class="kb-note-toolbar">
+                            <div class="segmented">
+                                <button class="seg-btn active">👁 预览</button>
+                                <button class="seg-btn">✎ 编辑</button>
+                            </div>
+                            <span class="kb-note-meta">#2 · ID: p002</span>
+                            <button class="btn-icon" style="color:var(--danger)" title="删除">✕</button>
+                        </div>
+                        <div class="kb-note-body">
+                            阿不思·邓布利多是霍格沃茨魔法学校的校长，被公认为当代最伟大的巫师。他曾击败黑巫师格林德沃，是凤凰社的创始人。<br><br>
+                            性格慈祥而深不可测，善于运筹帷幄，对哈利有着如同祖父般的关怀。他掌握 Elder Wand（老魔杖）的力量，精通炼金术，与 [[尼可·勒梅]] 是旧识。
+                        </div>
+                        <div class="kb-note-props">
+                            <div class="kb-note-props-head">属性</div>
+                            <div class="kb-prop"><label>触发词</label><input value="邓布利多，校长，阿不思"></div>
+                            <div class="kb-prop"><label>触发模式</label><select><option>关键词</option><option>常驻</option><option>正则</option></select></div>
+                            <div class="kb-prop"><label>注入位置</label><select><option>用户输入前</option><option>用户输入后</option><option>作者注</option><option>系统</option></select></div>
+                            <div class="kb-prop"><label>优先级</label><input type="number" value="5"></div>
+                            <div class="kb-prop"><label>扫描深度</label><input type="number" value="2" min="1" max="10"></div>
+                            <div class="kb-prop"><label>关联</label><input value="p010:causal，p005:related" placeholder="目标ID:关系，逗号分隔"></div>
+                        </div>
+                    </div>
+
+                    <!-- 右：关联 -->
+                    <div class="kb-backlinks" data-kb-col="backlinks">
+                        <div class="kb-back-head">出链 <span style="background:rgba(201,168,124,0.15);color:var(--primary);border-radius:10px;padding:0 7px;font-size:11px;">2</span></div>
+                        <div class="kb-back-row"><span class="kb-back-rel">因果</span><span>→</span><span style="overflow:hidden;text-overflow:ellipsis;">尼可·勒梅</span></div>
+                        <div class="kb-back-row"><span class="kb-back-rel">相关</span><span>→</span><span style="overflow:hidden;text-overflow:ellipsis;">老魔杖</span></div>
+                        <div class="kb-back-head" style="margin-top:12px;">反向链接 <span style="background:rgba(201,168,124,0.15);color:var(--primary);border-radius:10px;padding:0 7px;font-size:11px;">3</span></div>
+                        <div class="kb-back-row"><span style="overflow:hidden;text-overflow:ellipsis;">凤凰社</span><span>→</span><span class="kb-back-rel">本条目</span></div>
+                        <div class="kb-back-row"><span style="overflow:hidden;text-overflow:ellipsis;">格林德沃</span><span>→</span><span class="kb-back-rel">本条目</span></div>
+                        <div class="kb-back-row"><span style="overflow:hidden;text-overflow:ellipsis;">霍格沃茨</span><span>→</span><span class="kb-back-rel">本条目</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图谱视图（占位） -->
+        <div class="lv-pane hidden" data-lv-pane="graph">
+            <div class="graph-placeholder">
+                <span style="font-size:32px;">🔗</span>
+                <span>知识图谱视图（力导向布局）</span>
+                <span style="font-size:12px;">42 节点 · 156 关联 · 8 分类</span>
+            </div>
+        </div>
+
+        <!-- 时间体系视图 -->
+        <div class="lv-pane hidden" data-lv-pane="time">
+            <div class="time-card">
+                <div class="time-card-head">🌐 世界时间体系</div>
+                <div class="time-row">
+                    <label>纪元</label>
+                    <input type="text" value="1990年代" id="tc_era_demo">
+                    <span class="time-conflict-badge" id="tcConflictBadge" style="display:none;">⚠ 时间冲突</span>
+                </div>
+                <div class="time-row">
+                    <label>历法</label>
+                    <select id="tc_calendar_demo"><option>公历（月/日/星期）</option><option>按第 N 天推进</option><option>阴历（月/日）</option><option>不显示日期</option></select>
+                </div>
+                <div class="time-row">
+                    <label>起始日期</label>
+                    <div class="flex-gap">
+                        <input type="number" min="1" max="12" value="9" placeholder="月" style="width:60px;"> /
+                        <input type="number" min="1" max="31" value="1" placeholder="日" style="width:60px;">
+                    </div>
+                </div>
+                <div class="time-row">
+                    <label>时钟</label>
+                    <select><option>时段标签</option><option>不显示时刻</option></select>
+                </div>
+                <div class="time-row">
+                    <label>季节</label>
+                    <input type="text" value="初秋">
+                </div>
+                <div class="time-row">
+                    <label>天气</label>
+                    <input type="text" value="晴朗" placeholder="可选">
+                </div>
+                <div class="time-row">
+                    <label>界面显示</label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);"><input type="checkbox" checked style="width:auto;">在顶栏显示日期时间</label>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- 底部精简：只保留 取消 + 保存 -->
+    <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn secondary" onclick="this.closest('.modal-overlay').classList.remove('show')">取消</button>
+        <button class="btn primary">💾 保存知识库</button>
+    </div>
+</div>
+</div>
+
+<!-- ===== 3. 存档详情弹窗（重构后） ===== -->
+<div class="modal-overlay" id="demo-saveDetail">
+<div class="modal modal-wide">
+    <div class="modal-header">
+        <h2>存档详情 · 哈利波特</h2>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+        <div class="tabs" id="saveDetailTabs">
+            <button class="tab active" data-sd-tab="overview">概览</button>
+            <button class="tab" data-sd-tab="lore">存档知识库 <span class="tag" style="margin-left:4px;padding:0 6px;font-size:11px;">45</span></button>
+        </div>
+
+        <!-- 概览 -->
+        <div class="sd-pane" data-sd-pane="overview">
+            <div class="save-progress">
+                <div class="save-progress-card">
+                    <div class="save-progress-num">第 47 天</div>
+                    <div class="save-progress-label">游戏进度</div>
+                </div>
+                <div class="save-progress-card">
+                    <div class="save-progress-num">12</div>
+                    <div class="save-progress-label">已完成事件</div>
+                </div>
+                <div class="save-progress-card">
+                    <div class="save-progress-num">8</div>
+                    <div class="save-progress-label">行为记忆</div>
+                </div>
+            </div>
+            <div class="detail-grid">
+                <div class="detail-row">
+                    <div class="detail-label">所属世界</div>
+                    <div class="detail-value">哈利波特</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">当前时间</div>
+                    <div class="detail-value muted">1991年10月17日 · 下午</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">主角状态</div>
+                    <div class="detail-value muted">格兰芬多一年级 · 魔力 80/100 · 生命 95/100</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">最后存档</div>
+                    <div class="detail-value muted">2026-07-25 09:15</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 存档知识库 -->
+        <div class="sd-pane hidden" data-sd-pane="lore">
+            <div class="summary-card">
+                <div class="summary-card-head">
+                    <span class="summary-card-title">存档知识库（独立副本）</span>
+                    <span class="tag" style="background:rgba(201,168,124,0.12);color:var(--primary);">比世界默认多 3 条</span>
+                </div>
+                <div class="summary-card-stats">
+                    <div class="stat-item"><span class="stat-num">45</span><span class="stat-label">总条目</span></div>
+                    <div class="stat-item"><span class="stat-num">3</span><span class="stat-label">新增</span></div>
+                    <div class="stat-item"><span class="stat-num">2</span><span class="stat-label">已修改</span></div>
+                </div>
+                <div class="flex-gap" style="justify-content:flex-end;">
+                    <button class="btn secondary btn-sm" onclick="switchDemo('loreReview')">✎ 编辑存档知识库</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <div class="dropdown">
+            <button class="btn secondary btn-sm" onclick="this.parentElement.classList.toggle('open')">更多 ▾</button>
+            <div class="dropdown-menu">
+                <button class="dropdown-item">📥 导出世界</button>
+                <button class="dropdown-item">📄 导出剧情文本</button>
+                <div class="dropdown-divider"></div>
+                <button class="dropdown-item danger">🗑 删除存档</button>
+            </div>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn secondary" onclick="switchDemo('worldDetail')">返回</button>
+        <button class="btn primary">▶ 继续游戏</button>
+    </div>
+</div>
+</div>
+
+<!-- ===== 4. 世界规则弹窗（重构后） ===== -->
+<div class="modal-overlay" id="demo-ruleEditor">
+<div class="modal modal-wide">
+    <div class="modal-header">
+        <h2>世界规则 · 哈利波特</h2>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+        <!-- 工具栏：添加规则移到这里 -->
+        <div class="kb-toolbar" style="margin-bottom:14px;">
+            <span style="font-size:13px;color:var(--text-secondary);">共 5 条规则</span>
+            <div class="spacer"></div>
+            <button class="btn secondary btn-sm">＋ 添加规则</button>
+        </div>
+
+        <div class="rule-item">
+            <div class="rule-item-head">
+                <span class="rule-item-name">魔力消耗</span>
+                <span class="rule-item-type">数值</span>
+                <button class="btn-icon" title="编辑">✎</button>
+                <button class="btn-icon" style="color:var(--danger)" title="删除">✕</button>
+            </div>
+            <div class="rule-item-desc">施法消耗魔力值，魔力值不足时无法施法。魔力值 = 基础值 + 等级 × 成长系数。休息或魔药可恢复。</div>
+        </div>
+        <div class="rule-item">
+            <div class="rule-item-head">
+                <span class="rule-item-name">禁止杀戮</span>
+                <span class="rule-item-type">禁止</span>
+                <button class="btn-icon" title="编辑">✎</button>
+                <button class="btn-icon" style="color:var(--danger)" title="删除">✕</button>
+            </div>
+            <div class="rule-item-desc">玩家不可主动杀死 NPC。重要 NPC 受剧情保护，不可被攻击。</div>
+        </div>
+        <div class="rule-item">
+            <div class="rule-item-head">
+                <span class="rule-item-name">好感度系统</span>
+                <span class="rule-item-type">关系</span>
+                <button class="btn-icon" title="编辑">✎</button>
+                <button class="btn-icon" style="color:var(--danger)" title="删除">✕</button>
+            </div>
+            <div class="rule-item-desc">NPC 好感度范围 -100 到 100。好感度影响对话选项和剧情走向，低于 -30 可能触发敌对行为。</div>
+        </div>
+        <div class="rule-item">
+            <div class="rule-item-head">
+                <span class="rule-item-name">学院分数</span>
+                <span class="rule-item-type">进度</span>
+                <button class="btn-icon" title="编辑">✎</button>
+                <button class="btn-icon" style="color:var(--danger)" title="删除">✕</button>
+            </div>
+            <div class="rule-item-desc">玩家行为影响格兰芬多学院分数，月底统计排名。分数影响 NPC 对玩家的态度。</div>
+        </div>
+        <div class="rule-item">
+            <div class="rule-item-head">
+                <span class="rule-item-name">魔法限制</span>
+                <span class="rule-item-type">能力</span>
+                <button class="btn-icon" title="编辑">✎</button>
+                <button class="btn-icon" style="color:var(--danger)" title="删除">✕</button>
+            </div>
+            <div class="rule-item-desc">一年级学生不可使用不可饶恕咒。高级魔法需要特定条件解锁（学习、事件触发）。</div>
+        </div>
+    </div>
+    <!-- 底部精简：只保留 取消 + 保存 -->
+    <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn secondary" onclick="switchDemo('worldDetail')">取消</button>
+        <button class="btn primary">💾 保存规则</button>
+    </div>
+</div>
+</div>
+
+<script>
+// Demo 切换
+function switchDemo(name) {
+    document.querySelectorAll('.modal-overlay').forEach(o => o.classList.remove('show'));
+    document.querySelectorAll('.demo-bar-btn').forEach(b => b.classList.remove('active'));
+    const map = { worldDetail: 'demo-worldDetail', loreReview: 'demo-loreReview', saveDetail: 'demo-saveDetail', ruleEditor: 'demo-ruleEditor' };
+    const overlay = document.getElementById(map[name]);
+    if (overlay) overlay.classList.add('show');
+    const btn = document.querySelector(`[data-demo="${name}"]`);
+    if (btn) btn.classList.add('active');
+    // 关闭所有下拉
+    document.querySelectorAll('.dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+document.querySelectorAll('.demo-bar-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchDemo(btn.dataset.demo));
+});
+
+// 世界详情页签
+document.querySelectorAll('[data-wd-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('[data-wd-tab]').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('[data-wd-pane]').forEach(p => p.classList.add('hidden'));
+        document.querySelector(`[data-wd-pane="${tab.dataset.wdTab}"]`)?.classList.remove('hidden');
+    });
+});
+
+// 知识库视图页签
+document.querySelectorAll('[data-lv-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('[data-lv-tab]').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('[data-lv-pane]').forEach(p => p.classList.add('hidden'));
+        document.querySelector(`[data-lv-pane="${tab.dataset.lvTab}"]`)?.classList.remove('hidden');
+    });
+});
+
+// 存档详情页签
+document.querySelectorAll('[data-sd-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('[data-sd-tab]').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('[data-sd-pane]').forEach(p => p.classList.add('hidden'));
+        document.querySelector(`[data-sd-pane="${tab.dataset.sdTab}"]`)?.classList.remove('hidden');
+    });
+});
+
+// 文件树点击
+document.querySelectorAll('.kb-tree-item').forEach(item => {
+    item.addEventListener('click', () => {
+        document.querySelectorAll('.kb-tree-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+    });
+});
+
+// 知识库分段切换（PC端也显示）
+document.querySelectorAll('[data-kb-seg]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-kb-seg]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    });
+});
+
+// 点击外部关闭下拉
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.dropdown')) {
+        document.querySelectorAll('.dropdown.open').forEach(d => d.classList.remove('open'));
+    }
+});
+</script>
+</body>
+</html>

@@ -278,7 +278,7 @@ export function buildSystemPrompt() {
 
     // ★ P1: 开场白注入 system prompt（世界级固定内容，永远命中缓存）
     if (S.currentWorld && S.currentWorld.opening_narrative) {
-        // S5-3：注入前展开占位符（{era_label}/{season}/{calendar_date}/...），使用开局起点日期
+        // S5-3：注入前展开占位符（{era_label}/{calendar_date}/...），使用开局起点日期
         const tc = getTimeConfig();
         const openingDate = (S.gameState && S.gameState.current_date) || tc.timeConfig.calendar_start || null;
         const openingResolved = resolveOpeningTokens(S.currentWorld.opening_narrative, tc.timeConfig, openingDate);
@@ -337,12 +337,11 @@ export function buildTimeModeRules() {
     const cfg = tc.timeConfig;
     let timeExtra = "";
     if (cfg && cfg.era_label) timeExtra += `当前纪元/年份：${cfg.era_label}。`;
-    if (cfg && cfg.calendar_mode && cfg.calendar_mode !== "none") timeExtra += `本世界历法为「${cfg.calendar_mode}」，叙事中可用对应的月日/季节表达时间（如阴历「三月初九」）。`;
+    if (cfg && cfg.calendar_mode && cfg.calendar_mode !== "none") timeExtra += `本世界历法为「${cfg.calendar_mode}」，叙事中可用对应的月日表达时间（如阴历「三月初九」）。`;
     if (cfg && cfg.calendar_mode === "gregorian") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（真实公历，含星期）。常规推进只填 period；跨度（闭关/沉睡/远行）填 addMonths/addDays（如闭关三月填 addMonths:3）；跳到具体历史/未来日期填绝对 year/month/date（如昏迷苏醒到 2004-06-16 填 {year:2004,month:6,date:16}）。真实历史世界观不得编造与史实冲突的日期。`;
     if (cfg && cfg.calendar_mode === "lunar") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（农历）。跨度填 addMonths/addDays；绝对跳填写 year/month/date。`;
     if (cfg && cfg.calendar_mode === "custom_calendar") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（本世界自定义历法，月长见 custom_calendar 配置）。跨度与绝对跳转同上，按本世界月长计算。`;
-    if (cfg && cfg.season) timeExtra += `当前季节：${cfg.season}。`;
-    if (cfg && cfg.weather) timeExtra += `当前天气：${cfg.weather}。天气可随剧情变化，但不得无故改变季节。`;
+    if (cfg && cfg.weather) timeExtra += `当前天气：${cfg.weather}。天气可随剧情变化。`;
     if (cfg && cfg.clock_mode === "clock") timeExtra += `本世界使用具体时钟制。每次行动可将耗时分钟数填入 state_changes.current_date.elapsed_minutes（如 15=15 分钟），系统自动累加并换算日期、时段与时钟。典型耗时：短应答 5 分钟、勘察/聊天 15 分钟、远行 60 分钟、重大事件 120 分钟。`;
     if (tc.timeConfig.mode === "multiverse" && tc.timelines) {
         const names = Object.keys(tc.timelines).map(id => tc.timelines[id].name || id).join(" / ");
@@ -718,7 +717,6 @@ export function buildAuthoritativeTime(state, tc) {
             if (!cd) continue;
             const parts = [];
             if (line.era_label) parts.push(line.era_label);
-            if (line.season) parts.push(line.season);
             const dateStr = formatCalendarDate(cd, line.calendar_mode, line.custom_calendar);
             if (dateStr) parts.push(dateStr);
             const period = cd.period;
@@ -727,7 +725,7 @@ export function buildAuthoritativeTime(state, tc) {
             lines.push(`· ${line.name || id}${tag}：${parts.join(" · ")}`);
         }
     } else {
-        // 单界：formatWorldTime 已按当前配置拼好 纪元·季节·日期·时刻（含 continuous 的 relative_label）
+        // 单界：formatWorldTime 已按当前配置拼好 纪元·日期·时刻（含 continuous 的 relative_label）
         const main = formatWorldTime(state);
         if (main) lines.push(`· ${main}`);
         else if (cfg.mode === "continuous") {

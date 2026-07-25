@@ -15,7 +15,7 @@ function setWorld(schema, gameState) {
 
 test("S5-6 buildAuthoritativeTime：gregorian 含权威时间标题/纪元/年份/覆盖指令", () => {
     setWorld(
-        { time_config: { mode: "periods", calendar_mode: "gregorian", era_label: "大航海时代", season: "冬季", calendar_start: { year: 1620, month: 1, date: 1 } } },
+        { time_config: { mode: "periods", calendar_mode: "gregorian", era_label: "大航海时代", calendar_start: { year: 1620, month: 1, date: 1 } } },
         { current_date: { year: 1620, month: 3, date: 15, period: "morning", step: 1 } }
     );
     const out = buildAuthoritativeTime(S.gameState);
@@ -73,7 +73,7 @@ test("S5-6 buildAuthoritativeTime：continuous 模式用相对锚点", () => {
 
 test("S5-6 buildAuthorNote：每轮注入【当前权威时间】章节", () => {
     setWorld(
-        { time_config: { mode: "periods", calendar_mode: "gregorian", era_label: "大航海时代", season: "冬季", calendar_start: { year: 1620, month: 1, date: 1 } } },
+        { time_config: { mode: "periods", calendar_mode: "gregorian", era_label: "大航海时代", calendar_start: { year: 1620, month: 1, date: 1 } } },
         { current_date: { year: 1620, month: 3, date: 15, period: "morning", step: 1 } }
     );
     const note = buildAuthorNote();
