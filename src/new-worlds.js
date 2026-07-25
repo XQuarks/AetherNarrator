@@ -25,7 +25,7 @@ export function createCthulhuWorld() {
                 courage: "胆识", perception: "观察", patience: "定力", luck: "命运", will: "理智"
             },
             time_periods: { morning: "清晨", forenoon: "上午", afternoon: "午后", evening: "黄昏", night: "深夜" },
-            time_config: { era_label: "1920年代", calendar_mode: "gregorian", calendar_start: { year: 1926, month: 2, date: 2 }, clock_mode: "period", season: "深冬", show: true, deadlines: [] },
+            time_config: { era_label: "1920年代", calendar_mode: "gregorian", calendar_start: { month: 2, date: 2 }, clock_mode: "period", season: "深冬", show: true, deadlines: [] },
             game_over_conditions: ["is_alive === false", "sanity <= 0"]
         },
         initial_state: {
@@ -66,10 +66,10 @@ export function createCthulhuWorld() {
             completed_events: [],
             active_event: null,
             current_location: "波士顿 · 私人书房",
-            current_date: { year: 1926, month: 2, date: 2, period: "morning" },
+            current_date: { month: 2, date: 2, period: "morning" },
             goals: [
-                { goal_id: "examine_notes", name: "仔细研究安吉尔教授的笔记和浮雕", type: "完成事件", deadline: { year: 1926, month: 2, date: 2, period: "afternoon" }, visible: true },
-                { goal_id: "visit_wilcox", name: "拜访雕塑家威尔科克斯", type: "完成事件", deadline: { year: 1926, month: 2, date: 4, period: "night" }, visible: true }
+                { goal_id: "examine_notes", name: "仔细研究安吉尔教授的笔记和浮雕", type: "完成事件", deadline: { month: 2, date: 2, period: "afternoon" }, visible: true },
+                { goal_id: "visit_wilcox", name: "拜访雕塑家威尔科克斯", type: "完成事件", deadline: { month: 2, date: 4, period: "night" }, visible: true }
             ],
             status_effects: [],
             npc_activity: {

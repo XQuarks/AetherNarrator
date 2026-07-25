@@ -1696,6 +1696,16 @@
         .time-cfg-start-hint { font-size:11px; color:var(--text-muted); margin-top:4px; display:block; }
         .time-cfg-start-hint code { background:rgba(127,127,213,0.12); padding:0 4px; border-radius:4px; }
         .time-cfg-multiverse { grid-column:1 / -1; }
+        .time-cfg-warn {
+            margin-top: 6px;
+            padding: 6px 10px;
+            border-radius: 8px;
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.55);
+            color: #b45309;
+            font-size: 12px;
+            line-height: 1.5;
+        }
         .time-conflict-badge {
             margin-top: 10px;
             padding: 8px 12px;

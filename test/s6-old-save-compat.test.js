@@ -58,12 +58,14 @@ test("S6-2 后室预设 current_date 为原生 {step,period} 且规范化不崩"
     }
 });
 
-test("S6-2 克苏鲁预设为原生 dated 形状且规范化不崩", () => {
+test("S6-2 克苏鲁预设为原生 dated 形状（年份归纪元）且规范化不崩", () => {
     const w = createCthulhuWorld();
     const tc = w.schema.time_config;
     assert.equal(tc.calendar_mode, "gregorian");
+    // 方案 22：calendar_start 仅含月日，年份归 era_label「1920年代」
+    assert.deepEqual(tc.calendar_start, { month: 2, date: 2 });
     const r = normalizeCurrentDate(w.initial_state.current_date, tc);
-    assert.equal(r.year, 1926);
+    assert.equal(r.year, 1920); // 年从 era_label「1920年代」推导（deriveAnchorYear → 1920）
     assert.equal(r.month, 2);
     assert.equal(r.date, 2);
     // 开场白已去硬编码为占位符

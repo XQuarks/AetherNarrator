@@ -1,19 +1,20 @@
 // S5-2：存储层必带字段保底（normalizeTimeConfig 落点）。
-// 确保：gregorian/lunar 无起点 → 回退 day（不强制 1/1）；custom 无月历表 → 回退 day；
-// multiverse 无 timelines → 回退 single；active_timeline 非法 → 取第一条存在的线。
+// 方案 22（年份归纪元）：gregorian/lunar 无 calendar_start 不再回退 day 模式（纪元-only 世界合法）；
+// 仅 custom_calendar 无月历表 → 回退 day；multiverse 无 timelines → 回退 single；active_timeline 非法 → 取第一条。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeTimeConfig } from "../src/store.js";
 
-test("S5-2: gregorian 无 calendar_start → 回退 day 模式（不强制 1/1）", () => {
+test("S5-2: gregorian 无 calendar_start → 不回退 day，保持 gregorian（方案 22 年份归纪元）", () => {
     const cfg = normalizeTimeConfig({ calendar_mode: "gregorian" });
-    assert.equal(cfg.calendar_mode, "day");
+    assert.equal(cfg.calendar_mode, "gregorian");
     assert.equal(cfg.calendar_start, null);
 });
 
-test("S5-2: lunar 无 calendar_start → 回退 day 模式", () => {
+test("S5-2: lunar 无 calendar_start → 不回退 day，保持 lunar（方案 22 年份归纪元）", () => {
     const cfg = normalizeTimeConfig({ calendar_mode: "lunar" });
-    assert.equal(cfg.calendar_mode, "day");
+    assert.equal(cfg.calendar_mode, "lunar");
+    assert.equal(cfg.calendar_start, null);
 });
 
 test("S5-2: custom_calendar 无月历表 → 回退 day 模式", () => {

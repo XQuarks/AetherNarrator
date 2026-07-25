@@ -61,6 +61,34 @@ function embedViaWorker(text, isQuery) {
     });
 }
 
+// ★ P0 时间线向量并发：批量推理走 Worker（一次 forward pass 处理多条文本）
+function embedViaWorkerBatch(texts, isQuery) {
+    return new Promise((resolve, reject) => {
+        let w;
+        try { w = getEmbedWorker(); }
+        catch (e) { reject(e); return; }
+        const id = ++_embedReqId;
+        _embedPending.set(id, { resolve, reject });
+        try {
+            w.postMessage({ id, texts, isQuery });
+        } catch (e) {
+            _embedPending.delete(id);
+            reject(e);
+        }
+    });
+}
+
+// 把 transformers 的批量输出张量拆成「每条一个向量」的数组（与 worker 内 splitBatch 同形）。
+function splitBatchTensor(out) {
+    if (!out || !out.dims || out.dims.length < 2) return [Array.from(out.data)];
+    const batch = out.dims[0], dim = out.dims[1];
+    const vectors = [];
+    for (let i = 0; i < batch; i++) {
+        vectors.push(Array.from(out.data.subarray(i * dim, (i + 1) * dim)));
+    }
+    return vectors;
+}
+
 // 主动预热（init 时调用）：让 worker 后台加载模型，玩家首次语义检索即命中、不卡
 export function warmupEmbeddingWorker() {
     try {
@@ -168,14 +196,60 @@ export async function computeEmbedding(text, isQuery = false) {
     } catch (e) {
         console.warn("Worker 向量计算失败，回落主线程:", e && e.message);
     }
-    // 主线程回落（需 window.transformers）
-    if (typeof window.transformers === "undefined") throw new Error("transformers 不可用");
+    // 主线程回落（动态加载 transformers，避免首屏下载 880KB；与 embedding-worker 共用模型/维度）
+    if (typeof window.transformers === "undefined") {
+        try {
+            const mod = await import("../vendor/transformers/transformers.min.js");
+            const e = mod.env;
+            e.allowRemoteModels = false;                       // 禁止回退到远程下载
+            e.localModelPath = "models";                       // 相对文档根 → 项目根/models/
+            if (e.backends && e.backends.onnx && e.backends.onnx.wasm) {
+                e.backends.onnx.wasm.wasmPaths = "vendor/transformers/";
+            }
+            window.transformers = mod;
+        } catch (err) {
+            throw new Error("transformers 不可用（主线程回落加载失败）");
+        }
+    }
     if (!S.embeddingModel) {
         S.embeddingModel = await window.transformers.pipeline("feature-extraction", EMBED_MODEL);
     }
     const input = isQuery ? BGE_QUERY_PREFIX + text : text;
     const out = await S.embeddingModel(input, { pooling: "mean", normalize: true });
     return Array.from(out.data);
+}
+
+// ★ P0 时间线向量并发：批量向量计算——一次 forward pass 处理多条文本，
+// 远快于逐条串行 Worker 往返。embedFn 可注入（测试/替换推理后端）。
+export async function computeEmbeddingBatch(texts, isQuery = false, embedFn = null) {
+    if (!Array.isArray(texts) || !texts.length) return [];
+    if (embedFn) return embedFn(texts, isQuery); // 测试注入
+    try {
+        return await embedViaWorkerBatch(texts, isQuery);
+    } catch (e) {
+        console.warn("Worker 批量向量计算失败，回落主线程:", e && e.message);
+    }
+    // 主线程回落（动态加载 transformers，避免首屏下载 880KB；与 embedding-worker 共用模型/维度）
+    if (typeof window.transformers === "undefined") {
+        try {
+            const mod = await import("../vendor/transformers/transformers.min.js");
+            const e = mod.env;
+            e.allowRemoteModels = false;                       // 禁止回退到远程下载
+            e.localModelPath = "models";                       // 相对文档根 → 项目根/models/
+            if (e.backends && e.backends.onnx && e.backends.onnx.wasm) {
+                e.backends.onnx.wasm.wasmPaths = "vendor/transformers/";
+            }
+            window.transformers = mod;
+        } catch (err) {
+            throw new Error("transformers 不可用（主线程批量回落加载失败）");
+        }
+    }
+    if (!S.embeddingModel) {
+        S.embeddingModel = await window.transformers.pipeline("feature-extraction", EMBED_MODEL);
+    }
+    const inputs = isQuery ? texts.map(t => BGE_QUERY_PREFIX + t) : texts;
+    const out = await S.embeddingModel(inputs, { pooling: "mean", normalize: true });
+    return splitBatchTensor(out);
 }
 
 export async function ensureLoreEmbeddings(kb, onProgress) {
@@ -309,13 +383,49 @@ export async function embedTimelineSegment(t, embedFn = computeEmbedding) {
     return p;
 }
 
+// ★ P0 时间线向量并发：单向门禁（只保留 order ≤ 当前故事进度的已解锁阶段）。
+// 抽成独立纯函数，供 selectTimelineSlice 与批量向量化共用，避免门禁逻辑重复。
+export function unlockedTimelineSegments(snippet) {
+    const tl = snippet.timeline;
+    if (!Array.isArray(tl) || !tl.length) return [];
+    const orderOf = (t) => (typeof t.order === "number" ? t.order : 1);
+    const progress = (S.gameState && typeof S.gameState.story_progress === "number") ? S.gameState.story_progress : 1;
+    return tl.filter((t) => orderOf(t) <= progress);
+}
+
+// ★ P0 时间线向量并发：把一批时间线阶段合并成一次批量推理（一次 forward pass），
+// 远快于逐段串行 Worker 往返。段向量缓存 + 逐段回落保证并发安全与降级。
+// batchEmbedFn 默认走真实 computeEmbeddingBatch（Worker 批量），测试可注入 mock。
+export async function embedTimelineSegmentsBatch(segments, batchEmbedFn = computeEmbeddingBatch) {
+    const pending = segments.filter(s => !(Array.isArray(s.embedding) && s.embedding.length && s.embedDim === EMBED_DIM && s.embedModel === EMBED_MODEL));
+    if (!pending.length) return; // 全部已缓存 → 直接跳过（无 Worker 往返）
+    const texts = pending.map(textOfTimeline);
+    try {
+        const vectors = await batchEmbedFn(texts, false); // 文档句不加查询前缀
+        if (Array.isArray(vectors)) {
+            pending.forEach((s, i) => {
+                if (vectors[i] && Array.isArray(vectors[i]) && vectors[i].length) {
+                    s.embedding = vectors[i];
+                    s.embedDim = EMBED_DIM;
+                    s.embedModel = EMBED_MODEL;
+                }
+            });
+        }
+    } catch (e) {
+        // 整批失败 → 逐段回落（沿用现有 selectTimelineSlice 内的 embedTimelineSegment 单条路径）
+        console.warn("时间线批量向量失败，逐段回落:", e && e.message);
+        for (const s of pending) {
+            try { await embedTimelineSegment(s); } catch (_) { /* 单段失败不阻塞整体 */ }
+        }
+    }
+}
+
 export async function selectTimelineSlice(snippet, input, qVec) {
     const tl = snippet.timeline;
     if (!Array.isArray(tl) || !tl.length) return snippet;
     const orderOf = (t) => (typeof t.order === "number" ? t.order : 1);
     // ① 单向门禁：只保留 order ≤ 当前故事进度的阶段（未发生的未来一律不注入，避免剧透）
-    const progress = (S.gameState && typeof S.gameState.story_progress === "number") ? S.gameState.story_progress : 1;
-    const unlocked = tl.filter((t) => orderOf(t) <= progress);
+    const unlocked = unlockedTimelineSegments(snippet);
     if (!unlocked.length) return snippet; // 连最早阶段都未解锁（异常）→ 不注入 timeline，保留原 content
     // ② 关键词匹配（零成本，始终可用）——仅在已解锁片段内
     const terms = segmentChinese(input || "");
@@ -368,7 +478,8 @@ export async function retrieve(input) {
     }
 
     // ★ P1.2.3: 向量模型未加载时给出一次性可见提示（而非静默降级），便于排查
-    if (typeof window.transformers === "undefined" && !S.vectorUnavailableWarned) {
+    // ★ P0 修正：window.transformers 现仅在主线程回落时定义；Worker 可用即视为向量可用，避免误报
+    if (typeof Worker === "undefined" && typeof window.transformers === "undefined" && !S.vectorUnavailableWarned) {
         S.vectorUnavailableWarned = true;
         showToast("向量模型未加载，已降级为关键词检索（检查网络或 transformers.js 是否加载）", "warn");
     }
@@ -511,13 +622,26 @@ export async function retrieve(input) {
     }
     // ★ 时间线切片（乙·语义版）：对命中且带 timeline 的动态召回条目，按对话语义/关键词筛最相关时间段注入，
     // 避免跨阶段信息混淆（如角色第一章在a城、第三章在b城）。无匹配时保留完整 timeline，由 AI 自判。
+    // ★ P0 时间线向量并发：先把本轮所有命中条目「已解锁」阶段的向量合并成一次批量推理（一次 forward pass），
+    //   再并发做各条时间线切片筛选（段向量已缓存，纯 CPU、无 Worker 往返）。比逐条串行快一个数量级。
+    const allUnlockedSegs = [];
+    for (const s of out) {
+        if (String(s.id).startsWith("behavior_")) continue;
+        if (s.timeline && s.timeline.length) {
+            for (const t of unlockedTimelineSegments(s)) allUnlockedSegs.push(t);
+        }
+    }
+    if (allUnlockedSegs.length) await embedTimelineSegmentsBatch(allUnlockedSegs);
+    const sliceTasks = [];
     for (let i = 0; i < out.length; i++) {
         const s = out[i];
         if (String(s.id).startsWith("behavior_")) continue;
         if (s.timeline && s.timeline.length) {
-            out[i] = await selectTimelineSlice(s, input, qVec);
+            const idx = i;
+            sliceTasks.push(selectTimelineSlice(s, input, qVec).then(res => { out[idx] = res; }));
         }
     }
+    if (sliceTasks.length) await Promise.all(sliceTasks);
 
     return out;
 }
@@ -533,7 +657,7 @@ export async function retrieveBehaviorRecords(input, topK = 3, qVec = null) {
     let queryVec = qVec;
     if (!queryVec) {
         try {
-            if (typeof window.transformers !== "undefined" && terms.length > 0) {
+            if ((typeof window.transformers !== "undefined" || typeof Worker !== "undefined") && terms.length > 0) {
                 queryVec = await computeEmbedding(input, true); // 查询句加 bge 检索前缀
             }
         } catch (e) { /* 向量不可用，降级关键词 */ }

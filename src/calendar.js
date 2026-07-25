@@ -27,6 +27,77 @@ export function daysInMonth(y, m) {
     return lens[mm];
 }
 
+// 方案 22（年份归纪元）：从纪元标签解析锚点年 / 年代起点。
+//   "1920年代" -> 1920（年代起点）; "1926"/"1926年" -> 1926; 无可解析年份 -> null
+export function deriveAnchorYear(eraLabel) {
+    if (!eraLabel || typeof eraLabel !== "string") return null;
+    const s = eraLabel.trim();
+    const dec = s.match(/(?:^|\D)(\d{3,4})\s*年代/);
+    if (dec) return Math.floor(parseInt(dec[1], 10) / 10) * 10;
+    const yr = s.match(/(?:^|\D)(\d{3,4})\s*年/);
+    if (yr) return parseInt(yr[1], 10);
+    const y2 = s.match(/(\d{3,4})/);
+    if (y2) return parseInt(y2[1], 10);
+    return null;
+}
+
+// 方案 22（日期校验层）：校验起始日期合法性，返回 { valid, warnings, corrected }。
+// - 公历：闰年 2月29 自动纠正（平年→28）；月份/日期越界 clamp；年无关下的 2月29 只警告不纠正。
+// - 农历/自定义：月份在表内、日期不超当月天数（clamp）；闰月正确性靠 AI 保证，不在此精确算。
+export function validateStartDate(cs, mode, eraLabel) {
+    const warnings = [];
+    if (!cs || typeof cs !== "object") return { valid: true, warnings, corrected: cs || null };
+    const out = {};
+    let valid = true;
+    const anchorYear = deriveAnchorYear(eraLabel);
+    if (mode === "gregorian") {
+        if (cs.year != null) {
+            const y = cs.year | 0;
+            out.year = y;
+            if (!Number.isFinite(cs.year) || y < 1 || y > 9999) { warnings.push(`年份 ${cs.year} 超出范围`); valid = false; }
+        }
+        let m = cs.month != null ? cs.month | 0 : null;
+        if (m != null) {
+            if (m < 1 || m > 12) { m = Math.min(12, Math.max(1, m)); warnings.push(`月份已夹紧到 ${m}`); valid = false; }
+            out.month = m;
+        }
+        let d = cs.date != null ? cs.date | 0 : null;
+        if (d != null) {
+            const max = daysInMonth(out.year != null ? out.year : (anchorYear || 1), m || 1);
+            if (m === 2 && d === 29) {
+                if (out.year != null && !isLeapYear(out.year)) { d = 28; warnings.push(`${out.year}年非闰年，2月29日已纠正为2月28日`); valid = false; }
+                else if (out.year == null) { warnings.push(`2月29日需闰年，当前纪元未指定具体年份，已保留2月29日（请确认对应年份为闰年）`); }
+            } else if (d > max) { d = max; warnings.push(`日期已夹紧到当月最大 ${max} 日`); valid = false; }
+            else if (d < 1) { d = 1; warnings.push(`日期已修正为 1`); valid = false; }
+            out.date = d;
+        }
+    } else if (mode === "lunar" || mode === "custom_calendar") {
+        const tbl = (mode === "custom_calendar" && cs.custom_calendar && Array.isArray(cs.custom_calendar.months)) ? cs.custom_calendar : DEFAULT_LUNAR;
+        const months = (tbl && tbl.months) || DEFAULT_LUNAR.months;
+        if (cs.year != null) out.year = cs.year | 0;
+        let m = cs.month != null ? cs.month | 0 : null;
+        if (m != null) {
+            if (m < 1 || m > months.length) { m = Math.min(months.length, Math.max(1, m)); warnings.push(`农历月份已夹紧到有效范围`); valid = false; }
+            out.month = m;
+        }
+        let d = cs.date != null ? cs.date | 0 : null;
+        if (d != null) {
+            if (m != null) {
+                const max = months[m - 1] ? months[m - 1].days : 30;
+                if (d > max) { d = max; warnings.push(`该农历月最多 ${max} 天，已夹紧`); valid = false; }
+                else if (d < 1) { d = 1; warnings.push(`日期已修正为 1`); valid = false; }
+                out.date = d;
+            } else {
+                out.date = Math.max(1, d); // 无月份时仅记录日期
+            }
+        }
+        if (mode === "custom_calendar" && cs.custom_calendar) out.custom_calendar = cs.custom_calendar;
+    } else {
+        return { valid: true, warnings, corrected: null };
+    }
+    return { valid, warnings, corrected: out };
+}
+
 // 默认农历月历（12 个月，大小月交替 30/29，约 354 天/年；进阶可换 custom_calendar）
 export const DEFAULT_LUNAR = {
     label: "农历",
@@ -123,22 +194,34 @@ export function gregorianWeekday(y, m, d) {
     return dt.getUTCDay(); // 0=周日
 }
 
-export function formatCalendarDate(cd, mode, custom = null) {
+export function formatCalendarDate(cd, mode, custom = null, opts = {}) {
+    const showYear = opts.showYear !== false; // 默认显示年；年无关模式（calendar_start 无 year）传 false
     if (mode === "gregorian") {
         const y = cd.year, m = cd.month, d = cd.date;
-        const wd = WEEKDAY_CN[gregorianWeekday(y, m, d)];
-        return `${y}年${m}月${d}日 · ${wd}`;
+        const parts = [];
+        if (showYear && y != null) parts.push(`${y}年`);
+        if (m != null) parts.push(`${m}月`);
+        if (d != null) parts.push(`${d}日`);
+        if (parts.length === 0) return "";
+        const wd = (showYear && y != null && m != null && d != null) ? WEEKDAY_CN[gregorianWeekday(y, m, d)] : "";
+        return parts.join("") + (wd ? ` · ${wd}` : "");
     }
     if (mode === "lunar") {
         const tbl = (custom && custom.months) ? custom : DEFAULT_LUNAR;
-        const mName = (tbl.months[((cd.month - 1) % tbl.months.length + tbl.months.length) % tbl.months.length] || {}).name || `第${cd.month}月`;
-        return `${tbl.label || "农历"}${mName}${cnDay(cd.date)}`;
+        const mName = (cd.month != null)
+            ? ((tbl.months[((cd.month - 1) % tbl.months.length + tbl.months.length) % tbl.months.length] || {}).name || `第${cd.month}月`)
+            : "";
+        const dPart = (cd.date != null) ? cnDay(cd.date) : "";
+        return [tbl.label || "农历", mName, dPart].filter(Boolean).join("");
     }
     if (mode === "custom_calendar") {
         const tbl = (custom && custom.months) ? custom : DEFAULT_LUNAR;
-        const mName = (tbl.months[((cd.month - 1) % tbl.months.length + tbl.months.length) % tbl.months.length] || {}).name || `月${cd.month}`;
+        const mName = (cd.month != null)
+            ? ((tbl.months[((cd.month - 1) % tbl.months.length + tbl.months.length) % tbl.months.length] || {}).name || `月${cd.month}`)
+            : "";
+        const dPart = (cd.date != null) ? `${cd.date}日` : "";
         const pre = tbl.label ? tbl.label + " " : "星历";
-        return `${pre}${mName}${cd.date}日`;
+        return [pre + mName, dPart].filter(Boolean).join("");
     }
     return "";
 }
@@ -181,10 +264,14 @@ export function ensureCurrentDate(currentDate, timeConfig = {}) {
     const mode = timeConfig.calendar_mode;
     const cd = { ...(currentDate && typeof currentDate === "object" ? currentDate : {}) };
     if (mode === "gregorian" || mode === "lunar" || mode === "custom_calendar") {
-        if (cd.year == null && cd.month == null && cd.date == null) {
-            const start = timeConfig.calendar_start || { year: 1, month: 1, date: 1 };
-            cd.year = start.year; cd.month = start.month; cd.date = start.date;
+        const start = timeConfig.calendar_start || null;
+        // 方案 22：各字段独立补齐；年份优先 current_date → calendar_start → 纪元锚点 → 1
+        if (cd.year == null) {
+            if (start && Number.isFinite(start.year)) cd.year = start.year;
+            else cd.year = deriveAnchorYear(timeConfig.era_label) ?? 1;
         }
+        if (cd.month == null) cd.month = (start && Number.isFinite(start.month)) ? start.month : 1;
+        if (cd.date == null) cd.date = (start && Number.isFinite(start.date)) ? start.date : 1;
         if (cd.step == null) cd.step = 1;
         if (!cd.period) cd.period = "morning";
     } else {
@@ -205,9 +292,10 @@ export function backfillCurrentDate(oldDate, timeConfig) {
     const day = Number.isFinite(oldDate && oldDate.day) ? oldDate.day : 1;
     const mode = timeConfig && timeConfig.calendar_mode;
     if (mode === "gregorian" || mode === "lunar" || mode === "custom_calendar") {
-        const start = (timeConfig && timeConfig.calendar_start) || { year: 1, month: 1, date: 1 };
+        const start = (timeConfig && timeConfig.calendar_start) || {};
+        const startYear = Number.isFinite(start.year) ? start.year : (deriveAnchorYear(timeConfig && timeConfig.era_label) ?? 1);
         const adv = addCalendar(
-            { year: start.year, month: start.month, date: start.date },
+            { year: startYear, month: start.month || 1, date: start.date || 1 },
             { days: day - 1 },
             mode,
             timeConfig && timeConfig.custom_calendar

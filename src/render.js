@@ -937,6 +937,39 @@ export function renderLog(reset) {
     log.scrollTop = log.scrollHeight;
 }
 
+// ★ 实时流式：把模型正在生成的叙事（部分文本）直接写进指定日志条目的 .narrative，
+// 让玩家在模型边生成边看到文字（首字延迟从「整段生成完」降到约 1~2 秒）。
+export function updateLiveNarrative(index, text) {
+    const log = document.getElementById("gameLog");
+    if (!log) return;
+    const entries = log.querySelectorAll(".log-entry");
+    const entry = entries[index];
+    if (!entry) return;
+    const el = entry.querySelector(".narrative");
+    if (!el) return;
+    el.textContent = text || "";
+    log.scrollTop = log.scrollHeight;
+}
+
+// ★ 实时流式：移除某条已渲染的日志条目（DOM + 数组 + 渲染计数同步）
+export function removeLogEntry(index) {
+    const log = document.getElementById("gameLog");
+    if (log) {
+        const entries = log.querySelectorAll(".log-entry");
+        const el = entries[index];
+        if (el) el.remove();
+    }
+    if (S.conversationHistory.length > index) S.conversationHistory.splice(index, 1);
+    if (S.renderedEntryCount > index) S.renderedEntryCount = index;
+}
+
+// ★ 实时流式：用最新数据重渲染指定条目（提交为格式化叙事 + 氛围提示）。
+// 先移除旧 DOM，再让 renderLog 从该下标重新追加（该下标之后通常无其它条目）。
+export function replaceEntryDOM(index) {
+    removeLogEntry(index);
+    renderLog();
+}
+
 export function startTypewriter(index) {
     stopTypewriter();
     const log = document.getElementById("gameLog");
@@ -971,12 +1004,12 @@ export function startTypewriter(index) {
             i++;
             log.scrollTop = log.scrollHeight;
 
-            // 标点处停顿，更接近阅读节奏
-            let delay = 28;
-            if ("。！？…".includes(ch)) delay = 170;
-            else if ("，、；：".includes(ch)) delay = 85;
-            else if (ch === "\n") delay = 110;
-            else if (ch === "「" || ch === "」" || ch === '"' ) delay = 50;
+            // 标点处停顿，更接近阅读节奏（P0 提速：整体更紧凑，避免整段打完再叠加十几秒）
+            let delay = 12;
+            if ("。！？…".includes(ch)) delay = 70;
+            else if ("，、；：".includes(ch)) delay = 35;
+            else if (ch === "\n") delay = 45;
+            else if (ch === "「" || ch === "」" || ch === '"' ) delay = 25;
             S.typingTimer = setTimeout(typeNext, delay);
         }
         typeNext();

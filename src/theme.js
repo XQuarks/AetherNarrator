@@ -23,7 +23,10 @@ export function formatDateOnly(cd, timeConfig) {
     if (!cd) return "";
     const mode = (timeConfig && timeConfig.calendar_mode) || "day";
     if (DATED_MODES.includes(mode)) {
-        return formatCalendarDate({ year: cd.year, month: cd.month, date: cd.date }, mode, timeConfig && timeConfig.custom_calendar);
+        const cs = timeConfig && timeConfig.calendar_start;
+        if (!cs) return ""; // 方案 22：无起始日期（calendar_start 为 null）→ 仅显示纪元，日期部分省略
+        const showYear = Number.isFinite(cs.year);
+        return formatCalendarDate({ year: cd.year, month: cd.month, date: cd.date }, mode, timeConfig && timeConfig.custom_calendar, { showYear });
     }
     if (mode === "none") return cd.relative_label || (cd.period ? getPeriodLabel(cd.period) : "");
     return `第${(cd.day != null ? cd.day : stepOf(cd))}天`;
@@ -43,8 +46,10 @@ export function formatDeadlineLabel(deadline, timeConfig) {
     const mode = (timeConfig && timeConfig.calendar_mode) || "day";
     const periodPart = deadline.period ? getPeriodLabel(deadline.period) : "";
     if (DATED_MODES.includes(mode)) {
+        const cs = timeConfig && timeConfig.calendar_start;
+        const showYear = !!(cs && Number.isFinite(cs.year));
         const cd = { year: deadline.year, month: deadline.month, date: deadline.date };
-        return [formatCalendarDate(cd, mode, timeConfig && timeConfig.custom_calendar), periodPart].filter(Boolean).join(" · ");
+        return [formatCalendarDate(cd, mode, timeConfig && timeConfig.custom_calendar, { showYear }), periodPart].filter(Boolean).join(" · ");
     }
     if (mode === "none") return periodPart || "无期限";
     return [`第${deadline.day || 0}天`, periodPart].filter(Boolean).join(" · ");

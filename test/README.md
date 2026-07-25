@@ -1,11 +1,11 @@
 # AetherNarrator 测试套件说明（AI 维护者指南）
 
 > 本文件供接手本项目的 AI / 维护者快速理解 `test/` 下的测试脚本：**每个测试守护什么、依赖什么、如何运行**。人类读者亦可参考。
-> 维护结论：35 个测试文件全部有效，无孤儿模块、无失效测试、无空测试。请勿凭"看起来重复"误删（见第六节互补说明）。
+> 维护结论：38 个测试文件全部有效，无孤儿模块、无失效测试、无空测试。请勿凭"看起来重复"误删（见第六节互补说明）。
 
 ## 一、总览
 
-- 测试位置：`test/*.test.js`，共 **35 个文件、约 240 个用例**（含 `describe` 嵌套子测试）。
+- 测试位置：`test/*.test.js`，共 **38 个文件、约 284 个用例**（含 `describe` 嵌套子测试）。
 - 测试框架：Node 内置 `node:test`（无需额外安装）。
 - 收录机制：`package.json` 的 `test` 脚本为 `node --test test/*.test.js`，**只要文件命名为 `<name>.test.js` 就会自动被收录**，新增测试无需改配置。
 - 隔离性：Node 测试运行器默认**每个测试文件在独立子进程中执行**，文件间全局状态（`src/store.js` 的 `S` 等）不串扰，可放心在单文件内 setup / teardown 全局状态。
@@ -13,7 +13,7 @@
 ## 二、如何运行
 
 ```bash
-npm test                 # 跑全部 35 个测试文件
+npm test                 # 跑全部 38 个测试文件
 npm run verify           # 全套：语法 → 模块 → 加载 → 测试 → 浏览器冒烟
 npm run check:syntax     # 仅语法检查（tools/syntax_check.cjs）
 npm run check:modules    # 模块引用校验（tools/verify-modules.cjs）
@@ -35,12 +35,12 @@ npm run check:load       # 浏览器加载桩校验（tools/load-check.mjs）
 
 | 分类 | 测试文件 | 一句话 |
 |---|---|---|
-| A. 时间系统 | `calendar` · `time-engine` · `triggers` · `multiverse` · `s5-start-date` · `s5-required-fields` · `s5-authoritative-time` · `s5-conflict-lint` · `s5-critic-time` · `s5-opening-tokens` · `s6-old-save-compat` | 历法推进、时间倒流、事件触发、多世界时间线、开局日期/占位符/冲突检测、旧档兼容 |
+| A. 时间系统 | `calendar` · `time-engine` · `triggers` · `multiverse` · `s5-start-date` · `s5-required-fields` · `s5-authoritative-time` · `s5-conflict-lint` · `s5-critic-time` · `s5-opening-tokens` · `s6-old-save-compat` · `s7-flexible-start` | 历法推进、时间倒流、事件触发、多世界时间线、开局日期/占位符/冲突检测、旧档兼容、年份归纪元+柔性起始日期 |
 | B. 知识库 / 世界观 / 批评 | `kg-graph` · `critic` · `lore-revision` · `lore-confirm` · `worldview-guard` · `worldview-dsl` · `promotion` · `memory-transfer` | 知识图谱、矛盾修订、晋升确认、世界观禁令、规则 DSL、记忆包迁移 |
 | C. 开场白专项 | `s5-opening-fix` · `s5-opening-optimize` | 时间冲突一键修复（regenerate/toPlaceholders）、剧情向优化 |
 | D. UI / 交互 / 选项 | `action-wiring` · `atmosphere` · `cognitive-state` · `fallback-choices` · `orphan-save` | 按钮接线校验、氛围净化、认知状态、保底选项安全、孤儿存档 |
-| E. 世界生成 / 提示词 / 模拟 | `prompt` · `world-tags-ai` · `simulation` | 开局 prompt 构造、AI 标签清洗、模拟事件结构化 |
-| F. Embedding / RAG | `ann` · `behavior-embeddings-concurrent` · `query-vector-dedup` · `timeline-embedding-cache` · `memory-isolation` | ANN 索引、行为向量并发补算、查询向量复用、时间线缓存、记忆隔离 |
+| E. 世界生成 / 提示词 / 模拟 | `prompt` · `world-tags-ai` · `simulation` · `s-stream-narrative` | 开局 prompt 构造、AI 标签清洗、模拟事件结构化、流式叙事抽取 |
+| F. Embedding / RAG | `ann` · `behavior-embeddings-concurrent` · `query-vector-dedup` · `timeline-embedding-cache` · `memory-isolation` · `timeline-vector-batch` | ANN 索引、行为向量并发补算、查询向量复用、时间线缓存、记忆隔离、时间线批量向量与并发切片 |
 | G. 基础设施 / 回合 | `reliability` | 回合锁、会话上下文、损坏配置回退、deadline、休息事件 |
 
 ## 五、测试详细清单
@@ -54,12 +54,13 @@ npm run check:load       # 浏览器加载桩校验（tools/load-check.mjs）
 | `triggers.test.js` | `triggers.js`: `normalizeTriggeredEvents/getTimelineTriggered/evalPolicy/recordTrigger/resetTriggers/createBranch` | 9 | 纯函数 | 事件不重触发、可重复冷却、分支隔离、重置回放 |
 | `multiverse.test.js` | `store.js`: `S/normalizeTimeConfig`；`theme.js`: `getTimeConfig/ensureTimelineState`；`time-engine.js`；`new-worlds.js`: `createDualWorld` | 5 | store 全局态 | 多世界时间线独立推进、切换不丢进度、非多世界 no-op |
 | `s5-start-date.test.js` | `calendar.js`: `normalizeCurrentDate` | 5 | 纯函数 | UI 起始日期经 `calendar_start` 正确驱动开局 `current_date` |
-| `s5-required-fields.test.js` | `store.js`: `normalizeTimeConfig` | 9 | 纯函数 | 时间配置缺字段回退（day / multiverse→single / active 取第一条） |
+| `s5-required-fields.test.js` | `store.js`: `normalizeTimeConfig` | 9 | 纯函数 | 时间配置缺字段保底：custom 无月历表→day；multiverse 无 timelines→single；active_timeline 非法→取第一条；**gregorian/lunar 无 calendar_start 不再回退 day，保持 dated 模式**（年份归纪元后纪元-only 世界合法） |
 | `s5-authoritative-time.test.js` | `prompt.js`: `buildAuthoritativeTime/buildAuthorNote` | 5 | 设全局 `S` | 权威时间章节（gregorian/multiverse/none/continuous）每轮注入 |
-| `s5-conflict-lint.test.js` | `utils.js`: `detectTimeConflict/formatConflictMessage` | 8 | 纯函数 | 开场白时间冲突检测（年份/季节/现代措辞/占位符豁免） |
+| `s5-conflict-lint.test.js` | `utils.js`: `detectTimeConflict/formatConflictMessage` | 11 | 纯函数 | 开场白时间冲突检测：改以 `era_label` 为锚点、同 decade 容错、克苏鲁式「1920年代」不误报、年份/季节/现代措辞/占位符豁免 |
 | `s5-critic-time.test.js` | `utils.js`: `buildCriticTimeContext`；`llm.js`: `callWorldCriticLLM` | 5 | DOM stub + mock fetch | Critic 注入「权威时间锚点 + 冲突线索 + 第7条审查重点」 |
 | `s5-opening-tokens.test.js` | `utils.js`: `resolveOpeningTokens` | 9 | 纯函数 | `{era_label}/{season}/{calendar_date}` 等占位符按历法解析、非破坏性保留 |
-| `s6-old-save-compat.test.js` | `calendar.js`: `normalizeCurrentDate/backfillCurrentDate/ensureCurrentDate`；`new-worlds.js`: 三个预设 | 9 | 纯函数 + 预设工厂 | 旧 `{day}` 存档回推/规范化不崩、新档存读一致 |
+| `s6-old-save-compat.test.js` | `calendar.js`: `normalizeCurrentDate/backfillCurrentDate/ensureCurrentDate`；`new-worlds.js`: 三个预设 | 9 | 纯函数 + 预设工厂 | 旧 `{day}` 存档回推/规范化不崩、新档存读一致；克苏鲁预设已改 `calendar_start` 仅 `{month,date}`、年从 `era_label「1920年代」`推导为 1920 |
+| `s7-flexible-start.test.js` | `calendar.js`: `deriveAnchorYear/validateStartDate/formatCalendarDate/normalizeCurrentDate/backfillCurrentDate`；`store.js`: `normalizeTimeConfig`；`utils.js`: `detectTimeConflict`；`theme.js`: `formatDateOnly/formatDeadlineLabel` | 26 | 纯函数 | 年份归纪元+柔性起始日期：anchor 推导（年代/硬年/无年）、克苏鲁式不误报、各粒度显示（年无关只月日/只月/全空）、日期校验（闰年/越界自动纠正）、无 year 截止、旧档硬年兼容 |
 
 ### B. 知识库 / 世界观 / 批评（Lore, Worldview, Critic）
 
@@ -98,6 +99,7 @@ npm run check:load       # 浏览器加载桩校验（tools/load-check.mjs）
 | `prompt.test.js` | `prompt.js`: `buildWorldGenerationPrompt` | 3 | 纯函数 | 导入原文时注入【原文开头】段 + 第二人称改写，无原文走兜底 |
 | `world-tags-ai.test.js` | `prompt.js`: `buildWorldGenerationPrompt`；`utils.js`: `sanitizeWorldConfig/pickWorldTags/analyzeWorldTags`；`llm.js`: `mockGenerateWorld`；`new-worlds.js` | 7 | DOM stub（mock 模式） | tags 自由生成、清洗去重、优先 AI 标签、不与 type 徽章重复 |
 | `simulation.test.js` | `simulation.js`: `applySimulationChanges/buildWorldSummary/normalizeSimulationState` | 3 | 纯函数 | 旧字符串事件/NPC 迁移为结构化状态、完成去重、摘要生成 |
+| `s-stream-narrative.test.js` | `llm.js`: `extractPartialNarrative` | 6 | 纯函数 | 流式叙事中间态抽取：未出现/非字符串返回 null、部分文本（无收尾引号）、完整还原、转义引号/换行、字段后置仍可抽 |
 
 ### F. Embedding / RAG（向量与检索，**全部 mock**）
 
@@ -108,6 +110,7 @@ npm run check:load       # 浏览器加载桩校验（tools/load-check.mjs）
 | `query-vector-dedup.test.js` | `rag.js`: `embeddingRetrieve/retrieveBehaviorRecords/EMBED_DIM` | 4 | `window/Worker` 桩 + mock 向量 | 「传入 qVec 复用不重算」契约，无模型时降级关键词 |
 | `timeline-embedding-cache.test.js` | `rag.js`: `embedTimelineSegment/EMBED_MODEL/EMBED_DIM` | 4 | mockEmbed（直接返回数组） | 同段只算一次 + 并发去重 + 模型变更重算 |
 | `memory-isolation.test.js` | `rag.js`: `addBehaviorRecords/ensureLoreEmbeddings/retrieve`；`prompt.js`: `rebuildSummaryFromHistory` | 9 | `window.transformers={}` + mock `S.embeddingModel` | 行为记忆运行态与世界模板隔离、检索/召回/字符预算 |
+| `timeline-vector-batch.test.js` | `rag.js`: `embedTimelineSegmentsBatch/unlockedTimelineSegments/selectTimelineSlice/retrieve`；`store.js`: `S` | 8 | mock 向量 + Worker 桩 | 时间线分段按进度解锁、批量一次推理+段上缓存、失败逐段回落、语义/关键词切片、并发端到端不崩 |
 
 ### G. 基础设施 / 回合（Reliability）
 

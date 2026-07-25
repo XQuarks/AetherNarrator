@@ -5,7 +5,7 @@ import { S } from "./store.js";
 import { DEFAULT_PERIOD_LABELS, getActiveConditionTags, normalizeTimeConfig } from "./store.js";
 import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, tryRepairJSON, runPool, chunkText, mergeLoreSnippets, deepClone, buildCriticTimeContext, detectTimeConflict, formatConflictMessage } from "./utils.js";
 import { getNextPeriod, getTemperature, getTimeConfig } from "./theme.js";
-import { advanceCalendarTime } from "./calendar.js";
+import { advanceCalendarTime, formatCalendarDate } from "./calendar.js";
 import { getWorldLoreKB, summarizeFactsFromChanges } from "./rag.js";
 import { buildSystemPrompt, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, getPositionedLore } from "./prompt.js";
 import { getProvider, readApiInputs, getChunkConcurrency } from "./providers.js";
@@ -373,7 +373,48 @@ export function mockGenerateWorld(name, type, desc, hero, ipName) {
     };
 }
 
-export async function callLLM(input, retrieved) {
+// ★ 实时流式：从「仍在生成中的 JSON」增量抽取 narrative 字段的当前文本。
+// 一旦流到 narrative 值的开引号后，就持续吐出已收到的字符串内容（含转义处理），
+// 直到遇到收尾引号——此时返回完整叙事；未遇到收尾引号则返回"到目前为止"的部分叙事。
+// 无法定位 narrative 键时返回 null（调用方据此不更新实时区）。
+export function extractPartialNarrative(raw) {
+    if (!raw || typeof raw !== "string") return null;
+    const keyIdx = raw.indexOf('"narrative"');
+    if (keyIdx < 0) return null;
+    const afterKey = raw.indexOf(":", keyIdx + 10);
+    if (afterKey < 0) return null;
+    let i = afterKey + 1;
+    while (i < raw.length && /\s/.test(raw[i])) i++;
+    if (raw[i] !== '"') return null; // 值不是字符串（如 null）或尚未开始 → 等待
+    i++;
+    let out = "";
+    let escaped = false;
+    while (i < raw.length) {
+        const c = raw[i];
+        if (escaped) {
+            // 解码常见转义，使实时预览与最终文本一致（不再显示字面 \" \n）
+            if (c === "n") out += "\n";
+            else if (c === "t") out += "\t";
+            else if (c === "r") out += "\r";
+            else if (c === "b") out += "\b";
+            else if (c === "f") out += "\f";
+            else if (c === "u") {
+                const hex = raw.substr(i + 1, 4);
+                if (/^[0-9a-fA-F]{4}$/.test(hex)) { out += String.fromCharCode(parseInt(hex, 16)); i += 4; }
+                else out += c;
+            } else out += c; // \" → "、\\ → \、\/ → / 等
+            escaped = false;
+            i++;
+            continue;
+        }
+        if (c === "\\") { escaped = true; i++; continue; }
+        if (c === '"') return out; // 收尾引号 → 完整叙事已拿到
+        out += c; i++;
+    }
+    return out; // 未收尾 → 部分叙事（持续更新）
+}
+
+export async function callLLM(input, retrieved, opts = {}) {
     const sessionEpoch = S.currentSession.epoch;       // ★ P0: 捕获调用时刻的会话标识
     const sessionWorldId = S.currentSession.worldId;
     const mock = document.getElementById("mockMode").checked;
@@ -414,7 +455,7 @@ export async function callLLM(input, retrieved) {
 
         try {
             parsed = useStream
-                ? await callLLMStreaming(url, apiKey, model, messages)
+                ? await callLLMStreaming(url, apiKey, model, messages, opts.onPartial)
                 : await callLLMNonStreaming(url, apiKey, model, messages);
         } catch (streamErr) {
             // 流式失败（如 CORS 代理不支持）才自动降级为非流式；
@@ -477,7 +518,7 @@ export async function callLLMNonStreaming(url, apiKey, model, messages) {
     }
 }
 
-export async function callLLMStreaming(url, apiKey, model, messages) {
+export async function callLLMStreaming(url, apiKey, model, messages, onPartial) {
     const controller = new AbortController();
     S.currentAbortController = controller; // ★ P0: 暴露给导航 abort
     // ★ P1.2.4: 改为"流式空闲超时"——仅在 30s 内无任何新 chunk 才 abort；而非收到响应头即清（旧 60s 头超时会在长生成时误杀）
@@ -530,6 +571,7 @@ export async function callLLMStreaming(url, apiKey, model, messages) {
                 if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
                     fullContent += json.choices[0].delta.content;
                     updateLoadingProgress(fullContent.length);
+                    if (onPartial) onPartial(fullContent); // ★ 实时流式：把累积文本交给上层增量显示
                 }
                 if (json.usage) usage = json.usage;
             } catch (e) {
@@ -545,11 +587,12 @@ export async function callLLMStreaming(url, apiKey, model, messages) {
             if (data !== "[DONE]") {
                 try {
                     const json = JSON.parse(data);
-                    if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
-                        fullContent += json.choices[0].delta.content;
-                        updateLoadingProgress(fullContent.length);
-                    }
-                    if (json.usage) usage = json.usage;
+            if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
+                fullContent += json.choices[0].delta.content;
+                updateLoadingProgress(fullContent.length);
+                if (onPartial) onPartial(fullContent);
+            }
+            if (json.usage) usage = json.usage;
                 } catch (e) { /* 忽略 */ }
             }
         }
@@ -1020,7 +1063,9 @@ export async function callRegenerateOpeningLLM(world, newTimeConfig, oldOpening,
     const era = tc.era_label || (world && world.era_label) || "";
     const season = tc.season || "";
     const start = tc.calendar_start;
-    const startDateStr = start ? `${start.year}年${start.month}月${start.date}日` : "未设定起点";
+    const startDateStr = start
+        ? formatCalendarDate({ year: start.year, month: start.month, date: start.date }, tc.calendar_mode || "gregorian", tc.custom_calendar, { showYear: Number.isFinite(start.year) })
+        : "未设定起点";
     const worldName = world && world.name ? world.name : "未知世界";
     const worldDesc = world && world.desc ? world.desc.slice(0, 600) : "";
 
@@ -1082,7 +1127,9 @@ export async function callOptimizeOpeningLLM(world, oldOpening, opts = {}) {
     const era = tc.era_label || (world && world.era_label) || "";
     const season = tc.season || "";
     const start = tc.calendar_start;
-    const startDateStr = start ? `${start.year}年${start.month}月${start.date}日` : "未设定起点";
+    const startDateStr = start
+        ? formatCalendarDate({ year: start.year, month: start.month, date: start.date }, tc.calendar_mode || "gregorian", tc.custom_calendar, { showYear: Number.isFinite(start.year) })
+        : "未设定起点";
     const worldName = world && world.name ? world.name : "未知世界";
     const worldDesc = world && world.desc ? world.desc.slice(0, 600) : "";
     const tone = (world && world.system_prompt ? world.system_prompt.split("\n")[0] : "").slice(0, 300);

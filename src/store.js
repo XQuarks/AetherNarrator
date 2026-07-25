@@ -57,6 +57,7 @@ export const S = {
 
 // Phase 2：规则 DSL 解释器（纯函数，无 store 反向依赖，避免循环引用）
 import { evaluateRules, legacyBanEntry } from "./worldview.js";
+import { validateStartDate } from "./calendar.js";
 
 export const MAX_CHAT_MESSAGES = 40;
 
@@ -109,10 +110,8 @@ const CALENDAR_MONTH_LEN = 30; // 历法月长，用于把"第 N 天"推导为�
 // S5-2 必带字段保底：dated 模式(公历/阴历)必须带起点；自定义历法必须带月历表；否则回退「第 N 天」模式。
 // 仅在 normalizeTimeConfig 内对顶层 time_config 调用（不进 timeline 内部——线的 current_date 由 ensureTimelineState 保证，不会静默 year-1）。
 function enforceTimeConfigRequired(cfg) {
-    if ((cfg.calendar_mode === "gregorian" || cfg.calendar_mode === "lunar") && !cfg.calendar_start) {
-        cfg.calendar_mode = "day";
-        cfg.calendar_start = null;
-    }
+    // 方案 22：gregorian/lunar 允许 calendar_start 为 null 或只含部分字段（纪元-only 世界），
+    // 不再因缺 calendar_start 强制回退 day 模式；仅自定义历法缺月历表时才回退。
     if (cfg.calendar_mode === "custom_calendar" && !cfg.custom_calendar) {
         cfg.calendar_mode = "day";
         cfg.custom_calendar = null;
@@ -127,13 +126,17 @@ export function normalizeTimeConfig(raw) {
         if (typeof raw.era_label === "string") cfg.era_label = raw.era_label.slice(0, 40);
         const calModes = ["day", "gregorian", "lunar", "custom_calendar", "none"];
         if (calModes.includes(raw.calendar_mode)) cfg.calendar_mode = raw.calendar_mode;
-        // 方案 B：本模式独立起始日（gregorian/lunar/custom 用）
-        if (raw.calendar_start && Number.isFinite(raw.calendar_start.year)) {
-            cfg.calendar_start = {
-                year: raw.calendar_start.year | 0,
-                month: Math.min(12, Math.max(1, raw.calendar_start.month | 0)),
-                date: Math.max(1, raw.calendar_start.date | 0)
-            };
+        // 方案 22：calendar_start 各字段独立可选（年/月/日均可缺），仅保留存在的字段；并做日期合法性校验+自动纠正
+        if (raw.calendar_start && typeof raw.calendar_start === "object") {
+            const cs = {};
+            if (Number.isFinite(raw.calendar_start.year)) cs.year = raw.calendar_start.year | 0;
+            if (Number.isFinite(raw.calendar_start.month)) cs.month = Math.min(12, Math.max(1, raw.calendar_start.month | 0));
+            if (Number.isFinite(raw.calendar_start.date)) cs.date = Math.max(1, raw.calendar_start.date | 0);
+            if (Object.keys(cs).length > 0) {
+                cfg.calendar_start = validateStartDate(cs, cfg.calendar_mode, cfg.era_label).corrected || cs;
+            } else {
+                cfg.calendar_start = null;
+            }
         }
         // 自定义历法月历表
         if (raw.custom_calendar && Array.isArray(raw.custom_calendar.months) && raw.custom_calendar.months.length) {
@@ -156,8 +159,15 @@ export function normalizeTimeConfig(raw) {
                     const nl = {
                         name: typeof l.name === "string" ? l.name.slice(0, 30) : id,
                         calendar_mode: calModes.includes(l.calendar_mode) ? l.calendar_mode : "day",
-                        calendar_start: (l.calendar_start && Number.isFinite(l.calendar_start.year))
-                            ? { year: l.calendar_start.year | 0, month: Math.min(12, Math.max(1, l.calendar_start.month | 0)), date: Math.max(1, l.calendar_start.date | 0) }
+                        // 方案 22：时间线 calendar_start 同样支持部分字段 + 校验自动纠正
+                        calendar_start: (l.calendar_start && typeof l.calendar_start === "object")
+                            ? (() => {
+                                const tcs = {};
+                                if (Number.isFinite(l.calendar_start.year)) tcs.year = l.calendar_start.year | 0;
+                                if (Number.isFinite(l.calendar_start.month)) tcs.month = Math.min(12, Math.max(1, l.calendar_start.month | 0));
+                                if (Number.isFinite(l.calendar_start.date)) tcs.date = Math.max(1, l.calendar_start.date | 0);
+                                return (Object.keys(tcs).length > 0) ? (validateStartDate(tcs, l.calendar_mode, l.era_label).corrected || null) : null;
+                            })()
                             : null,
                         current_date: (l.current_date && typeof l.current_date === "object") ? l.current_date : null,
                         era_label: typeof l.era_label === "string" ? l.era_label.slice(0, 40) : "",

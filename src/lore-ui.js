@@ -5,6 +5,7 @@
 // 不反向依赖 game.js，避免循环引用。
 // ============================================================
 import { S, LINK_RELATION_LABELS, DEFAULT_TIME_CONFIG, normalizeTimeConfig } from "./store.js";
+import { validateStartDate } from "./calendar.js";
 import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets, detectTimeConflict, formatConflictMessage } from "./utils.js";
 import { showModal, closeModal, showToast, getSelectedStyleRef } from "./render.js";
 import { getWorldLoreKB, ensureLoreEmbeddings } from "./rag.js";
@@ -112,15 +113,14 @@ function renderTimeConfigSection(mode) {
     const showStart = TC_DATED_MODES.includes(cfg.calendar_mode);
     const cs = cfg.calendar_start || {};
     const startRow = showStart ? `
-            <div class="form-group"><label>起始日期（年 / 月 / 日）</label>
+            <div class="form-group"><label>起始日期（月 / 日，可留空）</label>
                 <div class="time-cfg-start-row">
-                    <input id="tc_start_year" class="tc-num" type="number" min="1" max="9999" value="${cs.year != null ? cs.year : ""}" placeholder="年" data-action="timeConfigChanged" data-event="input">
-                    <span class="tc-sep">/</span>
                     <input id="tc_start_month" class="tc-num" type="number" min="1" max="12" value="${cs.month != null ? cs.month : ""}" placeholder="月" data-action="timeConfigChanged" data-event="input">
                     <span class="tc-sep">/</span>
                     <input id="tc_start_date" class="tc-num" type="number" min="1" max="31" value="${cs.date != null ? cs.date : ""}" placeholder="日" data-action="timeConfigChanged" data-event="input">
                 </div>
-                <span class="time-cfg-start-hint">仅 dated 历法生效；留空则开局回退默认起点</span>
+                <span class="time-cfg-start-hint">仅 dated 历法生效；年归「纪元」字段，此处只填月日，各字段可空（缺失部分不显示、按纪元推算年份）</span>
+                <div id="startDateWarn" class="time-cfg-warn" style="display:none;"></div>
             </div>` : "";
     // S5-1：multiverse 各时间线起始日期走代码配置（见 docs/21），本基础档不提供 UI
     const multiverseHint = cfg.mode === "multiverse" ? `
@@ -233,23 +233,22 @@ function renderBacklinksPanel(note, list, idx) {
         <div class="lore-back-list">${backHtml.length ? backHtml.join("") : `<div class="lore-back-empty">暂无其他条目链向此处</div>`}</div>`;
 }
 
-// S5-1：从 DOM 读取"起始日期"三输入并写回 tc.calendar_start（仅 dated 历法生效；其余模式清空）。
-// tc.calendar_mode 必须先已设置。输入不完整则置 null（开局由 ensureCurrentDate 兜底）。
+// 方案 22：从 DOM 读取"起始日期"的月/日（年已移除，归纪元字段），写回 tc.calendar_start（部分字段可空）。
+// 仅 dated 历法生效；其余模式清空。读到的字段经 validateStartDate 校验+自动纠正（如平年 2月29→28）。
 function readCalendarStartFromDOM(tc) {
     const TC_DATED_MODES = ["gregorian", "lunar", "custom_calendar"];
     if (!TC_DATED_MODES.includes(tc.calendar_mode)) { tc.calendar_start = null; return; }
-    const yEl = document.getElementById("tc_start_year");
     const moEl = document.getElementById("tc_start_month");
     const dEl = document.getElementById("tc_start_date");
-    if (!yEl || !moEl || !dEl) { tc.calendar_start = null; return; }
-    const y = parseInt(yEl.value, 10);
+    if (!moEl || !dEl) { tc.calendar_start = null; return; }
     const mo = parseInt(moEl.value, 10);
     const d = parseInt(dEl.value, 10);
-    if (Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(d) && mo >= 1 && d >= 1) {
-        tc.calendar_start = { year: y, month: Math.min(12, Math.max(1, mo)), date: Math.max(1, d) };
-    } else {
-        tc.calendar_start = null;
-    }
+    const cs = {};
+    if (Number.isFinite(mo) && mo >= 1) cs.month = Math.min(12, Math.max(1, mo));
+    if (Number.isFinite(d) && d >= 1) cs.date = Math.max(1, d);
+    if (Object.keys(cs).length === 0) { tc.calendar_start = null; return; }
+    const fixed = validateStartDate(cs, tc.calendar_mode, tc.era_label);
+    tc.calendar_start = fixed.corrected || cs;
 }
 
 // 切视图前把时间表单值写回 schema，避免 InnerHTML 重渲染丢失编辑
@@ -272,6 +271,7 @@ export function syncTimeConfigFromDOM() {
 // S5-4：编辑卡时间冲突徽章实时刷新（只读 schema，不重渲染卡片，避免输入框丢焦点）
 // 由 app.js 的 data-action="timeConfigChanged" 在改起始日期/历法/纪元/季节时调用。
 export function updateTimeConflictBadge() {
+    updateStartDateWarn(); // 方案 22：起始日期实时校验提示随同刷新
     const el = document.getElementById("timeConflictBadge");
     if (!el) return;
     const actions = document.getElementById("openingFixActions");
@@ -289,6 +289,33 @@ export function updateTimeConflictBadge() {
     el.style.display = "";
     el.innerHTML = `⚠ 时间可能冲突：${escapeHtml(formatConflictMessage(res))}`;
     if (actions) actions.classList.add("conflict"); // S5-4'：冲突时高亮修复按钮组
+}
+
+// 方案 22：起始日期实时合法性校验提示（不覆盖输入，仅提示；自动纠正发生在保存时 readCalendarStartFromDOM）
+export function updateStartDateWarn() {
+    const el = document.getElementById("startDateWarn");
+    if (!el) return;
+    if (!S._loreEditingWorldDefault) { el.style.display = "none"; el.innerHTML = ""; return; }
+    const tcfg = (S.currentWorld && S.currentWorld.schema && S.currentWorld.schema.time_config) || {};
+    const TC_DATED_MODES = ["gregorian", "lunar", "custom_calendar"];
+    if (!TC_DATED_MODES.includes(tcfg.calendar_mode)) { el.style.display = "none"; el.innerHTML = ""; return; }
+    const moEl = document.getElementById("tc_start_month");
+    const dEl = document.getElementById("tc_start_date");
+    const eraEl = document.getElementById("tc_era");
+    if (!moEl || !dEl) { el.style.display = "none"; el.innerHTML = ""; return; }
+    const mo = parseInt(moEl.value, 10);
+    const d = parseInt(dEl.value, 10);
+    const cs = {};
+    if (Number.isFinite(mo) && mo >= 1) cs.month = Math.min(12, Math.max(1, mo));
+    if (Number.isFinite(d) && d >= 1) cs.date = Math.max(1, d);
+    const era = eraEl ? eraEl.value.trim() : "";
+    const r = validateStartDate(cs, tcfg.calendar_mode, era);
+    if (r.warnings && r.warnings.length) {
+        el.style.display = "";
+        el.innerHTML = "⚠ " + escapeHtml(r.warnings.join("；"));
+    } else {
+        el.style.display = "none"; el.innerHTML = "";
+    }
 }
 
 // S5-4'：开场白时间修复按钮组（仅 world 模式卡片；当前世界已有开场白才可点）

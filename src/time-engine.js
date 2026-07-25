@@ -1,4 +1,4 @@
-import { addCalendar, compareCalendar, advanceCalendarTime } from "./calendar.js";
+import { addCalendar, compareCalendar, advanceCalendarTime, deriveAnchorYear } from "./calendar.js";
 import { evalPolicy } from "./triggers.js";
 
 const DAY_MINUTES = 1440;
@@ -42,7 +42,8 @@ function resolveTc(tc) {
         calendar_mode: t.calendar_mode || (t.timeConfig && t.timeConfig.calendar_mode) || "day",
         periods: t.periods || (t.timeConfig && t.timeConfig.periods) || DEFAULT_ORDER,
         calendar_start: t.calendar_start || (t.timeConfig && t.timeConfig.calendar_start) || null,
-        custom_calendar: t.custom_calendar || (t.timeConfig && t.timeConfig.custom_calendar) || null
+        custom_calendar: t.custom_calendar || (t.timeConfig && t.timeConfig.custom_calendar) || null,
+        era_label: t.era_label || (t.timeConfig && t.timeConfig.era_label) || ""
     };
 }
 
@@ -113,11 +114,13 @@ export function advanceWorldTime(currentDate, change, tc = {}) {
 
     if (DATED_MODES.includes(ctx.calendar_mode)) {
         // ===== dated 模式：方案 B（无隐藏序数，原生日期按模式分派）=====
-        const start = ctx.calendar_start || { year: 1, month: 1, date: 1 };
+        // 方案 22：calendar_start 可缺字段；year 缺失时用纪元锚点年兜底
+        const cs = ctx.calendar_start || {};
+        const startYear = Number.isFinite(cs.year) ? cs.year : (deriveAnchorYear(ctx.era_label) ?? 1);
         const cur = {
-            year: current.year != null ? current.year : start.year,
-            month: current.month != null ? current.month : start.month,
-            date: current.date != null ? current.date : start.date
+            year: current.year != null ? current.year : startYear,
+            month: current.month != null ? current.month : (cs.month || 1),
+            date: current.date != null ? current.date : (cs.date || 1)
         };
         let calChange = {};
         if (req.year != null || req.month != null || req.date != null) {
@@ -153,13 +156,14 @@ export function collectDueDeadlines(currentDate, deadlines, tc = [], triggeredId
     const seen = triggeredIds instanceof Set ? triggeredIds : new Set(triggeredIds || []);
     const reState = retriggerState && typeof retriggerState === "object" ? retriggerState : {};
 
-    // dated 模式：deadline 用 {year,month,date,period}（或回退 calendar_start）；按原生日期比较
+    // dated 模式：deadline 用 {year,month,date,period}（或回退日历起点）；按原生日期比较
     if (DATED_MODES.includes(ctx.calendar_mode)) {
-        const start = ctx.calendar_start || { year: 1, month: 1, date: 1 };
+        const cs = ctx.calendar_start || {};
+        const startYear = Number.isFinite(cs.year) ? cs.year : (deriveAnchorYear(ctx.era_label) ?? 1);
         const cur = {
-            year: current.year != null ? current.year : start.year,
-            month: current.month != null ? current.month : start.month,
-            date: current.date != null ? current.date : start.date
+            year: current.year != null ? current.year : startYear,
+            month: current.month != null ? current.month : (cs.month || 1),
+            date: current.date != null ? current.date : (cs.date || 1)
         };
         return (Array.isArray(deadlines) ? deadlines : []).map((deadline, index) => {
             if (!deadline) return null;
@@ -169,8 +173,10 @@ export function collectDueDeadlines(currentDate, deadlines, tc = [], triggeredId
             return { ...deadline, id: deadline.id || `deadline_${Math.abs(hash).toString(36)}` };
         }).filter(deadline => {
             if (!deadline) return false;
+            // 方案 22：年无关模式（calendar_start 无 year）下，截止日期不写 year，比较时忽略年（仅比月日）
+            const yearLess = !Number.isFinite(cs.year);
             const target = {
-                year: deadline.year != null ? deadline.year : start.year,
+                year: deadline.year != null ? deadline.year : (yearLess ? cur.year : startYear),
                 month: deadline.month != null ? deadline.month : 1,
                 date: deadline.date != null ? deadline.date : 1
             };

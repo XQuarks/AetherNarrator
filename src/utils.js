@@ -4,7 +4,7 @@
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_LABELS, LINK_RELATIONS, MAX_SOURCE_CHARS, normalizeTimeConfig } from "./store.js";
 import { applyStateChanges } from "./game.js";
-import { formatCalendarDate } from "./calendar.js";
+import { formatCalendarDate, deriveAnchorYear } from "./calendar.js";
 
 export function deepClone(obj) {
     return typeof structuredClone !== "undefined" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj));
@@ -269,11 +269,12 @@ export function createElementFromHTML(html) {
 
 // ============================================================
 // S5-4 · 时间冲突 Lint（纯函数，可在 Node 下单测）
-// 检测 opening_narrative / system_prompt / era_label 中写死的时间与 calendar_start 不一致。
-// 设计要点（见 docs/20 §13）：
+// 检测 opening_narrative / system_prompt 中写死的时间与纪元（era_label）不一致。
+// 设计要点（见 docs/22 · 方案 X）：
 // - 先剥 {..} 占位符（S5-3 用占位符的开场白不会误报）
-// - 年份严格判定（≠ calendar_start.year 即冲突，黎总拍板）
-// - 无 calendar_start（day/none）时跳过年份比对，仅做季节/现代措辞检查
+// - 年份锚点来自 era_label（年份归纪元），按 decade 容错（同 decade 不冲突，黎总拍板放宽）
+// - 不再扫描 era_label 本身（它现在是锚点来源，避免「1920年代」被当硬年份误报）
+// - era_label 无可解析年份（如「中世纪」）时跳过年份比对，仅做季节/现代措辞检查
 // - system_prompt 可能是数组（demo 世界），统一 join 成字符串再扫
 // ============================================================
 const TIME_CONFLICT_YEAR_RE = /\b(1[6-9]\d{2}|20\d{2})\b/g;
@@ -290,23 +291,28 @@ function seasonBaseOf(s) {
 export function detectTimeConflict(world) {
     const schema = getWorldSchema(world) || {};
     const cfg = normalizeTimeConfig(schema.time_config);
-    const startYear = cfg.calendar_start ? cfg.calendar_start.year : null;
+    // 方案 22：年份锚点来自 era_label（年份归纪元）
+    const eraLabel = cfg.era_label || "";
+    const anchorYear = deriveAnchorYear(eraLabel); // 可能为 null（模糊纪元）
+    const anchorDecade = (anchorYear != null) ? Math.floor(anchorYear / 10) : null;
     const season = (cfg.season || "").trim();
 
-    // 先剥占位符再扫描；system_prompt 可能为数组，统一成字符串
+    // 先剥占位符再扫描；system_prompt 可能为数组，统一成字符串。
+    // 注意：不再把 era_label 纳入扫描（它已是锚点来源）。
     const strip = (t) => {
         const s = Array.isArray(t) ? t.join(" ") : String(t == null ? "" : t);
         return s.replace(TIME_CONFLICT_PLACEHOLDER_RE, " ");
     };
-    const fullText = [strip(schema.opening_narrative), strip(schema.system_prompt), strip(cfg.era_label)].join("\n");
+    const fullText = [strip(schema.opening_narrative), strip(schema.system_prompt)].join("\n");
 
-    // 年份冲突（严格判定：≠ 起始年即冲突）
+    // 年份冲突（同 decade 容错：≠ 锚点 decade 即冲突）
     const years = [];
     let m;
     TIME_CONFLICT_YEAR_RE.lastIndex = 0;
     while ((m = TIME_CONFLICT_YEAR_RE.exec(fullText)) !== null) {
         const y = parseInt(m[1], 10);
-        if (startYear != null && y !== startYear && !years.includes(y)) years.push(y);
+        const yd = Math.floor(y / 10);
+        if (anchorDecade != null && yd !== anchorDecade && !years.includes(y)) years.push(y);
     }
 
     // 季节冲突（仅当配置了季节；按春/夏/秋/冬分族，避免「春」误伤「春季」）
@@ -321,13 +327,13 @@ export function detectTimeConflict(world) {
         }
     }
 
-    // 现代措辞（历史世界：起始年 < 2000）
-    const absolutePhrase = TIME_CONFLICT_ABSOLUTE_RE.test(fullText) && startYear != null && startYear < 2000;
+    // 现代措辞（历史世界：锚点年 < 2000）
+    const absolutePhrase = TIME_CONFLICT_ABSOLUTE_RE.test(fullText) && anchorYear != null && anchorYear < 2000;
 
     const snippets = [];
-    if (years.length) snippets.push(`年份 ${years.join("、")} 与起始年 ${startYear} 不一致`);
+    if (years.length) snippets.push(`年份 ${years.join("、")} 与纪元「${eraLabel}」不在同一 decade`);
     if (seasonConflict) snippets.push(`季节「${seasonConflict}」与配置「${season}」不一致`);
-    if (absolutePhrase) snippets.push("出现现代措辞（如今/当代/现在/今年）但起始年为历史年代");
+    if (absolutePhrase) snippets.push("出现现代措辞（如今/当代/现在/今年）但纪元为历史年代");
 
     return {
         conflict: years.length > 0 || seasonConflict !== null || absolutePhrase,
@@ -378,21 +384,25 @@ export function buildCriticTimeContext(world) {
         }
     }
     const parts = ["历法：" + calendarModeLabel(tc.calendar_mode)];
-    if (tc.era_label) parts.push("纪元标签：" + tc.era_label);
-    if (tc.calendar_start && typeof tc.calendar_start.year === "number") {
-        const s = tc.calendar_start;
-        const dateStr = tc.calendar_mode === "custom_calendar"
-            ? `${s.year} 年（自定义历法）`
-            : `${s.year} 年${s.month ? " " + s.month + " 月" : ""}${s.date ? " " + s.date + " 日" : ""}`;
-        parts.push("起始日期：" + dateStr);
-    } else {
-        parts.push("无绝对年份（day/none 模式）");
-    }
+    if (tc.era_label) parts.push("纪元：" + tc.era_label);
+    const dateStr = formatStartAnchor(tc.calendar_start);
+    if (dateStr) parts.push("起始日期：" + dateStr);
+    else if (!tc.era_label) parts.push("无绝对年份（day/none 模式）");
     if (tc.season) parts.push("季节：" + tc.season);
-    // 无任何实质时间信息（无年份/纪元/季节）则不增章节
-    const hasAnchor = !!((tc.calendar_start && typeof tc.calendar_start.year === "number") || tc.era_label || tc.season);
+    // 无任何实质时间信息（无纪元/起始日期/季节）则不增章节
+    const hasAnchor = !!(tc.era_label || (tc.calendar_start && (Number.isFinite(tc.calendar_start.year) || Number.isFinite(tc.calendar_start.month) || Number.isFinite(tc.calendar_start.date))) || tc.season);
     if (!hasAnchor) return "";
     return parts.join(" / ");
+}
+
+// 方案 22：把 calendar_start（可能只含部分字段）格式化为「年 月 日」片段（仅拼存在的字段）
+function formatStartAnchor(cs) {
+    if (!cs || typeof cs !== "object") return "";
+    const segs = [];
+    if (Number.isFinite(cs.year)) segs.push(cs.year + " 年");
+    if (Number.isFinite(cs.month)) segs.push(cs.month + " 月");
+    if (Number.isFinite(cs.date)) segs.push(cs.date + " 日");
+    return segs.join("");
 }
 
 export function cosineSimilarity(a, b) {

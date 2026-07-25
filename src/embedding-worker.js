@@ -31,12 +31,33 @@ async function loadModel() {
     }
 }
 
+// 把 transformers 的批量输出张量拆成「每条一个向量」的数组（out.dims = [batch, dim]）。
+// 兼容单条（dims 缺失或 [1, dim]）时退化为只返回一条。
+function splitBatch(out) {
+    if (!out || !out.dims || out.dims.length < 2) return [Array.from(out.data)];
+    const batch = out.dims[0], dim = out.dims[1];
+    const vectors = [];
+    for (let i = 0; i < batch; i++) {
+        vectors.push(Array.from(out.data.subarray(i * dim, (i + 1) * dim)));
+    }
+    return vectors;
+}
+
 self.onmessage = async (e) => {
     const msg = e.data || {};
     try {
         if (msg.type === "warmup") {
             await loadModel();
             self.postMessage({ id: msg.id, type: "ready" });
+            return;
+        }
+        // ★ P0 时间线向量并发：批量推理（一次 forward pass 处理多条文本），
+        // 远快于逐条串行 Worker 往返。返回「每条一个向量」的数组。
+        if (Array.isArray(msg.texts) && msg.texts.length) {
+            await loadModel();
+            const inputs = msg.isQuery ? msg.texts.map(t => BGE_QUERY_PREFIX + t) : msg.texts;
+            const out = await extractor(inputs, { pooling: "mean", normalize: true });
+            self.postMessage({ id: msg.id, type: "result", data: splitBatch(out) });
             return;
         }
         const { id, text, isQuery } = msg;

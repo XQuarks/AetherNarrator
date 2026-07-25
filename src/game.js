@@ -5,13 +5,13 @@ import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
 import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
-import { ensureCurrentDate, compareCalendar, advanceCalendarTime } from "./calendar.js";
+import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartDate } from "./calendar.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
-import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency } from "./llm.js";
-import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded } from "./render.js";
+import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative } from "./llm.js";
+import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry } from "./render.js";
 import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules, recordWorldviewNag } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { createWorldPack } from "./world-transfer.js";
@@ -77,6 +77,16 @@ export function exportStory() {
     showToast("剧情已导出为 TXT 文件", "success");
 }
 
+// 方案 22：AI 生成世界后，校验起始日期合法性；若有纠正/警告，提示用户
+function warnIfTimeCorrected(rawGen) {
+    const tc = rawGen && rawGen.schema && rawGen.schema.time_config;
+    if (!tc || !tc.calendar_start) return;
+    const r = validateStartDate(tc.calendar_start, tc.calendar_mode, tc.era_label);
+    if (r.warnings && r.warnings.length) {
+        showToast("⚠ 起始日期已自动校正：" + r.warnings.join("；"), "warn", 4000);
+    }
+}
+
 export async function generateWorld() {
     const name = document.getElementById("worldName").value.trim();
     const type = document.getElementById("worldType").value;
@@ -117,7 +127,9 @@ export async function generateWorld() {
             showToast(`本书较大，知识库将分 ${chunkCount} 段生成，可能需要较长时间（数十次 API 调用），请耐心等待。`, "warn");
             // ① 基础世界配置（结构/开场）由首段生成
             const firstChunk = src.slice(0, CHUNK_SIZE);
-            generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT));
+            const rawGen1 = await callWorldGenerationLLM(name, type, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT);
+            warnIfTimeCorrected(rawGen1);
+            generated = sanitizeWorldConfig(rawGen1);
             // ② 逐段抽取 lore 并合并（覆盖全书，同名条目汇总；含 relations 三元组）
             const extracted = await extractLoreFromSource(src, name, ipName, styleRef, customStyle, {
                 onRetry: (idx, total, kind, n) => showToast(`第 ${idx}/${total} 段${kind === "生成结果损坏" ? "生成结果损坏" : "被限流"}，自动重试(${n})...`, "warn"),
@@ -135,7 +147,9 @@ export async function generateWorld() {
             catch (e) { console.warn("知识库向量预计算失败，将降级为关键词检索:", e.message); }
         } else {
             // 小书：沿用原有单次生成
-            generated = sanitizeWorldConfig(await callWorldGenerationLLM(name, type, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix));
+            const rawGen2 = await callWorldGenerationLLM(name, type, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix);
+            warnIfTimeCorrected(rawGen2);
+            generated = sanitizeWorldConfig(rawGen2);
             loreKb = generated.lore_kb;
             if (loreKb) {
                 try { await ensureLoreEmbeddings(loreKb, (done, total) => { btn.textContent = `生成中 (向量化 ${done}/${total})...`; }); }
@@ -696,6 +710,22 @@ export async function processTurn(input) {
     const myEpoch = S.currentSession.epoch;
     const myWorldId = S.currentWorld && S.currentWorld.id;
     try {
+    // ★ 实时流式：先建一条"待生成"日志条目并渲染，让叙事边生成边显示
+    // （首字延迟从「整段生成完」降到约 1~2 秒；生成完立即定稿+出选项，不再跑完整打字机）。
+    const liveIndex = S.conversationHistory.length;
+    const pendingEntry = {
+        player: input,
+        narrative: "",
+        retrieved: [],
+        period: S.gameState.current_date.period,
+        day: stepOf(S.gameState.current_date),
+        tcd: deepClone(S.gameState.current_date),
+        key_facts: [],
+        _pending: true
+    };
+    S.conversationHistory.push(pendingEntry);
+    renderLog();
+
     showLoading("正在思考...");
     // ★ 前端防注入检测
     const injectionCheck = detectPromptInjection(input);
@@ -716,19 +746,11 @@ export async function processTurn(input) {
             outputTokens: 0, totalTokens: 0, hitRate: "0",
             playerInput: input.slice(0, 200)
         });
-        const blockEntry = {
-            player: input,
-            narrative: "（系统拦截）" + injectionCheck.reason,
-            retrieved: [],
-            period: S.gameState.current_date.period,
-            day: stepOf(S.gameState.current_date),
-            tcd: deepClone(S.gameState.current_date),
-            key_facts: [],
-            isWarning: true
-        };
-        S.conversationHistory.push(blockEntry);
+        pendingEntry.narrative = "（系统拦截）" + injectionCheck.reason;
+        pendingEntry.isWarning = true;
+        pendingEntry._pending = false;
+        replaceEntryDOM(liveIndex);
         saveState();
-        renderLog();
         renderChoices([]);
         showToast(injectionCheck.reason, "warn");
         return;
@@ -736,11 +758,19 @@ export async function processTurn(input) {
         const retrieved = await retrieve(input);
         // ★ 容错：游玩回合遇 AI 空白/JSON 损坏等偶发坏响应，自动重试最多 2 次再报错（对应日志里 "JSON 无法修复" 偶发空白）
         let resp;
+        let didStream = false;
         {
             const TURN_RETRIES = 2;
             for (let attempt = 0; attempt <= TURN_RETRIES; attempt++) {
                 try {
-                    resp = await callLLM(input, retrieved);
+                    resp = await callLLM(input, retrieved, {
+                        // ★ 实时流式：每收到一块累积文本就增量抽取 narrative 写到日志区
+                        onPartial: (raw) => {
+                            didStream = true;
+                            hideLoading(); // 一旦开始出字，隐藏"正在思考"横幅，改用实时叙事
+                            updateLiveNarrative(liveIndex, (extractPartialNarrative(raw) || "") + "▌");
+                        }
+                    });
                     break;
                 } catch (e) {
                     const retryable = /无法修复|JSON 解析失败|截断|结构损坏|空白|空响应|empty/i.test(String((e && e.message) || ""));
@@ -753,27 +783,22 @@ export async function processTurn(input) {
         if (resp._sessionEpoch !== myEpoch || resp._sessionWorldId !== (S.currentWorld && S.currentWorld.id)) {
             hideLoading();
             console.warn("丢弃过期/串世界的响应：会话标识不匹配");
+            removeLogEntry(liveIndex); // 撤掉这条尚未定稿的待生成条目，避免残留空条
             return;
         }
         hideLoading();
+        updateLiveNarrative(liveIndex, ""); // 清掉流式光标占位
 
         // 检测是否为非故事内容（拒绝/限制/错误响应）
         const isWarning = isNonStoryResponse(resp.narrative);
 
         if (isWarning) {
             // ⚠️ 非故事内容：不应用状态变更、不写入知识库、不影响记忆
-            const entry = {
-                player: input,
-                narrative: resp.narrative || "（无内容）",
-                retrieved: retrieved.map(s => s.title),
-                period: S.gameState.current_date.period,
-                day: stepOf(S.gameState.current_date),
-                tcd: deepClone(S.gameState.current_date),
-                key_facts: [],
-                isWarning: true
-            };
-            S.conversationHistory.push(entry);
-            // 明确跳过 applyStateChanges 和 addBehaviorRecords
+            pendingEntry.narrative = resp.narrative || "（无内容）";
+            pendingEntry.retrieved = retrieved.map(s => s.title);
+            pendingEntry.key_facts = [];
+            pendingEntry.isWarning = true;
+            pendingEntry._pending = false;
         } else {
             // ✅ 正常故事内容
             applyStateChanges(resp.state_changes);
@@ -852,18 +877,15 @@ export async function processTurn(input) {
                 }
             }).catch(() => { /* 裁判异常不影响主流程 */ });
 
-            const entry = {
-                player: input,
-                narrative: resp.narrative || "（无叙事）",
-                retrieved: retrieved.map(s => s.title),
-                period: S.gameState.current_date.period,
-                day: stepOf(S.gameState.current_date),
-                tcd: deepClone(S.gameState.current_date),
-                key_facts: resp.key_facts || [],
-                // ★ 氛围提示（环境变化/危机预警，纯氛围文字，无硬数值；多数回合为 null）
-                atmosphere: sanitizeAtmosphere(resp.atmosphere)
-            };
-            S.conversationHistory.push(entry);
+            pendingEntry.narrative = resp.narrative || "（无叙事）";
+            pendingEntry.retrieved = retrieved.map(s => s.title);
+            pendingEntry.period = S.gameState.current_date.period;
+            pendingEntry.day = stepOf(S.gameState.current_date);
+            pendingEntry.tcd = deepClone(S.gameState.current_date);
+            pendingEntry.key_facts = resp.key_facts || [];
+            // ★ 氛围提示（环境变化/危机预警，纯氛围文字，无硬数值；多数回合为 null）
+            pendingEntry.atmosphere = sanitizeAtmosphere(resp.atmosphere);
+            pendingEntry._pending = false;
 
             // 推入多轮对话历史（仅正常轮次，警告/错误轮次不入历史，避免污染上下文）
             pushChatTurn(resp._turnUserContent, resp);
@@ -887,10 +909,7 @@ export async function processTurn(input) {
             if (!finalChoices || finalChoices.length === 0) {
                 finalChoices = buildSmartFallbackChoices();
             }
-            // ★ 将最终选项存入记录并持久化（含兜底）
-            if (S.conversationHistory.length > 0) {
-                S.conversationHistory[S.conversationHistory.length - 1].choices = finalChoices;
-            }
+            pendingEntry.choices = finalChoices;
             // ★ P0 性能：此处不再单独 saveState——下方 createOrUpdateSave() 内部已统一持久化（含本回合最终选项），避免重复写盘。
         }
 
@@ -904,14 +923,21 @@ export async function processTurn(input) {
             }
         }
 
-        renderLog();
-
+        // ★ 实时流式：生成完立即把本条定稿为格式化叙事 + 氛围提示，并立刻出选项
+        // （不再跑完整打字机；非流式/模拟模式若 didStream 为 false 则回落到提速后的打字机动画）。
+        replaceEntryDOM(liveIndex);
         if (!isWarning) {
-            // 打字完成后显示选项
-            await startTypewriter(S.conversationHistory.length - 1);
-            renderChoices(finalChoices);
-            if (S.gameState.is_alive === false) {
-                setTimeout(showGameOver, 800);
+            if (didStream) {
+                renderChoices(finalChoices);
+                if (S.gameState.is_alive === false) {
+                    setTimeout(showGameOver, 800);
+                }
+            } else {
+                await startTypewriter(liveIndex);
+                renderChoices(finalChoices);
+                if (S.gameState.is_alive === false) {
+                    setTimeout(showGameOver, 800);
+                }
             }
         } else {
             // 警告内容不提供选项，也不做打字效果
@@ -923,7 +949,7 @@ export async function processTurn(input) {
         if (!isSessionContextCurrent(
             { epoch: myEpoch, worldId: myWorldId },
             { epoch: S.currentSession.epoch, worldId: S.currentWorld && S.currentWorld.id }
-        )) return;
+        )) { removeLogEntry(liveIndex); return; }
         // ★ 日志分离：即使 parse/API 失败也记录到 debugLog.turns
         const model = document.getElementById("modelName")?.value || "unknown";
         const temp = getTemperature();
@@ -950,20 +976,12 @@ export async function processTurn(input) {
             playerInput: input.slice(0, 200)
         });
 
-        // 网络/API 错误也作为警告展示，不影响游戏状态
-        const errorEntry = {
-            player: input,
-            narrative: "请求失败：" + e.message,
-            retrieved: [],
-            period: S.gameState.current_date.period,
-            day: stepOf(S.gameState.current_date),
-            tcd: deepClone(S.gameState.current_date),
-            key_facts: [],
-            isWarning: true
-        };
-        S.conversationHistory.push(errorEntry);
+        // 网络/API 错误也作为警告展示，不影响游戏状态（填充已存在的待生成条目，不重复追加）
+        pendingEntry.narrative = "请求失败：" + e.message;
+        pendingEntry.isWarning = true;
+        pendingEntry._pending = false;
+        replaceEntryDOM(liveIndex);
         saveState();
-        renderLog();
         renderChoices([]);
         // 识别常见错误类型并给出针对性提示
         let errorMsg = e.message;

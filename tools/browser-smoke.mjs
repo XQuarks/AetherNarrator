@@ -63,8 +63,10 @@ try {
     const pageErrors = [];
     page.on("pageerror", error => pageErrors.push(error.message));
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-    await page.locator('[data-action="showWorldList"]').click();
-    await page.locator('[data-action="showWorldDetail"][data-id="demo_cthulhu"]').click();
+    // index.html 存在两个同名 data-action="showWorldList" 按钮（首页主按钮 + 底部导航按钮），
+    // 用 .primary-btn 精确锁定首页「进入世界」主按钮，避免 Playwright 严格模式歧义报错。
+    await page.locator('button.primary-btn[data-action="showWorldList"]').first().click();
+    await page.locator('article.world-card[data-action="showWorldDetail"][data-id="demo_cthulhu"]').click();
     await page.locator('#worldDetailModal [data-action="startGame"]').click();
     await page.locator('[data-action="showGameSettings"]').click();
     // 时间设置已迁移至知识库初览，游戏设置中不应再出现独立按钮

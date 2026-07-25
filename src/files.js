@@ -6,6 +6,34 @@ import { S } from "./store.js";
 import { capSource, escapeHtml, formatFileSize } from "./utils.js";
 import { showToast, refreshIpNameRequirement } from "./render.js";
 
+// ★ P0 性能优化：mammoth / JSZip 已本地化到 vendor/，仅在用户上传 docx/epub 时才动态加载，
+// 不再于首屏从 jsdelivr 同步拉取（避免国内手机被第三方 CDN 卡白屏）。
+let _mammothPromise = null;
+let _jszipPromise = null;
+function loadVendorScript(src) {
+    return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error("脚本加载失败: " + src));
+        document.head.appendChild(s);
+    });
+}
+export async function ensureMammoth() {
+    if (typeof window.mammoth !== "undefined") return window.mammoth;
+    if (!_mammothPromise) {
+        _mammothPromise = loadVendorScript("./vendor/mammoth/mammoth.browser.min.js").then(() => window.mammoth);
+    }
+    return _mammothPromise;
+}
+export async function ensureJSZip() {
+    if (typeof window.JSZip !== "undefined") return window.JSZip;
+    if (!_jszipPromise) {
+        _jszipPromise = loadVendorScript("./vendor/jszip/jszip.min.js").then(() => window.JSZip);
+    }
+    return _jszipPromise;
+}
+
 export function autoFillWorldDesc() {
     const descEl = document.getElementById("worldDesc");
     if (descEl && !descEl.value.trim()) {
@@ -13,7 +41,7 @@ export function autoFillWorldDesc() {
     }
 }
 
-export function handleFileSelect(event) {
+export async function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
     // ★ Plan A：上传大小上限放宽到 20MB，配合全书分块抽取知识库
@@ -38,7 +66,8 @@ export function handleFileSelect(event) {
         };
         reader.readAsText(file, "UTF-8");
     } else if (file.name.endsWith(".docx")) {
-        if (typeof window.mammoth !== "undefined") {
+        try {
+            await ensureMammoth();
             const reader = new FileReader();
             reader.onload = function(e) {
                 window.mammoth.extractRawText({ arrayBuffer: e.target.result })
@@ -55,11 +84,12 @@ export function handleFileSelect(event) {
                     });
             };
             reader.readAsArrayBuffer(file);
-        } else {
-            showToast("DOCX 解析需要 mammoth.js，请使用 .txt 格式", "error");
+        } catch (err) {
+            showToast("DOCX 解析库加载失败，请改用 .txt 格式（" + (err && err.message || "") + "）", "error");
         }
     } else if (file.name.endsWith(".epub")) {
-        if (typeof window.JSZip !== "undefined") {
+        try {
+            await ensureJSZip();
             const reader = new FileReader();
             reader.onload = function(e) {
                 text.innerHTML = "正在解析 EPUB...";
@@ -79,8 +109,8 @@ export function handleFileSelect(event) {
                     });
             };
             reader.readAsArrayBuffer(file);
-        } else {
-            showToast("EPUB 解析需要 JSZip，请使用 .txt 格式", "error");
+        } catch (err) {
+            showToast("EPUB 解析库加载失败，请改用 .txt 格式（" + (err && err.message || "") + "）", "error");
         }
     }
 }
