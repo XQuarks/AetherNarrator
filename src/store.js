@@ -36,7 +36,6 @@ export const S = {
   themeClickTimer: null,
   lastFocusedBeforeModal: null,
   fontSizeSetting: _lsGet("aigame_fontsize", "normal"),
-  temperatureSetting: parseFloat(_lsGet("aigame_temperature", "0.5")),
   renderedEntryCount: 0,
   typingTimer: null,
   typingIndex: -1,

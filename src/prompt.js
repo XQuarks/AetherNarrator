@@ -233,7 +233,9 @@ export function buildSystemPrompt() {
         .replace(/{WORLD_RULES}/g, finalWorldRules)
         .replace(/{WORLD_SCHEMA}/g, JSON.stringify(schema, null, 2))
         .replace(/{PLOT_FREEDOM}/g, plotFreedomText)
-        .replace(/{TIME_MODE_RULES}/g, buildTimeModeRules());
+        .replace(/{TIME_MODE_RULES}/g, buildTimeModeRules())
+        .replace(/{STYLE_GUIDE}/g, buildStyleGuide(S.currentWorld))
+        .replace(/{STYLE_EXPRESSION_GUIDE}/g, buildExpressionGuide(S.currentWorld));
 
     // ★ 知识库注入 system（命中缓存优化·方案 B）
     // 原则：system 只常驻「真正的硬约束」（规则/世界观），其余类别（人物/地点/冲突/事件/物品/势力）
@@ -434,6 +436,16 @@ export function buildToneGuide() {
         (S.currentWorld && S.currentWorld.opening_narrative) || ""
     ].join(" ");
 
+    // ★ 自定义优先：玩家已明确文风时，不再用关键词推断（避免与风格打架）
+    const sp = buildStyleProfile(S.currentWorld);
+    if (sp.custom && sp.custom.trim()) {
+        return `叙事基调：以玩家自定义文风为准（${sp.custom.trim()}）。\n\n请据此调整叙事的紧张程度、信息密度与情感表达，保持全篇一致。`;
+    }
+    if (sp.style || sp.taste) {
+        const given = [sp.style, sp.taste].filter(Boolean).join(" / ");
+        return `叙事基调：以玩家选定的「${given}」为准，请据此统一全篇语气与节奏。`;
+    }
+
     // 日常/生活系特征
     const dailyWords = /日常|生活|校园|恋爱|甜|宠|治愈|温馨|轻松|慢|休闲|田园|种田|开店|经营|咖啡|烘焙|花|茶|猫|狗|宠物|恋爱|初恋|青梅|竹马|邻居|同桌|室友/;
     // 高张力特征
@@ -448,6 +460,14 @@ export function buildToneGuide() {
     const fantasyWords = /魔法|巫师|龙|精灵|骑士|王|城堡|冒险|勇者/;
     // 红楼梦/古典
     const classicalWords = /红楼|贾|黛|宝|钗|凤|府|园|宅|闺|诗|词|宴/;
+    // 克苏鲁/不可名状
+    const horrorWords = /克苏鲁|深渊|疯狂|诡秘|不可名状|邪神|旧日|异界恐惧/;
+    // 废土/生存
+    const wastelandWords = /废土|生存|末日|灾后|荒野|求生|丧尸|瘟疫|核冬/;
+    // 黑色/冷峻/罪案
+    const noirWords = /黑色|冷峻|犬儒|罪案|侦探|悬疑|硬汉|黑帮/;
+    // 史诗/神话
+    const epicWords = /史诗|神话|传说|宏大|王朝|远征|文明|神话史诗|创世/;
 
     let tones = [];
 
@@ -455,6 +475,10 @@ export function buildToneGuide() {
     if (romanceWords.test(clues)) tones.push("浪漫");
     if (mysteryWords.test(clues)) tones.push("悬疑");
     if (intenseWords.test(clues)) tones.push("高张力");
+    if (horrorWords.test(clues)) tones.push("悬疑");
+    if (wastelandWords.test(clues)) tones.push("高张力");
+    if (noirWords.test(clues)) tones.push("悬疑");
+    if (epicWords.test(clues)) tones.push("高张力");
 
     // 如果没有任何命中，根据题材推断
     if (tones.length === 0) {
@@ -760,6 +784,13 @@ export function buildAuthorNote() {
     if (authTime) {
         parts.push(authTime);
     }
+    // ★ 文风保持（中部纠偏位）：双保险，漂移可被即时拦回
+    const spNote = buildStyleProfile(S.currentWorld);
+    const styleLabel = (spNote.custom && spNote.custom.trim()) ? spNote.custom.trim()
+        : [spNote.genre, spNote.style, spNote.taste].filter(Boolean).join("/") || (spNote.mode === "original" ? "源文件文风" : "通用文风");
+    if (styleLabel) {
+        parts.push("【文风保持】本轮及后续所有输出，必须维持本世界强制文风（见系统提示“本世界强制文风”节）。如检测到语气/用词偏离，立即回调，不要等玩家纠正。");
+    }
     return parts.join("\n\n");
 }
 
@@ -984,4 +1015,109 @@ export function detectPromptInjection(input) {
     }
 
     return null;
+}
+
+// ============================================================
+// 文风一致性（文档24/26）：运行时强制文风约束
+// 把玩家建世界时选定的文风，在每轮生成时强制约束，避免漂移。
+// 预留 world.style_profile 扩展位，供 docs/25 结构化标签直接 plug in。
+// ============================================================
+
+// 把世界现有 style_ref/custom_style 与未来的 style_profile 统一成一个对象
+export function buildStyleProfile(world) {
+    const w = world || {};
+    const sp = (w.style_profile && typeof w.style_profile === "object") ? w.style_profile : {};
+    return {
+        mode: w.style_ref || "none",          // original | custom | none
+        custom: w.custom_style || "",          // 自由文本文风要求
+        genre: sp.genre || null,               // 题材（docs/25 填）
+        tropes: Array.isArray(sp.tropes) ? sp.tropes : [],  // 主题（A1 由"爽点"改名，字段名保持 tropes）
+        taste: sp.taste || null,               // 口味（docs/25 填）
+        pov: sp.pov || null,                   // 视角（docs/25 填）
+        style: sp.style || null,               // 文风标签（docs/25 填）
+        custom_tag: sp.custom_tag || ""        // 自定义标签（A1 加，≤10字）
+    };
+}
+
+// 运行时强制文风约束（填充模板 {STYLE_GUIDE}，缓存友好，纯函数）
+export function buildStyleGuide(world) {
+    const p = buildStyleProfile(world);
+    const lines = [];
+    lines.push("本世界的文风是最高优先级叙事约束，任何场景、任何 NPC 都不得偏离。");
+    lines.push("若世界知识库(world.system_prompt)中的文风描述与本条冲突，以本条为准。");
+    lines.push("");
+
+    if (p.mode === "original") {
+        lines.push("· 文风模式：沿用源文件本身的文风与叙事节奏（如为原创世界则使用通用叙事风格）。");
+    } else if (p.mode === "none") {
+        lines.push("· 文风模式：通用叙事风格，不模仿特定文风。");
+    } else {
+        lines.push("· 文风模式：严格遵循玩家自定义要求。");
+    }
+
+    if (p.custom && p.custom.trim()) {
+        lines.push("· 玩家自定义文风要求（必须执行）：" + p.custom.trim());
+    }
+    // ★ docs/25 结构化标签接入点：这些字段现在多半为空，Doc 25 落地后自动生效
+    if (p.genre) lines.push("· 题材：" + p.genre);
+    if (p.tropes.length) lines.push("· 主题：" + p.tropes.join("、"));
+    if (p.taste) lines.push("· 口味：" + p.taste);
+    if (p.pov) lines.push("· 叙事视角：" + p.pov);
+    if (p.style) lines.push("· 文风标签：" + p.style);
+    if (p.custom_tag) lines.push("· 自定义标签：" + p.custom_tag);
+    return lines.join("\n");
+}
+
+// 按文风分类输出表情/语气词指南（填充模板 {STYLE_EXPRESSION_GUIDE}）
+export function buildExpressionGuide(world) {
+    const p = buildStyleProfile(world);
+    const text = [p.style, p.taste, p.genre, p.custom, p.custom_tag].filter(Boolean).join(" ");
+
+    // 轻松/日常/恋爱/甜宠/治愈 → 启用 emoji + 心形 + 语气词（原模板内容）
+    if (/(轻松|日常|恋爱|甜宠|甜|宠|治愈|温馨|活泼|少女|校园|田园|种田|咖啡|烘焙)/.test(text)) {
+        return [
+            "可适度使用 emoji（如 💡🔥🌟）与心形符号 ♡ 增强亲密感；语气词（呀/嘛/呢）可营造轻松或恋爱氛围。",
+            "恋爱向可含轻柔的亲密描写，但须保持克制、不越界；日常对话可自然带出心形符号。",
+            "女性化语气词（啊、呀、嗯、呜、唔）可穿插于台词与反应描写；舒适/放松场景可用「嗯～好舒服的风啊」式表达。",
+            "注意：符号与语气词须贴合角色人设与当下情绪，不可让所有角色不分场合使用。"
+        ].join("\n");
+    }
+    // 史诗/硬核/废土/生存/武侠 → 冷峻感官
+    if (/(史诗|硬核|废土|生存|残酷|热血|战争|战斗|武侠|仙侠|玄幻)/.test(text)) {
+        return [
+            "禁用 emoji 与心形符号（即使上方「角色设定」提到可使用 emoji，本世界也以本条为准）。",
+            "描写以冷峻的感官细节为主：气味、触感、声响、痛觉、疲惫。",
+            "句子短促有力，避免甜腻语气词；情感通过动作与环境流露，而非直白抒情。",
+            "伤亡、血污、废墟等元素可写实呈现，但避免为残酷而残酷的炫技。"
+        ].join("\n");
+    }
+    // 克苏鲁/恐怖/悬疑/暗黑 → 不可名状
+    if (/(克苏鲁|恐怖|惊悚|悬疑|暗黑|诡异|怪谈|未知|疯狂|诡秘)/.test(text)) {
+        return [
+            "禁用 emoji 与心形符号（即使上方「角色设定」提到可使用 emoji，本世界也以本条为准）。",
+            "用不确定性、留白、不可名状感制造恐惧：不要细写怪物全貌，写它带来的错位与不安。",
+            "避免任何轻佻或亲密语气，保持疏离与压抑；叙事节奏克制，信息碎片化释放。",
+            "理智/认知的动摇是核心张力，可通过感知扭曲、记忆不可靠来体现。"
+        ].join("\n");
+    }
+    // 赛博朋克/黑色/冷峻/科幻/末世 → 冷光金属
+    if (/(赛博朋克|赛博|黑色|冷峻|犬儒|霓虹|科幻|废土公路|末世|丧尸|机甲)/.test(text)) {
+        return [
+            "禁用 emoji 与心形符号（即使上方「角色设定」提到可使用 emoji，本世界也以本条为准）。",
+            "用冷光、金属、数据、雨水等意象构建质感；对话带犬儒、锋利与距离感。",
+            "避免甜腻语气词；情感压抑在冷硬外壳下，通过反差与细节流露。",
+            "科技描写重质感与代价（义体、神经接口、监控），而非炫技。"
+        ].join("\n");
+    }
+    // 默认：克制使用 emoji，与基调一致
+    return "可在叙事中适度使用 emoji 来增强氛围（如 😊💀🔥✨），但须与当前叙事基调保持一致——日常向活泼些，高张力向克制使用。心形符号与语气词仅用于明确的恋爱/亲密场景，且须贴合人设。";
+}
+
+// 文风标签 → 推荐温度（严谨低、自由高）。配合 theme.js 的温度设定。
+export function styleToTemperature(style) {
+    if (!style) return 0.7; // 默认中性
+    if (/史诗|硬核|废土|克苏鲁|恐怖|悬疑|冷峻|黑色|武侠|仙侠/.test(style)) return 0.4;
+    if (/轻松|日常|恋爱|甜宠|治愈|温馨|校园|田园/.test(style)) return 0.8;
+    if (/赛博朋克|宏大|神话|科幻|末世/.test(style)) return 0.6;
+    return 0.7;
 }

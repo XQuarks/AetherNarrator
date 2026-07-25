@@ -247,14 +247,16 @@ export function updateFontSizeButtons() {
     });
 }
 
-export function updateTempLabel() {
-    const v = parseFloat(document.getElementById("temperatureSlider").value);
-    S.temperatureSetting = v;
-    localStorage.setItem("aigame_temperature", v.toString());
-    const desc = v <= 0.3 ? "严谨模式（高度一致）" : v <= 0.5 ? "剧情模式（稳定连贯）" : v <= 0.7 ? "均衡模式（适中开放）" : "创意模式（自由发散）";
-    document.getElementById("tempLabel").textContent = v.toFixed(1) + " — " + desc;
+export function tempLabelText(v) {
+    if (v <= 0.3) return "严谨模式（高度一致）";
+    if (v <= 0.5) return "剧情模式（稳定连贯）";
+    if (v <= 0.7) return "均衡模式（适中开放）";
+    return "创意模式（自由发散）";
 }
 
+// ★ 温度改为「每世界独立」：返回当前世界的 temperature_preset，缺失时回落中性值 0.5
 export function getTemperature() {
-    return S.temperatureSetting;
+    const w = S.currentWorld;
+    if (w && typeof w.temperature_preset === "number") return w.temperature_preset;
+    return 0.5;
 }

@@ -94,11 +94,6 @@
             </div>
         </div>
         <div class="settings-card">
-            <label class="settings-label">AI 创造性（温度）</label>
-            <input type="range" id="temperatureSlider" min="0" max="1" step="0.1" value="0.5" data-action="updateTempLabel" data-event="input">
-            <div class="settings-hint" id="tempLabel">0.5 — 剧情模式（稳定连贯）</div>
-        </div>
-        <div class="settings-card">
             <label class="settings-label">
                 <input type="checkbox" id="loreRequireConfirm" data-action="toggleLoreRequireConfirm" data-event="change" style="width:auto;">
                 知识库修订需我手动确认
@@ -398,7 +393,69 @@
                         </label>
                     </div>
                     <div class="conditional-field" id="customStyleField">
-                        <textarea id="customStyle" placeholder="描述你想要的文风，例如：冷峻克制、江湖气息浓厚、对话简练不拖沓..." style="min-height:80px;"></textarea>
+                        <textarea id="customStyle" placeholder="描述你想要的文风，例如：冷峻克制、江湖气息浓厚、对话简练不拖沓..." style="min-height:80px;" data-action="onCustomStyleInput" data-event="input"></textarea>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>叙事偏好（可选，帮 AI 更贴合你的期待）</label>
+                    <div class="pref-block">
+                        <div class="pref-label">题材</div>
+                        <div class="tag-row" data-pref="genre">
+                            <button type="button" class="tag-chip" data-val="都市" data-action="selectTagPref" data-event="click">都市</button>
+                            <button type="button" class="tag-chip" data-val="仙侠" data-action="selectTagPref" data-event="click">仙侠</button>
+                            <button type="button" class="tag-chip" data-val="克苏鲁" data-action="selectTagPref" data-event="click">克苏鲁</button>
+                            <button type="button" class="tag-chip" data-val="赛博朋克" data-action="selectTagPref" data-event="click">赛博朋克</button>
+                            <button type="button" class="tag-chip" data-val="西幻" data-action="selectTagPref" data-event="click">西幻</button>
+                            <button type="button" class="tag-chip" data-val="武侠" data-action="selectTagPref" data-event="click">武侠</button>
+                            <button type="button" class="tag-chip" data-val="末世" data-action="selectTagPref" data-event="click">末世</button>
+                        </div>
+                    </div>
+                    <div class="pref-block">
+                        <div class="pref-label">主题（可多选）</div>
+                        <div class="tag-row" data-pref="tropes" data-multi="1">
+                            <button type="button" class="tag-chip" data-val="逆袭" data-action="selectTagPref" data-event="click">逆袭</button>
+                            <button type="button" class="tag-chip" data-val="复仇" data-action="selectTagPref" data-event="click">复仇</button>
+                            <button type="button" class="tag-chip" data-val="甜宠" data-action="selectTagPref" data-event="click">甜宠</button>
+                            <button type="button" class="tag-chip" data-val="系统" data-action="selectTagPref" data-event="click">系统</button>
+                            <button type="button" class="tag-chip" data-val="成长" data-action="selectTagPref" data-event="click">成长</button>
+                            <button type="button" class="tag-chip" data-val="悬疑" data-action="selectTagPref" data-event="click">悬疑</button>
+                            <button type="button" class="tag-chip" data-val="救赎" data-action="selectTagPref" data-event="click">救赎</button>
+                        </div>
+                    </div>
+                    <div class="pref-block">
+                        <div class="pref-label">口味</div>
+                        <div class="tag-row" data-pref="taste">
+                            <button type="button" class="tag-chip" data-val="爽快" data-action="selectTagPref" data-event="click">爽快</button>
+                            <button type="button" class="tag-chip" data-val="暗黑" data-action="selectTagPref" data-event="click">暗黑</button>
+                            <button type="button" class="tag-chip" data-val="治愈" data-action="selectTagPref" data-event="click">治愈</button>
+                            <button type="button" class="tag-chip" data-val="史诗" data-action="selectTagPref" data-event="click">史诗</button>
+                            <button type="button" class="tag-chip" data-val="轻松" data-action="selectTagPref" data-event="click">轻松</button>
+                        </div>
+                    </div>
+                    <div class="pref-block">
+                        <div class="pref-label">视角</div>
+                        <div class="tag-row" data-pref="pov">
+                            <button type="button" class="tag-chip" data-val="第一人称" data-action="selectTagPref" data-event="click">第一人称</button>
+                            <button type="button" class="tag-chip" data-val="第二人称" data-action="selectTagPref" data-event="click">第二人称</button>
+                            <button type="button" class="tag-chip" data-val="第三人称" data-action="selectTagPref" data-event="click">第三人称</button>
+                        </div>
+                    </div>
+                    <div class="pref-block">
+                        <div class="pref-label">文风</div>
+                        <div class="tag-row" data-pref="style">
+                            <button type="button" class="tag-chip" data-val="轻松" data-action="selectTagPref" data-event="click">轻松</button>
+                            <button type="button" class="tag-chip" data-val="克制" data-action="selectTagPref" data-event="click">克制</button>
+                            <button type="button" class="tag-chip" data-val="华丽" data-action="selectTagPref" data-event="click">华丽</button>
+                            <button type="button" class="tag-chip" data-val="冷峻" data-action="selectTagPref" data-event="click">冷峻</button>
+                            <button type="button" class="tag-chip" data-val="写实" data-action="selectTagPref" data-event="click">写实</button>
+                        </div>
+                    </div>
+                    <div class="pref-block">
+                        <div class="pref-label">自定义标签（最多 10 字）</div>
+                        <div class="custom-tag-row">
+                            <input type="text" id="customTag" maxlength="10" placeholder="例如：群像、慢热..." data-action="onCustomTagInput" data-event="input">
+                            <span class="char-count" id="customTagCount">0/10</span>
+                        </div>
                     </div>
                 </div>
                 <div class="form-group">
@@ -411,6 +468,18 @@
                             <span>完全自由创作</span>
                         </div>
                     </div>
+                </div>
+                <div class="form-group">
+                    <label>AI 创造性（温度）</label>
+                    <div class="range-slider-wrapper">
+                        <input type="range" id="worldTemp" min="0" max="1" step="0.1" value="0.7" data-action="updateWorldTempLabel" data-event="input">
+                        <div class="range-current" id="worldTempLabel">0.7 — 均衡模式（适中开放）</div>
+                        <div class="range-labels">
+                            <span>严谨一致</span>
+                            <span>自由发散</span>
+                        </div>
+                    </div>
+                    <div class="hint">控制生成剧情的随机度。越低越稳定连贯，越高越自由发散。AI 已按你选的文风预填推荐值，可手动调整。</div>
                 </div>
                 <details class="advanced-details">
                     <summary>高级选项（特殊要求）</summary>

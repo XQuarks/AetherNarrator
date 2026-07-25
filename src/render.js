@@ -4,8 +4,9 @@
 import { S, calendarLabel, MEMORY_TYPE_LABELS } from "./store.js";
 
 import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema } from "./utils.js";
-import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, formatTimeLabel, formatDeadlineLabel, stepOf, updateFontSizeButtons, updateTempLabel, getAllTimelineViews, formatDateOnly } from "./theme.js";
+import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, formatTimeLabel, formatDeadlineLabel, stepOf, updateFontSizeButtons, getAllTimelineViews, formatDateOnly, tempLabelText } from "./theme.js";
 import { abortCurrentRequest, chooseOption, confirmRestart, continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./game.js";
+import { styleToTemperature } from "./prompt.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
 
 export function showScreen(id) {
@@ -74,8 +75,6 @@ export function showSettingsModal() {
 }
 function updateSettingsValues() {
     updateFontSizeButtons();
-    document.getElementById("temperatureSlider").value = S.temperatureSetting;
-    updateTempLabel();
     const lrc = document.getElementById("loreRequireConfirm");
     if (lrc) lrc.checked = S.loreRequireConfirm;
 }
@@ -129,6 +128,11 @@ function resetCreateWorldForm() {
     // 剧情自由度默认：3
     const pf = document.getElementById("plotFreedom"); if (pf) pf.value = "3";
     updatePlotFreedomLabel("3");
+    // 每世界温度默认：0.7（与「参考原版」风格一致），标签同步
+    const wtEl = document.getElementById("worldTemp"); if (wtEl) wtEl.value = "0.7";
+    updateWorldTempLabel();
+    // ★ A1：叙事偏好标签重置
+    resetStylePrefs();
     // 收起高级折叠
     const adv = document.querySelector("#createWorldModal details.advanced-details");
     if (adv) adv.open = false;
@@ -239,6 +243,7 @@ export function selectStyleRef(value, el) {
     } else {
         customField.classList.remove("show");
     }
+    syncWorldTempToStyle(); // ★ 每世界温度：切换文风时同步推荐温度
 }
 
 export function getSelectedStyleRef() {
@@ -255,6 +260,73 @@ export function updatePlotFreedomLabel(value) {
         5: "完全自由 — 仅用世界框架，剧情独立发展"
     };
     document.getElementById("plotFreedomLabel").textContent = labels[value] || "";
+}
+
+// ★ 每世界温度：创建卡滑块实时标签
+export function updateWorldTempLabel() {
+    const slider = document.getElementById("worldTemp");
+    if (!slider) return;
+    const v = parseFloat(slider.value);
+    const lbl = document.getElementById("worldTempLabel");
+    if (lbl) lbl.textContent = v.toFixed(1) + " — " + tempLabelText(v);
+}
+
+// ★ 每世界温度：根据所选文风预填推荐温度（original/none → 0.7，custom → 解析文风文本）
+export function syncWorldTempToStyle() {
+    const ref = getSelectedStyleRef();
+    let t = 0.7;
+    if (ref === "custom") {
+        const cs = document.getElementById("customStyle");
+        t = styleToTemperature(cs ? cs.value : "");
+    }
+    const slider = document.getElementById("worldTemp");
+    if (slider) slider.value = t.toFixed(1);
+    updateWorldTempLabel();
+}
+
+// ★ A1 结构化偏好标签：题材/主题(可多选)/口味/视角/文风 + 自定义标签(≤10字)
+export function selectTagPref(el) {
+    const row = el.closest(".tag-row");
+    if (!row) return;
+    const multi = row.dataset.multi === "1";
+    if (multi) {
+        el.classList.toggle("selected");
+    } else {
+        row.querySelectorAll(".tag-chip").forEach(c => c.classList.remove("selected"));
+        el.classList.add("selected");
+    }
+}
+
+export function onCustomTagInput(el) {
+    const cnt = document.getElementById("customTagCount");
+    if (cnt) cnt.textContent = (el.value.length) + "/10";
+}
+
+// 收集创建卡所选叙事偏好，返回写入 world.style_profile 的对象
+export function collectStylePrefs() {
+    const single = (key) => {
+        const c = document.querySelector('.tag-row[data-pref="' + key + '"] .tag-chip.selected');
+        return c ? c.dataset.val : null;
+    };
+    const multi = (key) => Array.from(document.querySelectorAll('.tag-row[data-pref="' + key + '"] .tag-chip.selected')).map(c => c.dataset.val);
+    const ct = document.getElementById("customTag");
+    return {
+        genre: single("genre"),
+        tropes: multi("tropes"),
+        taste: single("taste"),
+        pov: single("pov"),
+        style: single("style"),
+        custom_tag: ct ? ct.value.trim().slice(0, 10) : ""
+    };
+}
+
+// 打开创建向导时重置叙事偏好标签
+export function resetStylePrefs() {
+    document.querySelectorAll(".tag-row .tag-chip.selected").forEach(c => c.classList.remove("selected"));
+    const ct = document.getElementById("customTag");
+    if (ct) ct.value = "";
+    const cnt = document.getElementById("customTagCount");
+    if (cnt) cnt.textContent = "0/10";
 }
 
 export function toggleCustomPrefix(enabled, el) {

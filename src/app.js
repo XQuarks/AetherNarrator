@@ -5,13 +5,13 @@ import { S } from "./store.js";
 import { STORAGE_KEYS } from "./store.js";
 import { warmupEmbeddingWorker } from "./rag.js";
 import { deepClone } from "./utils.js";
-import { applyFontSize, applyTheme, changeFontSize, toggleTheme, updateTempLabel } from "./theme.js";
+import { applyFontSize, applyTheme, changeFontSize, toggleTheme } from "./theme.js";
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
-import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, cwNext, cwPrev } from "./render.js";
+import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev } from "./render.js";
 import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreRequireConfirm, togglePinMemory, triggerMemoryPackImport, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore, switchTimeline } from "./game.js";
-import { syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening } from "./lore-ui.js";
+import { syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel } from "./lore-ui.js";
 
 async function init() {
     applyTheme();
@@ -156,13 +156,17 @@ const ACTIONS = {
     // 字体
     changeFontSize: (el) => changeFontSize(el.dataset.size),
     // 滑块/下拉
-    updateTempLabel: () => updateTempLabel(),
     updatePlotFreedomLabel: (el) => updatePlotFreedomLabel(el.value),
+    updateWorldTempLabel: () => updateWorldTempLabel(),
+    onCustomStyleInput: () => syncWorldTempToStyle(),
+    worldTempChanged: () => updateTcTempLabel(),
     onWorldTypeChange: (el) => onWorldTypeChange(el.value),
     onProviderChange: (el) => applyProviderPreset(el.value),
     handleFileSelect: (el, e) => handleFileSelect(e),
     // radio 组
     selectStyleRef: (el) => selectStyleRef(el.value, el.closest(".radio-option")),
+    selectTagPref: (el) => selectTagPref(el),
+    onCustomTagInput: (el) => onCustomTagInput(el),
     toggleWorldPrefix: (el) => toggleWorldPrefix(el.value === "on", el.closest(".radio-option")),
     toggleCustomPrefix: (el) => toggleCustomPrefix(el.value === "on", el.closest(".radio-option")),
     // 开局

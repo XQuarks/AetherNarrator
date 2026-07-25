@@ -146,9 +146,11 @@ export function createCthulhuWorld() {
         behavior_records: [],
         style_ref: "original",
         custom_style: "",
+        style_profile: {},
         plot_freedom: 3,
         custom_prefix: "",
-        rules: []
+        rules: [],
+        temperature_preset: 0.4
     };
 }
 
@@ -287,9 +289,11 @@ export function createUrbanLegendWorld() {
         behavior_records: [],
         style_ref: "none",
         custom_style: "",
+        style_profile: {},
         plot_freedom: 4,
         custom_prefix: "",
-        rules: []
+        rules: [],
+        temperature_preset: 0.5
     };
 }
 
@@ -427,8 +431,10 @@ export function createDualWorld() {
         behavior_records: [],
         style_ref: "none",
         custom_style: "",
+        style_profile: {},
         plot_freedom: 4,
         custom_prefix: "",
-        rules: []
+        rules: [],
+        temperature_preset: 0.5
     };
 }

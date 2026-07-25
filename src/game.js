@@ -9,9 +9,9 @@ import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartD
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
-import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
+import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory, styleToTemperature } from "./prompt.js";
 import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative } from "./llm.js";
-import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry } from "./render.js";
+import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry, collectStylePrefs } from "./render.js";
 import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules, recordWorldviewNag } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { createWorldPack } from "./world-transfer.js";
@@ -175,9 +175,15 @@ export async function generateWorld() {
             source_content: capSource(S.sourceFileContent),
             style_ref: styleRef,
             custom_style: customStyle,
+            style_profile: collectStylePrefs(), // ★ A1：题材/主题/口味/视角/文风/自定义标签
             plot_freedom: plotFreedom,
             custom_prefix: customPrefix,
-            rules: [] // ★ Phase 2：规则 DSL（创作者界面配置，见 docs/Phase2改造方案.md）
+            rules: [], // ★ Phase 2：规则 DSL（创作者界面配置，见 docs/Phase2改造方案.md）
+            temperature_preset: (() => {
+                const tEl = document.getElementById("worldTemp");
+                const v = tEl ? parseFloat(tEl.value) : NaN;
+                return Number.isFinite(v) ? v : styleToTemperature(customStyle);
+            })()
         };
         S.worlds.unshift(world);
         saveWorlds();

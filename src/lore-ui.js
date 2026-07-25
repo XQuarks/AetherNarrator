@@ -16,6 +16,7 @@ import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { markPromotedRecords } from "./promotion.js"; // ★ B6：晋升后标记原记忆 promoted
 import { callLoreRevisionLLM, extractLoreFromSource, callRegenerateOpeningLLM, callOptimizeOpeningLLM } from "./llm.js";
 import { invalidateSystemPromptCache } from "./prompt.js";
+import { tempLabelText } from "./theme.js";
 import { invalidateLoreAnn } from "./ann-index.js";
 import { renderLoreMarkdown } from "./markdown.js"; // ★ 步骤 B：Obsidian 风 markdown 渲染封装
 import { REL_COLORS, ENTITY_COLOR, buildGraphModel } from "./kg-graph.js"; // ★ Phase 4：知识图谱模型（纯函数）
@@ -107,6 +108,8 @@ function renderTimeConfigSection(mode) {
         .map(([v, t]) => `<option value="${v}"${cfg.calendar_mode === v ? " selected" : ""}>${t}</option>`).join("");
     const clkOpts = Object.entries(CLOCK_LABELS)
         .map(([v, t]) => `<option value="${v}"${cfg.clock_mode === v ? " selected" : ""}>${t}</option>`).join("");
+    // ★ 每世界温度：读当前世界 temperature_preset（缺失回落 0.5）
+    const curTemp = (S.currentWorld && typeof S.currentWorld.temperature_preset === "number") ? S.currentWorld.temperature_preset : 0.5;
     // S5-1：起始日期输入框（gregorian/lunar/custom_calendar 显示；day/none 隐藏）
     const TC_DATED_MODES = ["gregorian", "lunar", "custom_calendar"];
     const showStart = TC_DATED_MODES.includes(cfg.calendar_mode);
@@ -132,6 +135,14 @@ function renderTimeConfigSection(mode) {
             <div class="form-group"><label>时钟</label><select id="tc_clock">${clkOpts}</select></div>
             <div class="form-group"><label>当前天气</label><input id="tc_weather" maxlength="20" value="${escapeHtml(cfg.weather || "")}" placeholder="例如：细雨"></div>
             <div class="form-group time-cfg-show"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="tc_show" style="width:auto;" ${cfg.show !== false ? "checked" : ""}><span>在界面显示世界时间</span></label></div>
+            <div class="form-group"><label>AI 创造性（温度）</label>
+                <div class="range-slider-wrapper">
+                    <input type="range" id="tc_temp" min="0" max="1" step="0.1" value="${curTemp.toFixed(1)}" data-action="worldTempChanged" data-event="input">
+                    <div class="range-current" id="tc_temp_label">${tempLabelText(curTemp)}</div>
+                    <div class="range-labels"><span>严谨一致</span><span>自由发散</span></div>
+                </div>
+                <div class="hint">控制剧情生成的随机度。越低越稳定连贯，越高越自由发散。</div>
+            </div>
             ${startRow}
             ${multiverseHint}
         </div>
@@ -139,6 +150,15 @@ function renderTimeConfigSection(mode) {
         <div id="timeConflictBadge" class="time-conflict-badge" style="display:none;"></div>
         ${renderOpeningFixActions()}
     </div>`;
+}
+
+// ★ 每世界温度：世界编辑卡滑块实时标签
+export function updateTcTempLabel() {
+    const slider = document.getElementById("tc_temp");
+    if (!slider) return;
+    const v = parseFloat(slider.value);
+    const lbl = document.getElementById("tc_temp_label");
+    if (lbl) lbl.textContent = tempLabelText(v);
 }
 
 // ★ 步骤 B：三栏链状（Obsidian 风）知识库 UI
@@ -728,6 +748,9 @@ export async function saveLoreReview() {
         delete tc.season;
         tc.weather = (document.getElementById("tc_weather")?.value || "").trim().slice(0, 20);
         tc.show = !!document.getElementById("tc_show")?.checked;
+        // ★ 每世界温度：写回 tc_temp
+        const tEl = document.getElementById("tc_temp");
+        if (tEl) { const tv = parseFloat(tEl.value); if (Number.isFinite(tv)) S.currentWorld.temperature_preset = tv; }
         if (!S.currentWorld.schema) S.currentWorld.schema = defaultWorldSchema(S.currentWorld.name);
         S.currentWorld.schema.time_config = tc;
     }
