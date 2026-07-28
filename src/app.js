@@ -10,8 +10,27 @@ import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset }
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev } from "./render.js";
-import { addLoreEntry, backToHomeAfterGameOver, chooseOption, confirmLoreRevision, confirmRestart, deleteMemory, doRestartConfirmed, continueLatestSave, deleteLoreEntry, deleteSave, deleteWorld, editWorldLore, editSaveLore, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, loadSave, openLoreReview, rejectLoreRevision, restToNextDay, reviewDeathScene, saveAuthorNote, saveLoreReview, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, startGame, submitInput, toggleAIEnhanced, toggleLoreRequireConfirm, togglePinMemory, triggerMemoryPackImport, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore, switchTimeline } from "./game.js";
-import { syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel } from "./lore-ui.js";
+import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline } from "./game.js";
+import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./save.js";
+import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
+import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
+import { openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview } from "./lore-editors.js";
+
+// 小工具（docs/34 #7 消重）：fetch 数据文件，失败时告警并返回兜底值，各文件独立降级互不影响
+async function fetchDataSafe(url, fallback, asText = false) {
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return asText ? await res.text() : await res.json();
+    } catch (e) { console.warn(url + " 加载失败:", e.message); return fallback; }
+}
+
+// 小工具（docs/34 #7 消重）：读 IndexedDB 并 JSON.parse，缺失/损坏返回兜底值
+async function idbGetJson(key, fallback) {
+    const raw = await idbGet(key);
+    if (!raw) return fallback;
+    try { return JSON.parse(raw); } catch (e) { return fallback; }
+}
 
 async function init() {
     applyTheme();
@@ -19,52 +38,29 @@ async function init() {
     await loadConfig();
 
     // 逐个加载数据文件，各自独立降级，一个失败不影响其他
-    try {
-        const res = await fetch("./data/lore_kb.json");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        S.loreKB = await res.json();
-    } catch (e) { console.warn("lore_kb.json 加载失败:", e.message); S.loreKB = { ip: "默认世界", snippets: [] }; }
+    S.loreKB = await fetchDataSafe("./data/lore_kb.json", { ip: "默认世界", snippets: [] });
+    S.loreEmbeddings = await fetchDataSafe("./data/lore_kb_with_embeddings.json", null);
+    S.systemPromptTemplate = await fetchDataSafe("./data/system_prompt_template.md", "", true);
 
-    try {
-        const res = await fetch("./data/lore_kb_with_embeddings.json");
-        if (res.ok) S.loreEmbeddings = await res.json();
-    } catch (e) { console.warn("向量知识库加载失败:", e.message); S.loreEmbeddings = null; }
-
-    try {
-        const res = await fetch("./data/system_prompt_template.md");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        S.systemPromptTemplate = await res.text();
-    } catch (e) { console.warn("system_prompt_template.md 加载失败:", e.message); S.systemPromptTemplate = ""; }
-
-    try {
-        const res = await fetch("./data/initial_state.json");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const state = await res.json();
-        const saved = await idbGet(STORAGE_KEYS.state);
-        if (saved) {
-            try { S.gameState = JSON.parse(saved); } catch (e) { S.gameState = deepClone(state); }
-        } else {
-            S.gameState = deepClone(state);
-        }
-    } catch (e) { console.warn("initial_state.json 加载失败:", e.message); S.gameState = null; }
+    const initialState = await fetchDataSafe("./data/initial_state.json", null);
+    if (initialState) {
+        // 优先用已存档的运行时状态，缺失/损坏则回退初始状态模板
+        S.gameState = await idbGetJson(STORAGE_KEYS.state, null) || deepClone(initialState);
+    } else {
+        S.gameState = null;
+    }
 
     // loreKB 已就绪，现在创建 demo 世界
     await loadWorlds();
     // 存档迁移依赖世界模板（用于旧知识库/行为记忆的兼容复制），必须后加载。
     await loadSaves();
 
-    const savedHistory = await idbGet(STORAGE_KEYS.history);
-    if (savedHistory) {
-        try { S.conversationHistory = JSON.parse(savedHistory); } catch (e) { S.conversationHistory = []; }
-    }
-    const savedChat = await idbGet(STORAGE_KEYS.chatHistory);
-    if (savedChat) {
-        try { S.chatHistory = JSON.parse(savedChat); } catch (e) { S.chatHistory = []; }
-    }
-    const savedSummary = await idbGet(STORAGE_KEYS.chatSummary);
-    if (savedSummary) {
-        try { S.chatSummary = JSON.parse(savedSummary); } catch (e) { S.chatSummary = []; }
-    }
+    const savedHistory = await idbGetJson(STORAGE_KEYS.history, null);
+    if (savedHistory) S.conversationHistory = savedHistory;
+    const savedChat = await idbGetJson(STORAGE_KEYS.chatHistory, null);
+    if (savedChat) S.chatHistory = savedChat;
+    const savedSummary = await idbGetJson(STORAGE_KEYS.chatSummary, null);
+    if (savedSummary) S.chatSummary = savedSummary;
     renderWorldList();
     renderSaveList();
 
@@ -225,8 +221,33 @@ const ACTIONS = {
     ruleTypeChange: (el) => ruleTypeChange(el),
     importBannedAsRules: () => importBannedAsRules(),
     saveRuleReview: () => saveRuleReview(),
+    // ★ B1：人物卡编辑器
+    openCharacterEditor: (el) => openCharacterEditor(el.dataset.id),
+    addCharacter: () => addCharacter(),
+    deleteCharacter: (el) => deleteCharacter(el.dataset.idx),
+    saveCharacterReview: () => saveCharacterReview(),
+    generateCharactersAI: () => generateCharactersAI(),
+    openVariableEditor: (el) => openVariableEditor(el.dataset.id),
+    addVariable: () => addVariable(),
+    deleteVariable: (el) => deleteVariable(el.dataset.idx),
+    saveVariableReview: () => saveVariableReview(),
+    // ★ B3：初始物品编辑器
+    openItemEditor: (el) => openItemEditor(el.dataset.id),
+    addItem: () => addItem(),
+    deleteItem: (el) => deleteItem(el.dataset.idx),
+    saveItemReview: () => saveItemReview(),
     // ★ S5-4：编辑卡时间体系字段改动 → 写回 schema 并实时刷新冲突徽章
-    timeConfigChanged: () => { syncTimeConfigFromDOM(); updateTimeConflictBadge(); },
+    timeConfigChanged: () => { syncTimeConfigFromDOM(); updateTimeConflictBadge(); refreshCustomCalendarEditor(); },
+    // ★ UI-1：自定义历法可视化编辑器（docs/35 方案 C）
+    ccAddMonth: () => ccAddMonth(),
+    ccDelMonth: (el) => ccDelMonth(Number(el.dataset.idx)),
+    ccMoveMonth: (el) => ccMoveMonth(Number(el.dataset.from), Number(el.dataset.to)),
+    ccRenMonthName: (el) => ccRenMonthName(Number(el.dataset.idx), el.value),
+    ccRenMonthDays: (el) => ccRenMonthDays(Number(el.dataset.idx), el.value),
+    ccRenLabel: (el) => ccRenLabel(el.value),
+    ccLeapMonth: (el) => ccLeapMonth(Number(el.dataset.after)),
+    ccPreset: (el) => ccPreset(el.dataset.preset),
+    ccClearMonths: () => ccClearMonths(),
     // ★ S5-4' + S5-7：开场白时间冲突一键修复
     regenerateOpening: () => regenerateOpening("regenerate"),
     convertOpeningToPlaceholders: () => regenerateOpening("toPlaceholders"),

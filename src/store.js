@@ -6,6 +6,7 @@
 // ★ node 环境（如 npm test）无 localStorage，顶层读取需守卫，避免模块加载即崩
 const _lsGet = (k, d) => (typeof localStorage !== "undefined" ? (localStorage.getItem(k) ?? d) : d);
 export const S = {
+  // ===== 分区 A · 运行时状态 runtime（游戏/世界/存档/对话核心数据；高频读写） =====
   gameState: null,
   loreKB: null,
   loreEmbeddings: null,
@@ -15,14 +16,22 @@ export const S = {
   conversationHistory: [],
   chatHistory: [],
   chatSummary: [],
+  // ===== 分区 B · 缓存 cache（提示词缓存/向量/会话统计；避免重复计算 token） =====
   systemPromptTemplate: "",
   cachedSystemPrompt: null,
   cachedSysPromptWorldId: null,
+  // ★ Phase 5 L2：角色卡独立缓存断点（与 L1 core / 知识库硬约束段分离）
+  cachedCharactersPrompt: null,
+  cachedCharactersWorldId: null,
+  // ★ Phase 5 L2：知识库硬约束独立缓存断点
+  cachedLoreHardPrompt: null,
+  cachedLoreHardWorldId: null,
   currentChoices: [],
   embeddingModel: null,
   currentWorld: null,
   worlds: [],
   saves: [],
+  // ===== 分区 C · UI / 视图状态（主题/字体/打字机/弹窗焦点/loading） =====
   currentStatusTab: "profile",
   sourceFileContent: "",
   currentTheme: _lsGet("aigame_theme", "dark"),
@@ -31,6 +40,7 @@ export const S = {
   auxiliaryControllers: new Set(),
   isGenerating: false,
   lastCacheStats: { hitTokens: 0, missTokens: 0, totalTokens: 0, hitRate: "0%" },
+  // ===== 分区 D · 调试数据 debug（导出诊断用，不参与玩法） =====
   debugLog: { sessionStart: new Date().toISOString(), worldCreations: [], chunkErrors: [], turns: [] },
   themeClickCount: 0,
   themeClickTimer: null,
@@ -45,6 +55,7 @@ export const S = {
   toastTimer: null,
   loadingStartTime: 0,
   loadingInterval: null,
+  // ===== 分区 E · 临时编辑缓冲（知识库/重开草稿；取消不影响原数据） =====
   _loreEdit: null,   // ★ B3：知识库编辑面板的临时草稿缓冲（取消编辑不影响原数据）
   _loreEditingWorldDefault: false,
   _restartWorldId: null, // ★ 修复：重新开始确认弹窗暂存目标世界 id（原生 confirm 在沙箱被吞，改用自定义弹窗）
@@ -56,6 +67,13 @@ export const S = {
 // Phase 2：规则 DSL 解释器（纯函数，无 store 反向依赖，避免循环引用）
 import { evaluateRules, legacyBanEntry } from "./worldview.js";
 import { validateStartDate } from "./calendar.js";
+import { detectIp, matchKnownIp } from "./utils.js";
+
+// ★ B7：读取当前生效知识库——优先当前存档的独立副本（不污染 world 出厂默认）。
+// 纯状态读取器，原在 rag.js；移入 store 以打破 rag↔prompt 循环依赖（docs/34 #1）。
+export function getWorldLoreKB() {
+    return S.activeLoreKB || (S.currentWorld && S.currentWorld.lore_kb) || S.loreKB;
+}
 
 export const MAX_CHAT_MESSAGES = 40;
 
@@ -379,28 +397,48 @@ export function getActiveConditionTags() {
 }
 
 // 获取当前世界「仍被禁用」的概念字符串数组（已解锁的概念不在此列）。
+// ★ A2 #5：从世界派生"当前禁项概念"列表（供 prompt 禁律段 + worldview 守卫）。
+// 来源：① 旧版 world.bannedConcepts（兼容历史世界）② world.rules 里的 ban 类型规则（玩家可编辑的主来源）。
+// 解锁语义（与旧 getBannedConcepts 一致）：条目带 unlockTags 时，仅当"任一解锁标签处于活跃"才放行（不禁用）；
+//   不带 unlockTags 或标签未活跃 → 禁用。不再包含全局 DEFAULT_BANNED_CONCEPTS。
+function collectBannedConcepts(world, activeTags) {
+    const set = new Set();
+    const out = [];
+    const push = (concept, unlockTags) => {
+        const c = (concept == null ? "" : String(concept)).trim();
+        if (!c || set.has(c)) return;
+        const ut = Array.isArray(unlockTags) ? unlockTags : [];
+        // 解锁语义（与旧 getBannedConcepts 一致）：仅当"带解锁标签且任一标签活跃"才放行（不禁用）；
+        //   无解锁标签（默认禁用）或标签未活跃 → 禁用。
+        const released = ut.length > 0 && activeTags && ut.some(t => activeTags.has(t));
+        if (released) return;
+        set.add(c);
+        out.push(c);
+    };
+    if (world && Array.isArray(world.bannedConcepts)) {
+        for (const e of world.bannedConcepts) {
+            const concept = typeof e === "string" ? e : (e && e.concept);
+            const ut = typeof e === "string" ? [] : (e && Array.isArray(e.unlockTags) ? e.unlockTags : []);
+            push(concept, ut);
+        }
+    }
+    if (world && Array.isArray(world.rules)) {
+        for (const r of world.rules) {
+            if (!r || r.enabled === false) continue;
+            const then = r.then;
+            if (then && then.type === "ban" && then.concept) push(then.concept, then.unlockTags);
+        }
+    }
+    return out;
+}
+
 // - 自由度 4–5 级：设计允许自由发挥，返回空（守卫放宽）
-// - 世界若配置了 bannedConcepts（同结构）则用世界配置，否则用默认词表
-// - 任一 unlockTag 处于活跃状态的概念被解锁；不兼容旧版纯字符串条目（视为永远禁用）
-// 注意：本函数依赖当前 gameState 的活跃标签，调用时机应在状态变更之后（A2 在 processTurn 里即如此）。
+// - ★ A2 #5：去掉全局 DEFAULT_BANNED_CONCEPTS 强加；禁项来自 world.rules 的 ban 规则 + 旧 world.bannedConcepts
 export function getBannedConcepts() {
     const w = S.currentWorld;
     const freedom = (w && typeof w.plot_freedom === "number") ? w.plot_freedom : 3;
     if (freedom >= 4) return [];
-    const list = (w && Array.isArray(w.bannedConcepts) && w.bannedConcepts.length)
-        ? w.bannedConcepts
-        : DEFAULT_BANNED_CONCEPTS;
-    const active = getActiveConditionTags();
-    const banned = [];
-    for (const entry of list) {
-        // 兼容旧格式：纯字符串条目 → 永远禁用
-        const concept = (typeof entry === "string") ? entry : (entry && entry.concept);
-        if (!concept) continue;
-        const unlockTags = (typeof entry === "string") ? [] : (entry && Array.isArray(entry.unlockTags) ? entry.unlockTags : []);
-        const unlocked = unlockTags.some(t => active.has(t));
-        if (!unlocked) banned.push(concept);
-    }
-    return banned;
+    return collectBannedConcepts(w, getActiveConditionTags());
 }
 
 // 返回当前世界「仍被禁用」的概念规则数组（喂给 worldview 守卫）。
@@ -414,15 +452,304 @@ export function getBannedConceptRules() {
     const freedom = (typeof w.plot_freedom === "number") ? w.plot_freedom : 3;
     if (freedom >= 4) return [];
     const ev = evaluateRules(w, S.gameState);
-    if (Array.isArray(w.bannedConcepts) && w.bannedConcepts.length) {
-        const banned = [];
-        for (const e of w.bannedConcepts) {
-            const b = legacyBanEntry(e);
-            if (b) banned.push(b);
-        }
-        for (const b of ev.bannedConcepts) banned.push(b); // DSL ban 规则叠加
-        return banned;
+    // ★ A2 #5：去掉全局 DEFAULT_BANNED_CONCEPTS 回退。ev.bannedConcepts 已含 rules 的 ban 规则 + 旧 bannedConcepts（worldview.evaluateRules 合并）。
+    return ev.bannedConcepts;
+}
+
+// ★ A2：统一"权威设定"模型的最小初始化（不破坏既有字段）
+export function ensureWorldCanon(world) {
+    if (!world || typeof world !== "object") return;
+    if (!world.canon || typeof world.canon !== "object") {
+        world.canon = {
+            mode: (world.ip_name || world.type === "ip") ? "ip_adaptation" : "original",
+            ip_name: world.ip_name || null,
+            source: "none",
+            detected: [],
+            key_divergences: "",
+            consistency_pack: null,
+            pack_source: null
+        };
     }
-    if (ev.bannedConcepts.length) return ev.bannedConcepts;
-    return DEFAULT_BANNED_CONCEPTS.slice();
+    const c = world.canon;
+    if (c.mode == null) c.mode = (c.ip_name || world.type === "ip") ? "ip_adaptation" : "original";
+    if (c.source == null) c.source = "none";
+    if (!Array.isArray(c.detected)) c.detected = [];
+    if (typeof c.key_divergences !== "string") c.key_divergences = "";
+    if (c.consistency_pack === undefined) c.consistency_pack = null;
+    if (c.pack_source === undefined) c.pack_source = null;
+    return c;
+}
+
+// ★ B1：人物卡模型兜底——保证 world.characters 始终是数组（与 ensureWorldCanon 同族）。
+// 每张卡字段见 docs/30_B1人物卡方案.md；只保证数组存在，不覆盖已有内容。
+export function ensureWorldCharacters(world) {
+    if (!world || typeof world !== "object") return;
+    if (!Array.isArray(world.characters)) world.characters = [];
+    // 兜底单张卡的必要字段（id / role），避免脏数据导致 UI / 注入崩溃
+    world.characters = world.characters.filter(c => c && typeof c === "object").map((c, i) => {
+        if (typeof c.id !== "string" || !c.id) c.id = "c" + Date.now().toString(36) + "_" + i;
+        if (c.role !== "protagonist" && c.role !== "npc") c.role = c.role || "npc";
+        // ★ B4：兜底 affinity / rel_tags，避免脏数据导致 UI / 注入崩溃
+        if (typeof c.affinity !== "number" || !isFinite(c.affinity)) c.affinity = 0;
+        else c.affinity = Math.max(-100, Math.min(100, c.affinity));
+        if (!Array.isArray(c.rel_tags)) c.rel_tags = [];
+        return c;
+    });
+    return world.characters;
+}
+
+// ★ B1：新建一张空白人物卡（供编辑器「＋ 添加角色」使用）。
+export function defaultCharacter(role) {
+    return {
+        id: "c" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
+        role: role === "protagonist" ? "protagonist" : "npc",
+        name: "",
+        identity: "",
+        gender_age: "",
+        appearance: "",
+        personality: "",
+        motivation: "",
+        relationship: "",
+        attitude: "",
+        current_state: "",
+        voice: "",
+        untouchable: "",
+        notes: "",
+        affinity: 0,        // ★ B4：初始好感度（NPC 对主角），-100~100，默认 0；主角卡忽略
+        rel_tags: []        // ★ B4：关系标签，如 ["盟友","宿敌"]
+    };
+}
+
+// ============================================================
+// ★ B4 羁绊 / 好感度（数值层叠加在 B1 文字关系层之上；可选默认零压力）
+// - 运行时 bonds：{ [npcName]: { affinity:number, tags:string[], desc:string } }，按 NPC 名索引
+//   （与 S.gameState.relationships 一致用名字，AI 天然给名字、免 id 映射）
+// - 创作层：人物卡加 affinity / rel_tags（defaultCharacter 已含默认）
+// - AI 通过 state_changes.bonds 返回相对 delta，applyStateChanges 累加
+// ============================================================
+
+// 由世界定义初始化好感度 map（仅新游戏 startGame 调用，不用于读旧档 → 不兼容旧档）
+export function initBondsFromWorld(world) {
+    const bonds = {};
+    const chars = (world && Array.isArray(world.characters)) ? world.characters : [];
+    for (const c of chars) {
+        if (!c || c.role === "protagonist") continue;
+        const name = (typeof c.name === "string" && c.name.trim()) ? c.name.trim() : null;
+        if (!name) continue;
+        const aff = (typeof c.affinity === "number" && isFinite(c.affinity)) ? Math.max(-100, Math.min(100, c.affinity)) : 0;
+        bonds[name] = {
+            affinity: aff,
+            tags: Array.isArray(c.rel_tags) ? c.rel_tags.filter(t => typeof t === "string") : [],
+            desc: (typeof c.relationship === "string") ? c.relationship : ""
+        };
+    }
+    // 预设 NPC 常写在 initial_state.relationships（文字层）：新游戏一并纳入 bonds，
+    // 使好感可从 0 起演化；若同名已在 characters 中则不被覆盖。
+    const rels = (world && world.initial_state && world.initial_state.relationships && typeof world.initial_state.relationships === "object")
+        ? world.initial_state.relationships : {};
+    for (const [name, desc] of Object.entries(rels)) {
+        if (!bonds[name]) bonds[name] = { affinity: 0, tags: [], desc: (typeof desc === "string") ? desc : "" };
+    }
+    return bonds;
+}
+
+// 纯函数：按 AI 返回的 state_changes.bonds 计算下一帧 bonds。
+// - delta：相对变化（±），累加并夹取 [-100, 100]
+// - tags：合并去重
+// - desc：可选，更新该 NPC 关系文字描述（同时回写 S.gameState.relationships）
+// 返回 { next, applied }，applied 为变化清单（供手记 / 本回合变化渲染）
+export function computeBondUpdates(changes, currentBonds) {
+    const cur = (currentBonds && typeof currentBonds === "object" && !Array.isArray(currentBonds)) ? { ...currentBonds } : {};
+    const applied = [];
+    if (changes && typeof changes === "object" && !Array.isArray(changes)) {
+        for (const [name, upd] of Object.entries(changes)) {
+            if (!upd || typeof upd !== "object") continue;
+            const prev = cur[name] || { affinity: 0, tags: [], desc: "" };
+            let affinity = (typeof prev.affinity === "number" && isFinite(prev.affinity)) ? prev.affinity : 0;
+            let deltaApplied = false;
+            if (typeof upd.delta === "number" && isFinite(upd.delta)) {
+                affinity = Math.max(-100, Math.min(100, affinity + upd.delta));
+                applied.push({ name, delta: upd.delta, affinity });
+                deltaApplied = true;
+            }
+            let tags = Array.isArray(prev.tags) ? prev.tags.slice() : [];
+            if (Array.isArray(upd.tags)) {
+                for (const t of upd.tags) {
+                    if (typeof t === "string" && t.trim() && !tags.includes(t)) tags.push(t);
+                }
+            }
+            let desc = (typeof prev.desc === "string") ? prev.desc : "";
+            if (typeof upd.desc === "string" && upd.desc.trim()) {
+                desc = upd.desc.trim();
+                if (!deltaApplied) applied.push({ name, delta: 0, affinity }); // 仅更新文字层也记入变化
+            }
+            cur[name] = { affinity, tags, desc };
+        }
+    }
+    return { next: cur, applied };
+}
+
+// ============================================================
+// ★ B2 玩家变量（创作者可配：数值/文本/开关；默认空=开箱无数字压力）
+// 复用现有 state_changes 通道：AI 在 state_changes.variables 返回变化后的值，
+// applyStateChanges → computeVariableUpdates 按 schema 校验/夹取/类型转换。
+// 变量定义（静态）进 system 段；当前值（动态）进每轮 user 消息，不破缓存。
+// ============================================================
+
+export function getVariableSchema(world) {
+    const v = world && world.variable_schema;
+    return Array.isArray(v) ? v : [];
+}
+
+// 取"启用中"的变量定义（filter 出 enabled !== false）
+export function getEnabledVariables(world) {
+    return getVariableSchema(world).filter(v => v && v.id && v.enabled !== false);
+}
+
+// 按 schema 初始化/同步运行时变量值：
+// - 启用的变量若缺值则用 default 补
+// - 已删/未启用的 key 清除（避免脏数据残留）
+// - 类型兜底：number→数字，text→字符串，toggle→布尔
+export function syncVariablesToSchema(world, vars) {
+    const out = (vars && typeof vars === "object" && !Array.isArray(vars)) ? { ...vars } : {};
+    const enabled = getEnabledVariables(world);
+    // 清掉不在启用集合里的 key
+    const validIds = new Set(enabled.map(v => v.id));
+    for (const k of Object.keys(out)) {
+        if (!validIds.has(k)) delete out[k];
+    }
+    for (const def of enabled) {
+        if (!(def.id in out)) {
+            out[def.id] = def.default;
+        } else {
+            // 类型兜底（老存档/异常值纠正）
+            out[def.id] = coerceVariableValue(out[def.id], def);
+        }
+    }
+    return out;
+}
+
+// 把任意值按变量定义纠正为合法类型（不夹取范围，仅保证类型正确）
+export function coerceVariableValue(val, def) {
+    if (!def) return val;
+    if (def.type === "number") {
+        const n = typeof val === "number" ? val : parseFloat(val);
+        return Number.isFinite(n) ? n : (typeof def.default === "number" ? def.default : 0);
+    }
+    if (def.type === "toggle") {
+        if (val === true || val === 1) return true;
+        if (val === false || val === 0) return false;
+        const s = String(val == null ? "" : val).trim().toLowerCase();
+        return s === "true" || s === "yes" || s === "on" || s === "1";
+    }
+    // text
+    return (val == null) ? (def.default != null ? String(def.default) : "") : String(val);
+}
+
+// ★ 纯函数：根据 AI 返回的 changes.variables（变化后的值）计算更新结果。
+// 返回 { next: 新变量表, applied: 人类可读的变化条目数组 }。
+// - 仅处理 schema 中启用且存在的变量；未知/未启用 id 直接忽略
+// - number：夹取到 [min,max]（未设边界则不限），非数字忽略该条目
+// - text：转字符串
+// - toggle：转布尔
+// 不触碰 DOM、不改全局状态，便于单测。
+export function computeVariableUpdates(changes, world, currentVars) {
+    const enabled = getEnabledVariables(world);
+    const defMap = {};
+    for (const d of enabled) defMap[d.id] = d;
+    const current = (currentVars && typeof currentVars === "object" && !Array.isArray(currentVars))
+        ? currentVars
+        : (S && S.gameState && S.gameState.variables) || {};
+    const next = { ...current };
+    const applied = [];
+    if (!changes || typeof changes !== "object") return { next, applied };
+
+    for (const [id, raw] of Object.entries(changes)) {
+        const def = defMap[id];
+        if (!def) continue; // 忽略未知/未启用的变量
+        const from = (id in next) ? next[id] : def.default;
+        let to;
+        if (def.type === "number") {
+            const n = typeof raw === "number" ? raw : parseFloat(raw);
+            if (!Number.isFinite(n)) continue; // 非数字忽略
+            let clamped = n;
+            if (typeof def.min === "number") clamped = Math.max(def.min, clamped);
+            if (typeof def.max === "number") clamped = Math.min(def.max, clamped);
+            to = clamped;
+        } else if (def.type === "toggle") {
+            to = raw === true || raw === "true" || raw === 1;
+        } else {
+            to = (raw == null) ? "" : String(raw);
+        }
+        if (to === from) continue; // 无变化不记录
+        next[id] = to;
+        applied.push({ id, name: def.name || id, type: def.type, from, to, unit: def.unit || "" });
+    }
+    return { next, applied };
+}
+
+// ★ A2：统一协调器——把"这是哪个 IP / 是否改编"收口成单一模型。
+// 协调三路信号：① 用户下拉选的 type（original/ip）② 用户填的 IP 名 ipName ③ 描述/上传文本里 detectIp() 检测到的 IP。
+// 规则（符合"上传文本优先、IP 识别辅助"）：
+//   - mode：用户显式选 ip 或填了 IP 名 → ip_adaptation；否则 original（尊重用户"原创"选择，不凭检测自动改判）。
+//   - ip_name：用户填的优先；用户选了"基于IP"但留空（允许上传源文件后留空）→ 用检测到的单一 IP 补足；原创世界不自动断言 IP。
+//   - source：有上传文本 → uploaded_text，否则 description。
+//   - conflicts：仅当"用户填的 IP 与文本检测到的 IP 不一致"或"检测到多个 IP 且未声明"时返回，供 #4 的 UI 弹一次确认（日常无感）。
+// 纯函数、无副作用、可单测；不碰任何 DOM / 不调用 LLM。
+export function resolveCanonContext({ type, ipName, desc, sourceFileContent } = {}) {
+    const userIp = (ipName && String(ipName).trim()) ? String(ipName).trim() : null;
+    const detected = detectIp([desc, sourceFileContent].filter(Boolean).join("\n"));
+    const conflicts = [];
+    if (userIp) {
+        const matchedUser = matchKnownIp(userIp);
+        if (detected.length && matchedUser && !detected.includes(matchedUser)) {
+            conflicts.push({ type: "ip_mismatch", userIp, detected, matchedUser });
+        }
+    } else if (detected.length > 1) {
+        conflicts.push({ type: "ambiguous_ip", detected });
+    }
+    const mode = (type === "ip" || type === "ip_adaptation" || userIp) ? "ip_adaptation" : "original";
+    let ip_name = userIp || null;
+    if (!ip_name && type === "ip" && detected.length === 1) ip_name = detected[0];
+    const source = sourceFileContent ? "uploaded_text" : "description";
+    return { mode, ip_name, source, detected, conflicts };
+}
+
+// ★ A2 #5：把一致性包落到世界上。
+// - 禁项（banned）转成 world.rules 的「禁止概念」规则（玩家可在规则编辑器增删改——单一可编辑来源），
+//   不再写入全局强加的禁项；旧 world.bannedConcepts 仅作兼容层，会同步成派生结果。
+// - 完整包（banned/must_read/style_anchor）存进 world.canon.consistency_pack 作记录，供 buildCanonRules 注入必读/文风。
+// - pack._seed=true 表示来自预设世界种子包（pack_source="seed"），否则 "generated"。
+export function applyConsistencyPack(world, pack) {
+    if (!world || typeof world !== "object") return;
+    const c = ensureWorldCanon(world);
+    const p = pack || { banned: [], must_read: [], style_anchor: "" };
+    const banned = (Array.isArray(p.banned) ? p.banned : [])
+        .filter(x => typeof x === "string" && x.trim())
+        .map(x => x.trim());
+    if (!Array.isArray(world.rules)) world.rules = [];
+    const existing = new Set();
+    for (const r of world.rules) {
+        if (r && r.then && r.then.type === "ban" && r.then.concept) existing.add(r.then.concept.trim());
+    }
+    for (const concept of banned) {
+        if (existing.has(concept)) continue;
+        world.rules.push({
+            id: "auto_ban_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7),
+            name: "禁项：" + concept,
+            enabled: true,
+            when: { type: "always" },
+            then: { type: "ban", concept, aliases: [], severity: "hard", unlockTags: [] }
+        });
+        existing.add(concept);
+    }
+    // 同步旧兼容层 bannedConcepts（含 rules ban + 历史 bannedConcepts），保证旧管线行为一致
+    world.bannedConcepts = collectBannedConcepts(world, getActiveConditionTags());
+    c.consistency_pack = {
+        banned: banned.slice(),
+        must_read: (Array.isArray(p.must_read) ? p.must_read : []).filter(x => typeof x === "string" && x.trim()),
+        style_anchor: (typeof p.style_anchor === "string") ? p.style_anchor : ""
+    };
+    c.pack_source = (p && p._seed) ? "seed" : "generated";
+    return c;
 }

@@ -5,6 +5,28 @@
 // 本文件是叶子模块，不依赖其他 src 模块，避免循环依赖。
 // ============================================================
 
+// 共享请求体构造：
+// - 默认 response_format: { type: "json_object" }（向后兼容旧调用）
+// - 传入 opts.tool 时改为 function calling：发 tools + 强制 tool_choice，不再用 json_object
+//   （Phase 5 工具调用约束：让模型直接返回已解析的结构化参数）
+function buildChatBody(model, messages, opts = {}, extra = {}) {
+    const base = {
+        model,
+        messages,
+        temperature: opts.temperature != null ? opts.temperature : 1,
+        max_tokens: opts.maxTokens || 8192,
+        ...extra
+    };
+    if (opts.tool) {
+        return {
+            ...base,
+            tools: [{ type: "function", function: { name: opts.tool.name, description: opts.tool.description, parameters: opts.tool.parameters } }],
+            tool_choice: { type: "function", function: { name: opts.tool.name } }
+        };
+    }
+    return { ...base, response_format: { type: "json_object" } };
+}
+
 // 各模型预设。新增模型只需在此追加一项。
 // cacheStrategy:
 //   - "prefix"   前缀缓存（system 稳定不变即可命中，如 DeepSeek）
@@ -19,14 +41,7 @@ export const PROVIDERS = {
         defaultModel: "deepseek-v4-flash",
         detect: (baseUrl) => /deepseek/.test(baseUrl),
         // 普通模型不带 thinking；仅 reasoner 类需要禁用思考
-        buildBody: (model, messages, opts = {}) => ({
-            model,
-            messages,
-            temperature: opts.temperature != null ? opts.temperature : 1,
-            max_tokens: opts.maxTokens || 8192,
-            ...(/reasoner/.test(model) ? { thinking: { type: "disabled" } } : {}),
-            response_format: { type: "json_object" }
-        }),
+        buildBody: (model, messages, opts = {}) => buildChatBody(model, messages, opts, /reasoner/.test(model) ? { thinking: { type: "disabled" } } : {}),
         // DeepSeek 专属缓存字段
         parseUsage: (usage = {}) => {
             const hit = usage.prompt_cache_hit_tokens || 0;
@@ -41,12 +56,7 @@ export const PROVIDERS = {
         defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         defaultModel: "qwen-max",
         detect: (baseUrl) => /dashscope|aliyun|qwen/.test(baseUrl),
-        buildBody: (model, messages, opts = {}) => ({
-            model, messages,
-            temperature: opts.temperature != null ? opts.temperature : 1,
-            max_tokens: opts.maxTokens || 8192,
-            response_format: { type: "json_object" }
-        }),
+        buildBody: (model, messages, opts = {}) => buildChatBody(model, messages, opts),
         parseUsage: () => ({ hit: 0, miss: 0, total: 0 })
     },
     zhipu: {
@@ -56,12 +66,7 @@ export const PROVIDERS = {
         defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
         defaultModel: "glm-4-plus",
         detect: (baseUrl) => /bigmodel|zhipu|chatglm/.test(baseUrl),
-        buildBody: (model, messages, opts = {}) => ({
-            model, messages,
-            temperature: opts.temperature != null ? opts.temperature : 1,
-            max_tokens: opts.maxTokens || 8192,
-            response_format: { type: "json_object" }
-        }),
+        buildBody: (model, messages, opts = {}) => buildChatBody(model, messages, opts),
         parseUsage: () => ({ hit: 0, miss: 0, total: 0 })
     },
     ollama: {
@@ -71,12 +76,7 @@ export const PROVIDERS = {
         defaultBaseUrl: "http://localhost:11434/v1",
         defaultModel: "qwen2.5:7b",
         detect: (baseUrl) => /11434|ollama/.test(baseUrl),
-        buildBody: (model, messages, opts = {}) => ({
-            model, messages,
-            temperature: opts.temperature != null ? opts.temperature : 1,
-            max_tokens: opts.maxTokens || 8192,
-            response_format: { type: "json_object" }
-        }),
+        buildBody: (model, messages, opts = {}) => buildChatBody(model, messages, opts),
         parseUsage: () => ({ hit: 0, miss: 0, total: 0 })
     },
     openai: {
@@ -86,12 +86,7 @@ export const PROVIDERS = {
         defaultBaseUrl: "https://api.openai.com/v1",
         defaultModel: "gpt-4o-mini",
         detect: (baseUrl) => /openai\.com|azure/.test(baseUrl),
-        buildBody: (model, messages, opts = {}) => ({
-            model, messages,
-            temperature: opts.temperature != null ? opts.temperature : 1,
-            max_tokens: opts.maxTokens || 8192,
-            response_format: { type: "json_object" }
-        }),
+        buildBody: (model, messages, opts = {}) => buildChatBody(model, messages, opts),
         parseUsage: (usage = {}) => {
             // OpenAI 系用 prompt_tokens_details.cached_tokens 表示缓存命中
             const hit = usage.prompt_tokens_details?.cached_tokens || 0;
@@ -106,12 +101,7 @@ export const PROVIDERS = {
         defaultBaseUrl: "",
         defaultModel: "",
         detect: () => false,
-        buildBody: (model, messages, opts = {}) => ({
-            model, messages,
-            temperature: opts.temperature != null ? opts.temperature : 1,
-            max_tokens: opts.maxTokens || 8192,
-            response_format: { type: "json_object" }
-        }),
+        buildBody: (model, messages, opts = {}) => buildChatBody(model, messages, opts),
         parseUsage: () => ({ hit: 0, miss: 0, total: 0 })
     }
 };

@@ -1,5 +1,21 @@
 
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500&display=swap');
+        /* ★ 字体本地化（2026-07-27，docs/34 #13）：移除 Google Fonts @import（渲染阻塞 + 国内访问不稳 + 与“彻底摆脱 CDN”目标矛盾）。
+           中文网络字体动辄数十 MB 不适合随项目内置，改用系统字体栈优雅回退：
+           - 衬线：若用户本机装有 Noto/思源宋体优先命中，否则回退 宋体/Georgia；
+           - 无衬线：各平台系统黑体（苹方/雅黑等）。
+           index.html 的 CSP 已同步收紧（移除 fonts.googleapis.com / fonts.gstatic.com）。 */
+
+/* ============================================================================
+ * styles.css 分层索引（docs/34 #15，2026-07-28 补）
+ * 单文件 2600+ 行、无构建步骤，按"大注释块"分区便于定位，不物理拆分。
+ * 分层：
+ *   1) 基础层   —— :root 变量 / 字体 / 主题(dark·light) / 动画关键帧        （约 L8–L130）
+ *   2) 组件层   —— 按钮 / 表单 / 弹窗 / Toast / 单选 / 滑块 / 折叠 / 向导     （约 L192–L1170）
+ *   3) 屏幕层   —— 首页 / 列表屏 / 游戏屏 / 设置屏 / 知识库面板 / 图谱         （约 L131–L2647，含各屏内组件）
+ *   4) 重设计层 —— ui-redesign 批次新增的卡片/编辑器样式（散落于组件层与屏幕层，均带 ★ 标记）
+ *   5) 媒体查询 —— ≤767px 移动端抽屉/适配（散落于各组件末尾）
+ * 检索某样式：优先按上方行号区间，或直接 grep 对应 ★ 标记 / 类名。
+ * ========================================================================== */
 
         :root {
             --bg: #191510;
@@ -48,7 +64,7 @@
             --text-3: rgba(217, 207, 192, 0.40);
             --primary-strong: #DDBE92;
             --blur: saturate(140%) blur(14px);
-            --serif: "Noto Serif SC", "Songti SC", Georgia, serif;
+            --serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", SimSun, Georgia, serif;
             --sans: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
         }
 
@@ -110,7 +126,7 @@
 
         .hidden { display: none !important; }
         html, body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", "Noto Sans SC", sans-serif;
             margin: 0;
             padding: 0;
             height: 100%;
@@ -187,7 +203,7 @@
         }
         .spacer { flex: 1; }
 
-        /* 主界面 */
+        /* ===== 屏幕层 · 主界面 ===== */
         .home-screen {
             justify-content: center;
             align-items: center;
@@ -299,7 +315,7 @@
             animation-delay: .05s;
         }
         .home-title {
-            font-family: 'Noto Serif SC', serif;
+            font-family: var(--serif);
             font-size: 52px;
             font-weight: 700;
             letter-spacing: 14px;
@@ -494,7 +510,7 @@
         /* 主界面在所有尺寸下整体垂直居中：由 .home-screen 的 flex 居中 + .home-content 的 margin:auto 实现，
            含顶部标题组与底部脚注，作为一个整体块居中，不会顶到上下边缘。背景层本就 absolute inset:0 全屏，与此无关。 */
 
-        /* 列表屏幕 */
+        /* ===== 屏幕层 · 列表屏幕（世界/存档/设置三屏复用） ===== */
         /* ---- 分区标题（快速入口 / 全部世界） ---- */
         .section-head {
             display: flex;
@@ -1182,7 +1198,7 @@
         .toast.success { border-color: var(--success); }
         .toast.error { border-color: var(--danger); }
 
-        /* 游戏界面 — 视觉语言与首页 home_v1 保持一致：氛围背景 + 浮层卡片 */
+        /* ===== 屏幕层 · 游戏界面（氛围背景 + 浮层卡片） ===== */
         /* 背景透明，复用 body 渐变 + 全局 #bgMotes 光点（与其它屏统一，避免盖住底层光点） */
         .game-screen { color: var(--text); }
         .game-screen > .game-header,
@@ -1552,6 +1568,32 @@
             line-height: 1.7;
             color: var(--text);
         }
+        /* ★ B3：关键物品金色高亮 */
+        .status-card.item-key {
+            border-color: var(--accent, #e0b341);
+            box-shadow: 0 0 0 1px var(--accent, #e0b341) inset;
+            background: linear-gradient(180deg, rgba(224,179,65,0.10), rgba(224,179,65,0.02));
+        }
+        .status-card.item-key .label { color: var(--accent, #e0b341); font-weight: 600; }
+        .item-cat {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 1px 7px;
+            font-size: 11px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            background: var(--card-border);
+            border-radius: 10px;
+        }
+        /* ★ B4：羁绊 / 好感度 */
+        .bond-bar { height: 6px; border-radius: 3px; background: var(--card-border, #d8d8d8); overflow: hidden; margin: 6px 0 2px; }
+        .bond-fill { height: 100%; border-radius: 3px; transition: width .3s ease; }
+        .bond-fill.pos { background: linear-gradient(90deg, #7bdcb0, #4f8a6b); }
+        .bond-fill.neg { background: linear-gradient(90deg, #e08a8a, #b85c5c); }
+        .bond-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+        .bond-tag { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(123,170,146,.2); color: #4f8a6b; }
+        .bond-key { border-color: var(--accent, #e0b341); box-shadow: 0 0 0 1px var(--accent, #e0b341) inset; background: linear-gradient(180deg, rgba(224,179,65,0.10), rgba(224,179,65,0.02)); }
+        .bond-key .label { color: var(--accent, #e0b341); font-weight: 600; }
         .status-tag-list { display: flex; flex-wrap: wrap; gap: 4px; }
         .status-tag {
             font-size: 11px;
@@ -1722,6 +1764,31 @@
             line-height: 1.5;
         }
 
+        /* UI-1：自定义历法可视化编辑器（docs/35 方案 C） */
+        .time-cfg-cc { grid-column:1 / -1; margin-top:12px; padding:12px; border:1px dashed rgba(127,127,213,0.5); border-radius:10px; background:rgba(127,127,213,0.04); }
+        .time-cfg-cc-label { display:block; font-weight:600; margin-bottom:8px; }
+        .cc-editor { display:flex; flex-direction:column; gap:10px; }
+        .cc-field { display:flex; flex-direction:column; gap:4px; max-width:320px; }
+        .cc-field label { font-size:12px; color:var(--text-secondary, #666); }
+        .cc-stats { font-size:12px; color:var(--text-secondary, #666); padding:6px 10px; background:rgba(127,127,213,0.08); border-radius:8px; }
+        .cc-stats code { background:rgba(127,127,213,0.16); padding:0 4px; border-radius:4px; }
+        .cc-rows { display:flex; flex-direction:column; gap:6px; }
+        .cc-empty { font-size:12px; color:var(--text-muted); padding:8px; }
+        .cc-month-row { display:flex; align-items:center; gap:6px; padding:6px 8px; border:1px solid var(--border, rgba(0,0,0,0.12)); border-radius:8px; background:var(--bg, #fff); }
+        .cc-month-row.cc-dragging { opacity:0.5; }
+        .cc-month-row.cc-drop { border-color:rgba(127,127,213,0.8); background:rgba(127,127,213,0.12); }
+        .cc-drag { cursor:grab; color:var(--text-muted); user-select:none; }
+        .cc-idx { width:20px; text-align:center; color:var(--text-muted); font-size:12px; }
+        .cc-name { flex:1; min-width:80px; }
+        .cc-days { width:64px; }
+        .cc-unit { font-size:12px; color:var(--text-muted); }
+        .cc-move, .cc-leap, .cc-del { padding:2px 8px; font-size:12px; border-radius:6px; border:1px solid var(--border, rgba(0,0,0,0.15)); background:var(--bg, #fff); cursor:pointer; }
+        .cc-move:disabled { opacity:0.4; cursor:default; }
+        .cc-leap { color:#7f5fd0; }
+        .cc-del { color:#c0392b; }
+        .cc-actions { display:flex; flex-wrap:wrap; gap:8px; }
+        .cc-hint { font-size:11px; color:var(--text-muted); line-height:1.5; }
+
         /* S5-4'：开场白时间修复按钮组 */
         .opening-fix-actions {
             margin-top: 10px;
@@ -1783,6 +1850,25 @@
 .rule-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .rule-label { font-weight: 600; color: var(--text-secondary); min-width: 28px; }
 .rule-sub { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+
+/* ★ B1：角色卡展示（世界详情页签） */
+.char-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.char-chip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: 8px; background: var(--bg-panel); font-size: 14px; }
+.char-role { font-size: 12px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.char-role-p { background: rgba(123,170,146,.22); color: #4f8a6b; }
+.char-role-n { background: rgba(107,155,209,.22); color: #4f7fb8; }
+.char-role-key { background: rgba(224,179,65,.22); color: #b8860b; }
+
+/* ★ B1：角色卡编辑弹窗 */
+.char-card { border: 1px solid var(--card-border); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: var(--bg-panel); }
+.char-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.char-role-select { background: var(--bg-input); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 6px 8px; font-size: 14px; }
+.char-name { flex: 1; background: var(--bg-input); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 6px 10px; font-size: 14px; }
+.char-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.char-npc-only { border-left: 3px solid var(--card-border); padding: 4px 0 4px 10px; margin: 6px 0; }
+.char-card .form-group { margin-bottom: 8px; }
+.char-card textarea { width: 100%; resize: vertical; background: var(--bg-input); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 6px 8px; font-size: 13px; font-family: inherit; }
+.char-card input { width: 100%; background: var(--bg-input); border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 6px 8px; font-size: 13px; }
 .rule-sub input { background: var(--bg-input); border: 1px solid var(--card-border); border-radius: 6px; color: var(--text); padding: 4px 6px; }
 .muted { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 
@@ -1921,6 +2007,19 @@
 .stat-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 12px 14px; }
 .stat-card .stat-num { font-size: 22px; font-weight: 600; color: var(--primary); line-height: 1.1; }
 .stat-card .stat-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+/* ★ A3：创作完成度清单 / 进度卡（世界详情页概览顶部，纯展示、不阻塞游玩） */
+.completion-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 14px 16px; margin-bottom: 16px; }
+.completion-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.completion-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.completion-score { font-size: 13px; color: var(--primary); font-weight: 600; }
+.completion-bar { height: 8px; border-radius: 4px; background: var(--card-border); overflow: hidden; margin: 10px 0 12px; }
+.completion-fill { display: block; height: 100%; background: var(--primary); transition: width .2s ease; }
+.completion-items { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.completion-item { font-size: 13px; padding: 2px 0; color: var(--text-secondary); }
+.completion-item.done { color: var(--text); }
+.completion-item.todo { color: var(--text-secondary); opacity: .85; }
+.completion-note { font-size: 12px; color: var(--text-secondary); margin: 10px 0 0; line-height: 1.6; }
 
 .cat-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; margin: 8px 0; }
 .cat-seg { height: 100%; }

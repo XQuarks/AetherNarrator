@@ -34,6 +34,6 @@ if (remaining > 0) {
   console.log('OK: 未发现 HTML 内联事件属性，可安全启用 hash CSP。');
 }
 
-const csp = `default-src 'self'; script-src 'self' ${hashes.join(' ')} https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`;
+const csp = `default-src 'self'; script-src 'self' ${hashes.join(' ')} https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`;
 console.log('\n建议的收紧版 CSP（去 unsafe-inline，改用 hash）。请将 index.html 的 CSP meta 内容替换为：\n');
 console.log(csp);

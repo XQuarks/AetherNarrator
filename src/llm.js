@@ -2,16 +2,15 @@
 // AetherNarrator · llm.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_LABELS, getActiveConditionTags, normalizeTimeConfig } from "./store.js";
-import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, tryRepairJSON, runPool, chunkText, mergeLoreSnippets, deepClone, buildCriticTimeContext, detectTimeConflict, formatConflictMessage } from "./utils.js";
+import { DEFAULT_PERIOD_LABELS, getActiveConditionTags, normalizeTimeConfig, getEnabledVariables, getWorldLoreKB } from "./store.js";
+import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, tryRepairJSON, runPool, chunkText, mergeLoreSnippets, deepClone, buildCriticTimeContext, detectTimeConflict, formatConflictMessage, logError } from "./utils.js";
 import { getNextPeriod, getTemperature, getTimeConfig } from "./theme.js";
 import { advanceCalendarTime, formatCalendarDate } from "./calendar.js";
-import { getWorldLoreKB, summarizeFactsFromChanges } from "./rag.js";
-import { buildSystemPrompt, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, getPositionedLore } from "./prompt.js";
+import { summarizeFactsFromChanges } from "./rag.js";
+import { buildSystemPrompt, buildLoreHardBreakpoint, buildCharactersBreakpoint, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, getPositionedLore } from "./prompt.js";
 import { getProvider, readApiInputs, getChunkConcurrency } from "./providers.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
-import { processTurn } from "./game.js";
-import { buildLoreRevisionDiff, parseLoreRevisionResponse } from "./lore-revision.js";
+import { buildLoreRevisionDiff } from "./lore-revision.js";
 import { selectPromotionCandidates } from "./promotion.js"; // ★ B6：记忆晋升候选筛选
 
 export function logTurnStats(hit, miss, total, usage) {
@@ -47,29 +46,10 @@ export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sou
     }
 
     const prompt = buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap, loreCountMin);
-    const url = buildApiUrl(baseUrl, corsProxy);
-    const res = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + apiKey
-        },
-        body: JSON.stringify({
-            model,
-            messages: [{ role: "system", content: prompt }],
-            temperature: 0.7,
-            max_tokens: 8192,
-            response_format: { type: "json_object" }
-        })
+    return await callStructured([{ role: "system", content: prompt }], "generate_world", {
+        temperature: 0.7, maxTokens: 8192,
+        mockFn: () => mockGenerateWorld(name, type, desc, hero, ipName)
     });
-    if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text}`);
-    }
-    const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("API 返回异常：无法获取响应内容");
-    return parseResponse(content);
 }
 
 // ★ Plan A：分块抽取单段 lore（与 callWorldGenerationLLM 同构，但只返回 lore_kb）
@@ -100,34 +80,18 @@ export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, c
     }
 
         const prompt = buildLoreChunkPrompt(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle);
-    const url = buildApiUrl(baseUrl, corsProxy);
-    const res = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + apiKey
-        },
-        body: JSON.stringify({
-            model,
-            messages: [{ role: "system", content: prompt }],
-            temperature: 0.7,
-            max_tokens: 16000,
-            response_format: { type: "json_object" }
-        })
+    const obj = await callStructured([{ role: "system", content: prompt }], "extract_lore_chunk", {
+        temperature: 0.7, maxTokens: 16000,
+        mockFn: () => ({ ip: name, snippets: [
+            { id: "c" + chunkIndex + "_0", category: "人物", title: "角色甲", content: "（第" + chunkIndex + "段）关于角色甲的设定片段，用于验证分块合并去重。", keywords: ["角色甲"], activation_keys: ["角色甲"], trigger_mode: "keyword", priority: 0 },
+            { id: "c" + chunkIndex + "_1", category: "地点", title: "地点乙", content: "（第" + chunkIndex + "段）关于地点乙的设定片段。", keywords: ["地点乙"], activation_keys: ["地点乙"], trigger_mode: "keyword", priority: 0 },
+            { id: "c" + chunkIndex + "_2", category: "事件", title: "事件丙", content: "（第" + chunkIndex + "段）关于事件丙的设定片段。", keywords: ["事件丙"], activation_keys: ["事件丙"], trigger_mode: "keyword", priority: 0 }
+        ] })
     });
-    if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text}`);
-    }
-    const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("API 返回异常：无法获取响应内容");
-    const parsed = parseResponse(content);
-    if (!parsed || !parsed.lore_kb || !Array.isArray(parsed.lore_kb.snippets)) {
-        if (parsed && Array.isArray(parsed.snippets)) return { ip: name, snippets: parsed.snippets };
-        throw new Error("分块抽取返回格式异常：缺少 lore_kb.snippets");
-    }
-    return parsed.lore_kb;
+    if (!obj) throw new Error("分块抽取返回为空");
+    if (obj.lore_kb && Array.isArray(obj.lore_kb.snippets)) return obj.lore_kb;
+    if (Array.isArray(obj.snippets)) return { ip: name, snippets: obj.snippets };
+    throw new Error("分块抽取返回格式异常：缺少 lore_kb.snippets");
 }
 
 // ★ Phase 3 · NER：从源文本抽取知识库（分块 + 并发 + 合并去重 + 重排 id + 改写 links.target）。
@@ -414,11 +378,152 @@ export function extractPartialNarrative(raw) {
     return out; // 未收尾 → 部分叙事（持续更新）
 }
 
+// ===================== Phase 5 · 集中工具调用层（function calling 结构化返回）=====================
+// 所有结构化 LLM 返回统一收口到这里：请求声明 tools，从模型返回的 tool_calls 直接取「已解析好的参数对象」，
+// 不再依赖 parseResponse / parseJsonLoose 的脆弱兜底链（正则截取 + tryRepairJSON）。
+// 兼容性：若提供方不守 tools（返回纯 content），自动回退 parseResponse(content)，行为与原先一致（解析失败兜底仍在）。
+
+// 工具 schema 注册表（名称 → { name, description, parameters(JSON Schema) }）。
+// parameters 用 additionalProperties:true 放宽约束，避免模型因「多了字段」被拒；取参后由各自解析函数按需读取。
+export const TOOLS = {
+    apply_turn_state: {
+        name: "apply_turn_state",
+        description: "返回本回合的叙事文本、状态变化与选项",
+        parameters: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+                narrative: { type: "string" },
+                choices: { type: "array", items: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, hint: { type: "string" }, action: { type: "string" } } } },
+                state_changes: { type: "object" },
+                key_facts: { type: "string" },
+                atmosphere: { type: "string" },
+                is_forced_plot: { type: "boolean" },
+                next_period: { type: "string" },
+                comment: { type: "string" }
+            }
+        }
+    },
+    generate_world: {
+        name: "generate_world",
+        description: "返回一个完整世界配置对象（name/desc/type/opening_narrative/initial_choices/characters/lore_kb/hero/rules/time_config/variables 等）",
+        parameters: { type: "object", additionalProperties: true, properties: {
+            name: { type: "string" }, desc: { type: "string" }, type: { type: "string" }, era_label: { type: "string" },
+            opening_narrative: { type: "string" }, initial_choices: { type: "array" }, characters: { type: "array" },
+            lore_kb: { type: "object" }, hero: { type: "string" }, rules: { type: "array" },
+            system_prompt: { type: "string" }, custom_prefix: { type: "string" }, time_config: { type: "object" }, variables: { type: "array" }
+        } }
+    },
+    extract_lore_chunk: {
+        name: "extract_lore_chunk",
+        description: "返回从文本片段抽取的知识库（lore_kb.snippets 或顶层 snippets 数组）",
+        parameters: { type: "object", additionalProperties: true, properties: {
+            lore_kb: { type: "object", additionalProperties: true, properties: { ip: { type: "string" }, snippets: { type: "array" } } },
+            snippets: { type: "array" }
+        } }
+    },
+    consistency_pack: {
+        name: "consistency_pack",
+        description: "返回世界一致性包（banned / must_read / style_anchor）",
+        parameters: { type: "object", additionalProperties: true, properties: {
+            banned: { type: "array", items: { type: "string" } },
+            must_read: { type: "array", items: { type: "string" } },
+            style_anchor: { type: "string" }
+        } }
+    },
+    character_cards: {
+        name: "character_cards",
+        description: "返回角色卡数组（characters）",
+        parameters: { type: "object", additionalProperties: true, properties: { characters: { type: "array" } } }
+    },
+    worldview_judge: {
+        name: "worldview_judge",
+        description: "返回世界观一致性裁判结果（consistent / severity / violations）",
+        parameters: { type: "object", additionalProperties: true, properties: {
+            consistent: { type: "boolean" },
+            severity: { type: "string" },
+            violations: { type: "array", items: { type: "string" } }
+        } }
+    },
+    lore_revision: {
+        name: "lore_revision",
+        description: "返回知识库修订 diff（与知识库同结构的 snippets 列表）",
+        parameters: { type: "object", additionalProperties: true, properties: { snippets: { type: "array" } } }
+    }
+};
+
+// 非流式：优先从 tool_calls 取参数；无 tool_calls（提供方不守 tools）则回退 content → parseResponse
+export function extractStructuredFromMessage(msg, label) {
+    const tc = msg && msg.tool_calls && msg.tool_calls[0];
+    if (tc && tc.function && tc.function.arguments) {
+        try { return JSON.parse(tc.function.arguments); }
+        catch (_) { /* 落到 content 回退 */ }
+    }
+    const content = msg && msg.content;
+    if (content) return parseResponse(content);
+    throw new Error("AI 未返回结构化参数（无 tool_calls 且无 content）：" + label);
+}
+
+// 流式收尾：fullArgs 是累积的 tool_calls arguments 文本；解析失败用 parseResponse 修复兜底
+export function extractStructuredFromArgs(fullArgs, label) {
+    if (fullArgs && fullArgs.trim()) {
+        try { return JSON.parse(fullArgs); } catch (_) { /* 截断/畸形 → parseResponse 修复 */ }
+        try { return parseResponse(fullArgs); } catch (_) { /* 继续 */ }
+    }
+    throw new Error("AI 返回的 JSON 解析失败：" + (label || "") + " " + (fullArgs || "").slice(0, 200));
+}
+
+function recordCacheStats(usage, provider) {
+    const { hit, miss, total } = provider.parseUsage(usage);
+    S.lastCacheStats = {
+        hitTokens: hit, missTokens: miss, totalTokens: total,
+        hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
+    };
+    updateCacheIndicator();
+    logTurnStats(hit, miss, total, usage);
+}
+
+// 统一结构化调用入口。mock 模式直接返回 mockFn 结果，不调 API（mock 不烧 token）。
+export async function callStructured(messages, toolName, opts = {}) {
+    const tool = TOOLS[toolName];
+    if (!tool) throw new Error("未知工具：" + toolName);
+    const { stream = false, onPartial, temperature, maxTokens, mockFn } = opts;
+    const mock = document.getElementById("mockMode") && document.getElementById("mockMode").checked;
+    if (mock) return mockFn ? mockFn() : null;
+
+    const { baseUrl, corsProxy, apiKey, model } = readApiInputs();
+    if (!baseUrl || !apiKey || !model) throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
+    const url = buildApiUrl(baseUrl, corsProxy);
+    const provider = getProvider();
+    const useStream = stream && !(document.getElementById("noStreamMode") && document.getElementById("noStreamMode").checked);
+    const body = provider.buildBody(model, messages, {
+        temperature: temperature != null ? temperature : getTemperature(),
+        maxTokens: maxTokens || 8192,
+        tool
+    });
+    try {
+        return useStream
+            ? await callLLMStreaming(url, apiKey, model, body, onPartial, provider)
+            : await callLLMNonStreaming(url, apiKey, model, body, provider);
+    } catch (e) {
+        const isParse = /JSON 解析失败/.test((e && e.message) || "");
+        const isAbort = e && e.name === "AbortError";
+        if (useStream && !isParse && !isAbort) {
+            console.warn("Structured streaming failed, falling back to non-streaming:", e && e.message);
+            return await callLLMNonStreaming(url, apiKey, model, body, provider);
+        }
+        throw e;
+    }
+}
+
 export async function callLLM(input, retrieved, opts = {}) {
     const sessionEpoch = S.currentSession.epoch;       // ★ P0: 捕获调用时刻的会话标识
     const sessionWorldId = S.currentSession.worldId;
-    const mock = document.getElementById("mockMode").checked;
+    // ★ Phase 5 L2：先建知识库硬约束段（设置 cachedSystemCats 等 RAG 分流标志），再建 L1 core 与角色卡段。
+    // 三者各自独立缓存断点；角色卡段排在世界知识段之前，故编辑知识库不会拖垮角色卡的前缀缓存。
+    const loreHardBreak = buildLoreHardBreakpoint();
     const systemPrompt = buildSystemPrompt();
+    const charactersBreak = buildCharactersBreakpoint();
     const userContent = buildTurnUserMessage(input, retrieved);
     // ★ P0-2：按 insert_at 分流的动态 lore。before_user/after_user 已在 buildTurnUserMessage 里
     // 拼进 userContent；这里取 system / author_note 两个槽位并入对应 role 消息。
@@ -434,6 +539,10 @@ export async function callLLM(input, retrieved, opts = {}) {
 
     const messages = [
         { role: "system", content: systemPrompt },
+        // ★ Phase 5 L2：角色卡段（排在世界知识段之前，独立缓存断点）
+        ...(charactersBreak ? [{ role: "system", content: charactersBreak }] : []),
+        // ★ Phase 5 L2：知识库硬约束段（独立缓存断点；编辑知识库仅 bust 此段，保角色卡前缀缓存）
+        ...(loreHardBreak ? [{ role: "system", content: loreHardBreak }] : []),
         ...S.chatHistory,
         // P0-2：insert_at=system 的检索片段作为独立 system 消息，放在历史之后、作者注之前，
         // 既有 system 级权威、贴近生成点，又不改动核心 system 前缀（保护 DeepSeek 缓存）。
@@ -442,45 +551,23 @@ export async function callLLM(input, retrieved, opts = {}) {
         { role: "user", content: userContent }
     ];
 
-    let parsed;
-    if (mock) {
-        parsed = mockLLM(input, retrieved);
-    } else {
-        const { baseUrl, corsProxy, apiKey, model } = readApiInputs();
-        if (!baseUrl || !apiKey || !model) {
-            throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
-        }
-        const url = buildApiUrl(baseUrl, corsProxy);
-        const useStream = !document.getElementById("noStreamMode") || !document.getElementById("noStreamMode").checked;
+    // ★ Phase 5：统一走集中工具调用层（function calling 结构化返回）；mock 模式由 callStructured 走 mockFn
+    const parsed = await callStructured(messages, "apply_turn_state", {
+        stream: true,
+        onPartial: opts.onPartial,
+        mockFn: () => mockLLM(input, retrieved)
+    });
 
-        try {
-            parsed = useStream
-                ? await callLLMStreaming(url, apiKey, model, messages, opts.onPartial)
-                : await callLLMNonStreaming(url, apiKey, model, messages);
-        } catch (streamErr) {
-            // 流式失败（如 CORS 代理不支持）才自动降级为非流式；
-            // 解析失败 / 导航中断(abort) 不应重试，以免重复请求或覆盖废弃响应（P1.2.4/2.5）
-            const isParse = /JSON 解析失败/.test(streamErr && streamErr.message || "");
-            const isAbort = streamErr && streamErr.name === "AbortError";
-            if (useStream && !isParse && !isAbort) {
-                console.warn("Streaming failed, falling back to non-streaming:", streamErr.message);
-                parsed = await callLLMNonStreaming(url, apiKey, model, messages);
-            } else {
-                throw streamErr;
-            }
-        }
-    }
     parsed._sessionEpoch = sessionEpoch;             // ★ P0: 回传会话标识供 processTurn 校验
     parsed._sessionWorldId = sessionWorldId;
     parsed._turnUserContent = userContent;
     return parsed;
 }
 
-export async function callLLMNonStreaming(url, apiKey, model, messages) {
+export async function callLLMNonStreaming(url, apiKey, model, body, provider) {
     const controller = new AbortController();
     S.currentAbortController = controller; // ★ P0: 暴露给导航 abort
     const timeoutId = setTimeout(() => controller.abort(), 60000);
-    const provider = getProvider();
     try {
         const res = await fetch(url, {
             method: "POST",
@@ -488,7 +575,7 @@ export async function callLLMNonStreaming(url, apiKey, model, messages) {
                 "Content-Type": "application/json",
                 "Authorization": "Bearer " + apiKey
             },
-            body: JSON.stringify(provider.buildBody(model, messages, { temperature: getTemperature() })),
+            body: JSON.stringify(body),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -497,19 +584,9 @@ export async function callLLMNonStreaming(url, apiKey, model, messages) {
         throw new Error(`HTTP ${res.status}: ${text}`);
     }
     const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("API 返回异常：无法获取响应内容");
-    const parsed = parseResponse(content);
+    const parsed = extractStructuredFromMessage(data?.choices?.[0]?.message, "Phase 5 非流式");
 
-    if (data.usage) {
-        const { hit, miss, total } = provider.parseUsage(data.usage);
-        S.lastCacheStats = {
-            hitTokens: hit, missTokens: miss, totalTokens: total,
-            hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
-        };
-        updateCacheIndicator();
-        logTurnStats(hit, miss, total, data.usage);
-    }
+    if (data.usage) recordCacheStats(data.usage, provider);
     return parsed;
     } catch (e) {
         clearTimeout(timeoutId);
@@ -518,7 +595,7 @@ export async function callLLMNonStreaming(url, apiKey, model, messages) {
     }
 }
 
-export async function callLLMStreaming(url, apiKey, model, messages, onPartial) {
+export async function callLLMStreaming(url, apiKey, model, body, onPartial, provider) {
     const controller = new AbortController();
     S.currentAbortController = controller; // ★ P0: 暴露给导航 abort
     // ★ P1.2.4: 改为"流式空闲超时"——仅在 30s 内无任何新 chunk 才 abort；而非收到响应头即清（旧 60s 头超时会在长生成时误杀）
@@ -528,7 +605,6 @@ export async function callLLMStreaming(url, apiKey, model, messages, onPartial) 
         idleTimer = setTimeout(() => controller.abort(), 30000);
     };
     resetIdle();
-    const provider = getProvider();
     try {
     const res = await fetch(url, {
         method: "POST",
@@ -536,7 +612,7 @@ export async function callLLMStreaming(url, apiKey, model, messages, onPartial) 
             "Content-Type": "application/json",
             "Authorization": "Bearer " + apiKey
         },
-        body: JSON.stringify({ ...provider.buildBody(model, messages, { temperature: getTemperature() }), stream: true, stream_options: { include_usage: true } }),
+        body: JSON.stringify({ ...body, stream: true, stream_options: { include_usage: true } }),
         signal: controller.signal
     });
     if (!res.ok) {
@@ -546,7 +622,7 @@ export async function callLLMStreaming(url, apiKey, model, messages, onPartial) 
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let fullContent = "";
+    let fullArgs = ""; // ★ Phase 5：累积 tool_calls.arguments（已是结构化 JSON 文本，无需字符串解析）
     let usage = null;
 
     let buffer = ""; // ★ P1.2.4: 跨 chunk 缓冲，按完整行处理，避免拆行丢字
@@ -568,12 +644,20 @@ export async function callLLMStreaming(url, apiKey, model, messages, onPartial) 
             if (data === "[DONE]") continue; // 流结束标记
             try {
                 const json = JSON.parse(data);
-                if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
-                    fullContent += json.choices[0].delta.content;
-                    updateLoadingProgress(fullContent.length);
-                    if (onPartial) onPartial(fullContent); // ★ 实时流式：把累积文本交给上层增量显示
+                const delta = json.choices && json.choices[0].delta;
+                if (delta && Array.isArray(delta.tool_calls)) {
+                    // ★ Phase 5：tool_calls 累积 arguments（已是 JSON 文本）
+                    for (const tc of delta.tool_calls) {
+                        if (tc.function && tc.function.arguments) fullArgs += tc.function.arguments;
+                    }
+                    updateLoadingProgress(fullArgs.length);
+                } else if (delta && delta.content) {
+                    // 极少数提供方在 tools 下仍吐 content：累积以便最终回退解析
+                    fullArgs += delta.content;
                 }
                 if (json.usage) usage = json.usage;
+                // ★ 实时流式：把累积参数交给上层，由 game.js 用 extractPartialNarrative 实时抽 narrative（保留打字机）
+                if (onPartial) onPartial(fullArgs);
             } catch (e) {
                 // 跳过无法解析的行
             }
@@ -587,29 +671,23 @@ export async function callLLMStreaming(url, apiKey, model, messages, onPartial) 
             if (data !== "[DONE]") {
                 try {
                     const json = JSON.parse(data);
-            if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
-                fullContent += json.choices[0].delta.content;
-                updateLoadingProgress(fullContent.length);
-                if (onPartial) onPartial(fullContent);
+            const delta = json.choices && json.choices[0].delta;
+            if (delta && Array.isArray(delta.tool_calls)) {
+                for (const tc of delta.tool_calls) { if (tc.function && tc.function.arguments) fullArgs += tc.function.arguments; }
+            } else if (delta && delta.content) {
+                fullArgs += delta.content;
             }
             if (json.usage) usage = json.usage;
+            if (onPartial) onPartial(fullArgs);
                 } catch (e) { /* 忽略 */ }
             }
         }
     }
     if (idleTimer) clearTimeout(idleTimer);
 
-    const parsed = parseResponse(fullContent);
+    const parsed = extractStructuredFromArgs(fullArgs, "Phase 5 流式");
 
-    if (usage) {
-        const { hit, miss, total } = provider.parseUsage(usage);
-        S.lastCacheStats = {
-            hitTokens: hit, missTokens: miss, totalTokens: total,
-            hitRate: total > 0 ? (hit / total * 100).toFixed(1) + "%" : "0%"
-        };
-        updateCacheIndicator();
-        logTurnStats(hit, miss, total, usage);
-    }
+    if (usage) recordCacheStats(usage, provider);
     return parsed;
     } catch (e) {
         if (idleTimer) clearTimeout(idleTimer);
@@ -640,6 +718,8 @@ export function mockLLM(input, retrieved) {
     } else if (input.includes("打听") || input.includes("问") || input.includes("聊天")) {
         narrative = `你向${npc}问起这${loc}的规矩。${npc}打量你片刻，言语间有几分试探，倒也没完全拒你于门外。"外乡人，想在这里活得好，先学会低头看路。"`;
         changes.relationships = { [npc]: "对方话虽不多，但看你的眼神少了些戒备，多了点可有可无的兴趣。" };
+        // ★ B4：mock 演示好感度演化（delta +5，同步回写文字关系层）
+        changes.bonds = { [npc]: { delta: 5, desc: "对方话虽不多，但看你的眼神少了些戒备，多了点可有可无的兴趣。" } };
         changes.skills = { "交谈": "这番对话让你意识到，打听消息比想象中更需要耐心和分寸。" };
         choices = [
             { text: "继续追问这世界的规则", action: "ask_more" },
@@ -669,7 +749,7 @@ export function mockLLM(input, retrieved) {
         changes.current_location = place;
         changes.attributes = { perception: "一路走下来，你学会从嘈杂中分辨出对自己有用的声响。" };
         changes.skills = { "观察": "你开始懂得，热闹背后的安静角落往往藏着更多东西。" };
-        changes.inventory = [{ op: "add", item_id: "herb", name: "草药", count: 1 }];
+        changes.inventory = [{ op: "add", item_id: "herb", name: "草药", count: 1, category: "消耗品" }];
         choices = [
             { text: "上前看看热闹", action: "approach" },
             { text: "找地方歇脚", action: "rest" },
@@ -684,6 +764,21 @@ export function mockLLM(input, retrieved) {
     } else {
         narrative = `你在${loc}做出了尝试。周围的世界似乎因为你的举动泛起了微小的涟漪，但一切都还在规则之内缓缓流动。`;
         changes.attributes = { courage: "这一尝试未必聪明，却让你觉得自己至少还敢迈出这一步。" };
+        // ★ B2：若本世界有启用的数值变量（如克苏鲁的「理智」），示范一处小幅变化，驱动「本回合变化」面板与状态页签
+        const mockVars = getEnabledVariables(S.currentWorld).filter(v => v.type === "number");
+        if (mockVars.length) {
+            const v = mockVars[0];
+            const cur = (S.gameState.variables && typeof S.gameState.variables[v.id] === "number") ? S.gameState.variables[v.id] : (typeof v.default === "number" ? v.default : 0);
+            let next = cur - 5; // 模拟一次轻微消耗
+            if (typeof v.min === "number") next = Math.max(v.min, next);
+            if (typeof v.max === "number") next = Math.min(v.max, next);
+            changes.variables = { [v.id]: next };
+        }
+        // ★ B3：若当前背包还没有关键物品，示范授予一件关键线索，驱动状态面板高亮 + 手记强调
+        const hasKey = Array.isArray(S.gameState.inventory) && S.gameState.inventory.some(i => i.is_key === true);
+        if (!hasKey) {
+            changes.inventory = [{ op: "add", item_id: "mock_clue", name: "神秘纸条", count: 1, category: "线索", is_key: true }];
+        }
         choices = [
             { text: "继续行动", action: "continue" },
             { text: "先观察周围", action: "observe" },
@@ -760,36 +855,144 @@ function getWorldLoreForJudge() {
 }
 
 // 轻量非流式 JSON 调用（专供裁判，max_tokens 小、temperature=0）
-async function callLLMJson(systemContent, userContent, opts = {}) {
-    const mock = document.getElementById("mockMode") && document.getElementById("mockMode").checked;
-    if (mock) return null; // 模拟模式无 API，跳过裁判
-    const { baseUrl, corsProxy, apiKey, model, provider } = readApiInputs();
-    if (!baseUrl || !apiKey || !model) return null;
-    const url = buildApiUrl(baseUrl, corsProxy);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    S.auxiliaryControllers.add(controller);
+// ★ Phase 5：原 callLLMJson 已统一收口到 callStructured（见上方）。JSON 兜底解析现由
+// extractStructuredFromMessage / extractStructuredFromArgs 复用 parseResponse 完成。
+
+const CANON_SYSTEM_PROMPT = `你是世界设定一致性顾问。根据用户提供的世界观资料，提取一份"一致性包"，用于在 AI 文字游戏运行时约束叙事，防止偏离该世界的设定。
+
+请只输出 JSON（不要任何解释文字），结构如下：
+{
+  "banned": ["不应自行出现在叙事中的概念/事物（如现代科技、与原著冲突的力量体系等），每条 2-8 字"],
+  "must_read": ["该世界的核心设定/铁律，AI 必须遵循（如关键人物关系、不可颠覆的世界规则），每条一句"],
+  "style_anchor": "该世界的文风/基调锚点，一句话"
+}
+
+要求：
+- banned 聚焦"若 AI 自行引入会破坏沉浸感"的概念，不要列正常词汇。
+- 若资料不足以判断，banned/must_read 可为空数组。
+- style_anchor 为空字符串表示无特殊要求。`;
+
+// ★ docs/34 #8：三处「宽松 JSON 解析」共用的兜底链——直接 parse → 正则截取 → tryRepairJSON 修复后再 parse。
+// tryRepairJSON 返回的是「修复后的字符串」，需二次 parse；expectArray=true 时按 JSON 数组截取与校验。
+// 任何一步失败都返回 null（由调用方决定兜底值，绝不抛错阻断流程）。
+export function parseJsonLoose(text, { expectArray = false } = {}) {
+    if (!text || typeof text !== "string") return null;
+    const ok = (o) => expectArray ? Array.isArray(o) : !!(o && typeof o === "object");
+    let obj = null;
+    try { obj = JSON.parse(text); } catch (_) { /* 继续 */ }
+    if (!ok(obj)) {
+        const m = text.match(expectArray ? /\[[\s\S]*\]/ : /\{[\s\S]*\}/);
+        if (m) { try { obj = JSON.parse(m[0]); } catch (_) { obj = null; } }
+    }
+    if (!ok(obj)) {
+        try { obj = JSON.parse(tryRepairJSON(text)); } catch (_) { obj = null; }
+    }
+    return ok(obj) ? obj : null;
+}
+
+// ★ A2：一致性包解析（纯函数，可在 node 测试环境直接验证，不触 DOM）
+export function parseConsistencyPack(text) {
+    const pack = { banned: [], must_read: [], style_anchor: "" };
+    const obj = parseJsonLoose(text);
+    if (!obj) return pack;
+    if (Array.isArray(obj.banned)) {
+        pack.banned = obj.banned.filter(x => typeof x === "string" && x.trim()).map(x => x.trim()).slice(0, 50);
+    }
+    if (Array.isArray(obj.must_read)) {
+        pack.must_read = obj.must_read.filter(x => typeof x === "string" && x.trim()).map(x => x.trim()).slice(0, 30);
+    }
+    if (typeof obj.style_anchor === "string") pack.style_anchor = obj.style_anchor.slice(0, 200);
+    return pack;
+}
+
+// ★ A2：建世界时由 AI 从源文本生成一致性包。无 API / mock / 失败 均安全返回空包，绝不阻断建世界。
+export async function generateConsistencyPack(sourceText, ipName) {
+    const src = (sourceText || "").slice(0, 12000);
+    if (!src.trim()) return { banned: [], must_read: [], style_anchor: "" };
+    const ipLine = ipName ? `\n\n【已知 IP / 改编来源】：${ipName}（空白表示原创；若填了 IP，请让 banned/must_read 与该 IP 设定一致，但尊重用户对本世界的自定义改动）` : "";
+    const userContent = `【世界观资料】\n${src}${ipLine}\n\n请只输出一致性包 JSON：`;
     try {
-        const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-            body: JSON.stringify(provider.buildBody(model, [
-                { role: "system", content: systemContent },
+        const obj = await callStructured(
+            [
+                { role: "system", content: CANON_SYSTEM_PROMPT },
                 { role: "user", content: userContent }
-            ], { temperature: opts.temperature != null ? opts.temperature : 0, maxTokens: opts.maxTokens || 400 })),
-            signal: controller.signal
-        });
-        if (!res.ok) {
-            const text = await res.text();
-            throw new Error(`HTTP ${res.status}: ${text}`);
-        }
-        const data = await res.json();
-        return data?.choices?.[0]?.message?.content || null;
+            ],
+            "consistency_pack",
+            { maxTokens: 600, temperature: 0.2, mockFn: () => ({ banned: [], must_read: [], style_anchor: "" }) }
+        );
+        return parseConsistencyPack(JSON.stringify(obj || {}));
     } catch (e) {
-        throw e;
-    } finally {
-        clearTimeout(timeoutId);
-        S.auxiliaryControllers.delete(controller);
+        logError("consistencyPack", e);
+        return { banned: [], must_read: [], style_anchor: "" };
+    }
+}
+
+// ★ B1：角色卡解析（纯函数，可在 node 测试环境直接验证，不触 DOM）
+export function parseCharacters(text) {
+    const out = [];
+    const obj = parseJsonLoose(text, { expectArray: true });
+    if (!obj) return out;
+    for (const c of obj) {
+        if (!c || typeof c !== "object") continue;
+        out.push({
+            role: c.role === "protagonist" ? "protagonist" : "npc",
+            name: typeof c.name === "string" ? c.name.trim() : "",
+            identity: typeof c.identity === "string" ? c.identity.trim() : "",
+            gender_age: typeof c.gender_age === "string" ? c.gender_age.trim() : "",
+            appearance: typeof c.appearance === "string" ? c.appearance.trim() : "",
+            personality: typeof c.personality === "string" ? c.personality.trim() : "",
+            motivation: typeof c.motivation === "string" ? c.motivation.trim() : "",
+            relationship: typeof c.relationship === "string" ? c.relationship.trim() : "",
+            attitude: typeof c.attitude === "string" ? c.attitude.trim() : "",
+            current_state: typeof c.current_state === "string" ? c.current_state.trim() : "",
+            voice: typeof c.voice === "string" ? c.voice.trim() : "",
+            untouchable: typeof c.untouchable === "string" ? c.untouchable.trim() : "",
+            notes: typeof c.notes === "string" ? c.notes.trim() : ""
+        });
+    }
+    return out.slice(0, 12);
+}
+
+const CHARACTER_SYSTEM_PROMPT = `你是文字游戏角色设计师。根据用户提供的世界观，设计一组角色卡（1 张主角 + 若干 NPC），用于约束 AI 叙事时保持角色一致。
+请只输出 JSON 数组（不要任何解释文字），每个元素结构如下：
+{
+  "role": "protagonist" 或 "npc",
+  "name": "姓名（主角可留空字符串）",
+  "identity": "身份",
+  "gender_age": "性别/年龄",
+  "appearance": "外貌",
+  "personality": "性格",
+  "motivation": "核心目标/动机",
+  "relationship": "（NPC）与主角关系",
+  "attitude": "（NPC）对主角态度",
+  "current_state": "（NPC）当前状态/所在",
+  "voice": "（NPC）声音标签/说话方式",
+  "untouchable": "不可触碰设定（红线）",
+  "notes": "自由备注"
+}
+要求：主角 1 张；NPC 2-5 张；字段用中文简洁填写；无内容填空字符串。`;
+
+// ★ B1：建世界/编辑时由 AI 依据世界观草拟角色卡。无 API / mock / 失败 均安全返回空数组，绝不阻断。
+export async function generateCharacters(world) {
+    const w = world || S.currentWorld;
+    if (!w) return [];
+    const desc = (w.desc || "").slice(0, 4000);
+    const hero = (w.hero || "").slice(0, 1000);
+    const ipLine = w.ip_name ? `\n【已知 IP / 改编来源】：${w.ip_name}` : "";
+    const userContent = `【世界观描述】\n${desc}\n\n【主角设定】\n${hero}${ipLine}\n\n请只输出角色卡 JSON 数组：`;
+    try {
+        const obj = await callStructured(
+            [
+                { role: "system", content: CHARACTER_SYSTEM_PROMPT },
+                { role: "user", content: userContent }
+            ],
+            "character_cards",
+            { maxTokens: 1500, temperature: 0.6, mockFn: () => [] }
+        );
+        return parseCharacters(JSON.stringify(obj || []));
+    } catch (e) {
+        logError("characterCard", e);
+        return [];
     }
 }
 
@@ -833,19 +1036,14 @@ export async function judgeWorldviewConsistency(narrative, stateChangesObj, opts
         "\n\n【待判定状态变更】\n" + (stateChangesObj ? JSON.stringify(stateChangesObj, null, 2) : "（无）") +
         inputLine;
     try {
-        const text = await callLLMJson(JUDGE_SYSTEM_PROMPT + "\n\n" + freedomNote, userContent, { maxTokens: 400, temperature: 0 });
-        if (!text) return null;
-        // 解析裁判返回的 JSON：tryRepairJSON 返回的是「修复后的字符串」，需二次 parse；
-        // 先做直接解析与 {…} 抽取，逐级兜底，任何失败都回退 null（绝不抛错阻断回合）
-        let obj = null;
-        try { obj = JSON.parse(text); } catch (_) { /* 继续 */ }
-        if (!obj || typeof obj !== "object") {
-            const m = text.match(/\{[\s\S]*\}/);
-            if (m) { try { obj = JSON.parse(m[0]); } catch (_) { obj = null; } }
-        }
-        if (!obj) {
-            try { obj = JSON.parse(tryRepairJSON(text)); } catch (_) { obj = null; }
-        }
+        const obj = await callStructured(
+            [
+                { role: "system", content: JUDGE_SYSTEM_PROMPT + "\n\n" + freedomNote },
+                { role: "user", content: userContent }
+            ],
+            "worldview_judge",
+            { maxTokens: 400, temperature: 0, mockFn: () => null }
+        );
         if (obj && typeof obj.consistent === "boolean") {
             return {
                 consistent: obj.consistent,
@@ -855,7 +1053,7 @@ export async function judgeWorldviewConsistency(narrative, stateChangesObj, opts
         }
         return null;
     } catch (e) {
-        console.warn("A7 世界观裁判调用失败，跳过：", e && e.message);
+        logError("worldCritic", e);
         return null; // 裁判失败绝不阻断回合
     }
 }
@@ -864,11 +1062,9 @@ export async function judgeWorldviewConsistency(narrative, stateChangesObj, opts
 export async function callLoreRevisionLLM() {
     const kb = getWorldLoreKB();
     if (!kb || !kb.snippets || !kb.snippets.length) return null;
-    const { baseUrl, corsProxy, apiKey, model: readModel } = readApiInputs();
-    const model = readModel || "deepseek-v4-flash";
+    const { baseUrl, apiKey } = readApiInputs();
     const mock = document.getElementById("mockMode") && document.getElementById("mockMode").checked;
     if (!baseUrl || !apiKey) { if (!mock) return null; }
-    const apiUrl = buildApiUrl(baseUrl, corsProxy);
 
     const behaviorRecords = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords.slice(-20) : [];
     const recentFacts = behaviorRecords.map(r => r.text).filter(Boolean).join("；");
@@ -912,30 +1108,17 @@ ${candidatesText}
 - 不要删除已有条目（除非确实过时/错误）
 - 只输出 JSON，不要额外解释。`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    S.auxiliaryControllers.add(controller);
     try {
-        const resp = await fetch(apiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-            body: JSON.stringify({
-                model, messages: [{ role: "user", content: prompt }],
-                temperature: 0.3, max_tokens: 3000, stream: false
-            }),
-            signal: controller.signal
-        });
-        if (!resp.ok) throw new Error("知识库修订请求失败：" + resp.status);
-        const data = await resp.json();
-        const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-        const proposed = parseLoreRevisionResponse(content);
-        const diff = buildLoreRevisionDiff(kb.snippets, proposed);
+        const proposed = await callStructured(
+            [{ role: "user", content: prompt }],
+            "lore_revision",
+            { maxTokens: 3000, temperature: 0.3, mockFn: () => null }
+        );
+        if (!proposed || !Array.isArray(proposed.snippets)) return null;
+        const diff = buildLoreRevisionDiff(kb.snippets, proposed.snippets);
         if (diff.updates.length || diff.additions.length) return diff;
     } catch (e) {
-        console.warn("B5 知识库修订调用失败：", e && e.message);
-    } finally {
-        clearTimeout(timeoutId);
-        S.auxiliaryControllers.delete(controller);
+        logError("loreRevision", e);
     }
     return null;
 }
@@ -945,12 +1128,10 @@ ${candidatesText}
 // kb：世界知识库 { ip, snippets }；world：世界对象（取其 rules 作为不可违反的硬约束）。
 export async function callWorldCriticLLM(kb, world) {
     if (!kb || !Array.isArray(kb.snippets) || !kb.snippets.length) return null;
-    const { baseUrl, corsProxy, apiKey, model: readModel } = readApiInputs();
-    const model = readModel || "deepseek-v4-flash";
+    const { baseUrl, apiKey } = readApiInputs();
     const mock = document.getElementById("mockMode") && document.getElementById("mockMode").checked;
     if (!baseUrl || !apiKey) { if (!mock) return null; }
     if (mock) return null; // 模拟模式不烧 API，跳过审稿
-    const apiUrl = buildApiUrl(baseUrl, corsProxy);
 
     const snippetsText = kb.snippets.map(s => {
         const links = Array.isArray(s.links) && s.links.length
@@ -1016,33 +1197,20 @@ ${snippetsText}${timeBlock}${preBlock}
 - 修订条目必须保留原 id，仅改有问题的字段。
 - 新增条目用 "nl" + 序号作 id，category 必须合法。
 - 不要删除仍有价值的条目。
-- 涉及时间的条目若写死年份/季节，优先改用占位符 {calendar_date}/{era_label}/{season}，使时间跳跃后自动跟随；仅在确属固定史实时才保留具体年份。
+- 涉及时间的条目若写死年份/季节，优先改用占位符 {calendar_date}/{era_label}，使时间跳跃后自动跟随；仅在确属固定史实时才保留具体年份。
 - 只输出 JSON，不要任何解释。`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 40000);
-    S.auxiliaryControllers.add(controller);
     try {
-        const resp = await fetch(apiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-            body: JSON.stringify({
-                model, messages: [{ role: "user", content: prompt }],
-                temperature: 0.2, max_tokens: 4000, stream: false
-            }),
-            signal: controller.signal
-        });
-        if (!resp.ok) throw new Error("审稿请求失败：" + resp.status);
-        const data = await resp.json();
-        const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-        const proposed = parseLoreRevisionResponse(content);
-        const diff = buildLoreRevisionDiff(kb.snippets, proposed);
+        const proposed = await callStructured(
+            [{ role: "user", content: prompt }],
+            "lore_revision",
+            { maxTokens: 4000, temperature: 0.2, mockFn: () => null }
+        );
+        if (!proposed || !Array.isArray(proposed.snippets)) return null;
+        const diff = buildLoreRevisionDiff(kb.snippets, proposed.snippets);
         if (diff.updates.length || diff.additions.length) return diff;
     } catch (e) {
-        console.warn("Phase 3 审稿调用失败：", e && e.message);
-    } finally {
-        clearTimeout(timeoutId);
-        S.auxiliaryControllers.delete(controller);
+        logError("phase3Review", e);
     }
     return null;
 }

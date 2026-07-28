@@ -3,11 +3,26 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_LABELS, LINK_RELATIONS, MAX_SOURCE_CHARS, normalizeTimeConfig } from "./store.js";
-import { applyStateChanges } from "./game.js";
 import { formatCalendarDate, deriveAnchorYear } from "./calendar.js";
 
 export function deepClone(obj) {
     return typeof structuredClone !== "undefined" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj));
+}
+
+// ★ #10 统一错误处理（最小侵入版）：默认静默降级（console.warn），
+// 关键路径错误同时写入诊断缓冲 S.debugLog.chunkErrors（供玩家导出诊断），
+// 绝不擅自弹 toast（避免把"有意静默降级"变成烦人弹窗）。
+export function logError(scope, err) {
+    const summary = (err && err.message) ? err.message : String(err);
+    console.warn(`[${scope}]`, err);
+    try {
+        if (S && S.debugLog) {
+            S.debugLog.chunkErrors = S.debugLog.chunkErrors || [];
+            if (S.debugLog.chunkErrors.length < 300) {
+                S.debugLog.chunkErrors.push({ t: new Date().toISOString(), scope, msg: summary });
+            }
+        }
+    } catch (_) { /* 写缓冲失败不应再抛错 */ }
 }
 
 // migrateGameState 已移除（Phase 0：不兼容旧存档/世界；gameState 形状由 initial_state.json / saveState 保证）
@@ -34,7 +49,8 @@ export function defaultWorldSchema(styleHint) {
             },
             time_periods: DEFAULT_PERIOD_LABELS,
             time_config: normalizeTimeConfig(null),
-            game_over_conditions: ["is_alive === false"]
+            game_over_conditions: ["is_alive === false"],
+            variable_schema: []
         };
     }
     return {
@@ -47,12 +63,49 @@ export function defaultWorldSchema(styleHint) {
         },
         time_periods: DEFAULT_PERIOD_LABELS,
         time_config: normalizeTimeConfig(null),
-        game_over_conditions: ["is_alive === false"]
+        game_over_conditions: ["is_alive === false"],
+        variable_schema: []   // ★ B2：玩家变量定义（默认空=开箱无数字压力，创作者按需添加）
     };
 }
 
 export function getWorldSchema(world) {
     return (world && world.schema) || defaultWorldSchema(world && world.name);
+}
+
+// ★ A2：IP 轻量识别（关键词启发式）。
+// 明确边界：只识别"提到了哪个已知 IP"（模式匹配），不比对/不存储版权原文，不做"原文 vs 改稿"判定。
+export const IP_SIGNATURES = [
+    { name: "哈利波特", aliases: ["哈利波特", "harry potter", "hp", "霍格沃茨", "hogwarts", "魁地奇", "quidditch", "伏地魔", "voldemort", "魔法部", "麻瓜", "muggle", "邓布利多", "dumbledore", "格兰芬多", "gryffindor", "斯莱特林", "slitherin", "分院帽"] },
+    { name: "克苏鲁", aliases: ["克苏鲁", "cthulhu", "洛夫克拉夫特", "lovecraft", "深潜者", "旧日支配者", "修格斯", "shoggoth", "阿撒托斯", "azathoth", "犹格", "yog-sothoth", "奈亚拉托提普", "nyarlathotep"] },
+    { name: "三体", aliases: ["三体", "three body", "刘慈欣", "面壁者", "黑暗森林", "罗辑", "章北海"] },
+    { name: "红楼梦", aliases: ["红楼梦", "石头记", "贾宝玉", "林黛玉", "曹雪芹", "大观园"] },
+    { name: "剑来", aliases: ["剑来", "骊珠洞天", "陈平安", "宁姚"] }
+];
+
+// 从任意文本里识别"提到了哪些已知 IP"，返回统一 IP 名数组（去重）。无匹配返回 []。
+export function detectIp(text) {
+    if (!text || typeof text !== "string") return [];
+    const lower = text.toLowerCase();
+    const hits = new Set();
+    for (const sig of IP_SIGNATURES) {
+        for (const alias of sig.aliases) {
+            if (lower.includes(alias.toLowerCase())) { hits.add(sig.name); break; }
+        }
+    }
+    return [...hits];
+}
+
+// 把用户自由填写的 IP 名映射到已知 IP（用于冲突判定），无匹配返回 null。
+export function matchKnownIp(name) {
+    if (!name) return null;
+    const lower = String(name).toLowerCase();
+    for (const sig of IP_SIGNATURES) {
+        for (const alias of sig.aliases) {
+            if (lower.includes(alias.toLowerCase())) return sig.name;
+        }
+        if (lower.includes(sig.name.toLowerCase())) return sig.name;
+    }
+    return null;
 }
 
 export function capSource(text) { return (text || "").slice(0, MAX_SOURCE_CHARS); }
@@ -791,4 +844,39 @@ export async function runPool(items, concurrency, worker, opts = {}) {
     }
     await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runner()));
     return results;
+}
+
+// ============================================================
+// A3 · 创作完成度清单（纯函数，可在 Node 下单测；无 DOM 依赖）
+// 全部指标从 world 现有字段实时派生，不新增数据模型、不阻塞游玩。
+// 维度（见 docs/36）：1 标题 / 2 世界观 / 3 开场场景 / 4 ≥1角色 /
+//   5 游玩系统(规则) / 6 重要事件(lore_kb 带 trigger) / 7 主角设定
+// ============================================================
+export function computeWorldCompletion(world) {
+    const w = world || {};
+    const has = (v) => typeof v === "string" && v.trim().length > 0;
+    const snippets = (w.lore_kb && Array.isArray(w.lore_kb.snippets)) ? w.lore_kb.snippets : [];
+    const characters = Array.isArray(w.characters) ? w.characters : [];
+    const rules = Array.isArray(w.rules) ? w.rules : [];
+    const eventSnippets = snippets.filter(s => s && s.trigger && typeof s.trigger === "object");
+
+    const items = [
+        { key: "title", label: "标题", done: has(w.name), hint: "世界名称" },
+        { key: "worldview", label: "世界观", done: has(w.desc), hint: "去编辑世界观描述" },
+        { key: "opening", label: "开场场景", done: has(w.opening_narrative), hint: "去补开场白" },
+        { key: "characters", label: "≥1 角色", done: characters.length >= 1, hint: "去添加角色卡" },
+        { key: "rules", label: "游玩系统", done: rules.length >= 1, hint: "去添加规则" },
+        { key: "events", label: "重要事件", done: eventSnippets.length >= 1, hint: "去知识库给片段挂触发" },
+        { key: "hero", label: "主角设定", done: has(w.hero), hint: "去补主角动机/身份" }
+    ];
+
+    const done = items.filter(i => i.done).length;
+    const total = items.length;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    let grade;
+    if (done >= total) grade = "圆满";
+    else if (done >= 4) grade = "基本可用";
+    else grade = "待充实";
+
+    return { items, done, total, pct, grade };
 }

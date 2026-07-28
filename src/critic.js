@@ -10,6 +10,7 @@ import { callWorldCriticLLM } from "./llm.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { ensureLoreEmbeddings } from "./rag.js";
 import { saveWorlds } from "./storage.js";
+import { invalidateLoreHardCache } from "./prompt.js";
 
 // 自动审稿（生成世界后 fire-and-forget 调用）或手动触发。
 // world：世界对象（取其 lore_kb 与 rules）。
@@ -63,6 +64,7 @@ export async function confirmCriticRevision() {
     try { await ensureLoreEmbeddings(candidateKB); }
     catch (e) { console.warn("审稿后向量重算失败，降级为关键词检索：", e && e.message); }
     world.lore_kb = candidateKB;
+    invalidateLoreHardCache(); // ★ Phase 5 L2：知识库改动仅失效「知识库硬约束」缓存段（角色卡段保留命中）
     if (S.currentWorld && S.currentWorld.id === world.id && S.activeLoreKB) S.activeLoreKB = candidateKB;
     saveWorlds();
     S._criticBuffer = null;

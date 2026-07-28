@@ -1,12 +1,11 @@
 // ============================================================
 // AetherNarrator · prompt.js（由 app.js 模块化拆分自动生成）
 // ============================================================
-import { S } from "./store.js";
+import { S, getVariableSchema, getEnabledVariables, getWorldLoreKB } from "./store.js";
 import { CHAT_ANCHOR_MSGS, CHAT_RECENT_MSGS, LORE_FULL_THRESHOLD, MAX_CHAT_MESSAGES, SYSTEM_ROLES, DEFAULT_BANNED_CONCEPTS, getBannedConcepts } from "./store.js";
 import { dedupeStrings, getWorldSchema, resolveOpeningTokens } from "./utils.js";
 import { getTimeConfig, formatWorldTime, getPeriodLabel, stepOf } from "./theme.js";
 import { formatCalendarDate } from "./calendar.js";
-import { getWorldLoreKB } from "./rag.js";
 import { getProvider } from "./providers.js";
 
 // 模块级缓存标志：核心知识库是否已固定注入 system（buildSystemPrompt 写、getPositionedLore 读）
@@ -186,6 +185,25 @@ ${chunkContent}
 { "lore_kb": { "ip": "${name}", "snippets": [ ... ] } }`;
 }
 
+// ★ A2：把一致性包里的 must_read / style_anchor / key_divergences 拼进 system prompt。
+// banned 已由 getBannedConcepts 注入（见上方"世界观禁律"段），此处不重复。
+export function buildCanonRules(world) {
+    const c = world && world.canon;
+    const pack = c && c.consistency_pack;
+    if (!pack) return "";
+    const parts = [];
+    if (Array.isArray(pack.must_read) && pack.must_read.length) {
+        parts.push("# 世界核心设定（必读铁律）\n\n" + pack.must_read.map((m, i) => (i + 1) + ". " + m).join("\n"));
+    }
+    if (pack.style_anchor && pack.style_anchor.trim()) {
+        parts.push("# 文风锚点\n\n" + pack.style_anchor.trim());
+    }
+    if (c.key_divergences && c.key_divergences.trim()) {
+        parts.push("# 关键偏离（用户自定义，优先级最高）\n\n以下为用户对本世界的明确修改，高于以上任何设定：\n" + c.key_divergences.trim());
+    }
+    return parts.length ? "\n\n" + parts.join("\n\n") : "";
+}
+
 export function buildSystemPrompt() {
     // ★ P0: 预计算缓存 — 同一世界内 system prompt 完全固定，无需每轮重建
     const worldId = S.currentWorld && S.currentWorld.id;
@@ -237,37 +255,12 @@ export function buildSystemPrompt() {
         .replace(/{STYLE_GUIDE}/g, buildStyleGuide(S.currentWorld))
         .replace(/{STYLE_EXPRESSION_GUIDE}/g, buildExpressionGuide(S.currentWorld));
 
-    // ★ 知识库注入 system（命中缓存优化·方案 B）
-    // 原则：system 只常驻「真正的硬约束」（规则/世界观），其余类别（人物/地点/冲突/事件/物品/势力）
-    // 改为每轮动态 RAG 注入（受 rag.js 的 1600 字符 + 12 条预算裁剪）。
-    // 既保证 AI 严格守世界规则，又把 system 从几十万字符压到几千，前缀缓存稳定命中，token 大幅下降。
+    // ★ Phase 5 L2：知识库硬约束段（规则/世界观）已拆为「独立缓存断点」，由 buildLoreHardBreakpoint() 产出，
+    // 不再拼进 L1 单体 system 串。原因：角色卡 / 知识库变化频率不同，混在同一缓存段会让任一变化
+    // 拖垮整段缓存（编辑知识库→角色卡也被迫重发）。拆分后二者各自独立命中，详见 buildLoreHardBreakpoint。
+    // 注意：cachedSystemCats / isCoreLoreCached 由 buildLoreHardBreakpoint 设置（getPositionedLore 的 RAG 分流依赖），
+    // 调用方（callLLM）须先调用 buildLoreHardBreakpoint 再调用 getPositionedLore。
     const allSnippets = kb && kb.snippets ? kb.snippets : [];
-    // 小知识库（全量 < LORE_FULL_THRESHOLD）：直接全量常驻 system，缓存友好，无需 RAG
-    const fullLoreText = allSnippets.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
-    if (fullLoreText.length > 0 && fullLoreText.length < LORE_FULL_THRESHOLD) {
-        systemPrompt += "\n\n# 世界观知识库（全量·固定，命中缓存）\n\n以下为该世界全部知识片段，请作为叙事依据：\n\n```\n" + fullLoreText + "\n```";
-        cachedSystemCats = new Set(allSnippets.map(s => s.category));
-        isCoreLoreCached = true;
-    } else {
-        // 大知识库：只把硬约束类（规则/世界观）常驻 system，且设上限保护前缀缓存
-        const HARD_CATS = ["规则", "世界观"];
-        const SYSTEM_LORE_CAP = 8000; // 常驻 system 的知识文本上限（字符），超出则只留更关键的「规则」类
-        let hardSnips = allSnippets.filter(s => HARD_CATS.includes(s.category));
-        let hardText = hardSnips.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
-        if (hardText.length > SYSTEM_LORE_CAP) {
-            // 超限则只保留规则类（更关键的约束），世界观也走 RAG，确保 system 始终精简
-            const ruleOnly = allSnippets.filter(s => s.category === "规则");
-            hardText = ruleOnly.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
-            cachedSystemCats = new Set(hardText.length ? ["规则"] : []);
-        } else {
-            cachedSystemCats = new Set(HARD_CATS);
-        }
-        if (hardText.length) {
-            systemPrompt += "\n\n# 世界观核心约束（规则·世界观·固定，命中缓存）\n\n以下为必须始终遵守的世界硬约束，请作为叙事依据：\n\n```\n" + hardText + "\n```";
-        }
-        // 人物/地点/冲突/事件/物品/势力等不进 system，由每轮动态 RAG 按需注入（受预算裁剪）
-        isCoreLoreCached = false;
-    }
 
     // 世界专属指令注入 system 开头（固定）
     if (S.currentWorld && S.currentWorld.system_prompt) {
@@ -297,6 +290,22 @@ export function buildSystemPrompt() {
         systemPrompt += "\n\n# 世界观禁律（生成前约束）\n\n本世界为「" + worldType + "」背景，请严格避免让以下现代/科技概念自行出现在叙事中（若玩家在游戏内明确、合理地要求引入，可酌情处理，但请勿无故自行添加）：\n" + bannedConcepts.map((c, i) => (i + 1) + ". " + c).join("\n");
     }
 
+    // ★ A2：一致性包补充约束（必读设定 / 文风锚点 / 用户关键偏离）
+    systemPrompt += buildCanonRules(S.currentWorld);
+
+    // ★ Phase 5 L2：人物卡（角色卡）已拆为「独立缓存断点」，由 buildCharactersBreakpoint() 产出，
+    // 不再拼进 L1 单体 system 串（理由同知识库硬约束段，见上方注释）。
+
+    // ★ B2：玩家变量定义注入 system 静态段（静态，编辑保存时 invalidateSystemPromptCache 重建）
+    const variablesCtx = buildVariablesContext(S.currentWorld);
+    if (variablesCtx) systemPrompt += "\n\n" + variablesCtx;
+
+    // ★ B3：物品作为可反复触发的叙事道具——选项生成行为指令（常驻、世界无关、不破前缀缓存）
+    systemPrompt += "\n\n" + buildItemUseHint();
+
+    // ★ B4：关系 / 好感度驱动选项行为指令（常驻、世界无关、不破前缀缓存）
+    systemPrompt += "\n\n" + buildBondHint();
+
     // ★ 时间线单向进度指令（仅当知识库存在带 timeline 的条目时注入，避免污染无时间线的世界）
     const hasTimeline = allSnippets.some(s => Array.isArray(s.timeline) && s.timeline.length);
     if (hasTimeline) {
@@ -316,6 +325,86 @@ export function buildSystemPrompt() {
 export function invalidateSystemPromptCache() {
     S.cachedSystemPrompt = null;
     S.cachedSysPromptWorldId = null;
+    S.cachedCharactersPrompt = null;
+    S.cachedCharactersWorldId = null;
+    S.cachedLoreHardPrompt = null;
+    S.cachedLoreHardWorldId = null;
+}
+
+// ★ Phase 5 L2：角色卡独立缓存断点。
+// 角色卡变化频率极低（只在你编辑角色时才变），却长期稳定，应作为独立缓存段长期命中，
+// 不被知识库 / 规则的变动拖垮。返回拼好的「角色卡段」文本（空串表示该世界无角色卡）。
+// none 策略（本地模型）不缓存，每轮重建（返回计算值即可，不影响正确性）。
+export function buildCharactersBreakpoint() {
+    const strategy = getProvider().cacheStrategy;
+    const worldId = S.currentWorld && S.currentWorld.id;
+    if (strategy !== "none" && S.cachedCharactersPrompt !== null && worldId && worldId === S.cachedCharactersWorldId) {
+        return S.cachedCharactersPrompt;
+    }
+    const charactersCtx = buildCharactersContext(S.currentWorld);
+    const text = charactersCtx ? "\n\n" + charactersCtx : "";
+    if (strategy !== "none") {
+        S.cachedCharactersPrompt = text;
+        S.cachedCharactersWorldId = worldId;
+    }
+    return text;
+}
+
+// ★ Phase 5 L2：知识库硬约束（规则 / 世界观）独立缓存断点。
+// 大世界下编辑知识库是高频动作（B5 自动修订 / Critic 审稿 / 手动编辑），不应拖垮角色卡缓存段。
+// 本函数同时设置 cachedSystemCats / isCoreLoreCached（getPositionedLore 的 RAG 分流依赖），
+// 故调用方（callLLM）须在 buildTurnUserMessage / getPositionedLore 之前调用本函数。
+// none 策略不缓存，每轮重建（返回计算值）。
+export function buildLoreHardBreakpoint() {
+    const strategy = getProvider().cacheStrategy;
+    const worldId = S.currentWorld && S.currentWorld.id;
+    if (strategy !== "none" && S.cachedLoreHardPrompt !== null && worldId && worldId === S.cachedLoreHardWorldId) {
+        return S.cachedLoreHardPrompt;
+    }
+    const kb = getWorldLoreKB();
+    const allSnips = kb && kb.snippets ? kb.snippets : [];
+    let text = "";
+    const fullLoreText = allSnips.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
+    if (fullLoreText.length > 0 && fullLoreText.length < LORE_FULL_THRESHOLD) {
+        text = "\n\n# 世界观知识库（全量·固定，命中缓存）\n\n以下为该世界全部知识片段，请作为叙事依据：\n\n```\n" + fullLoreText + "\n```";
+        cachedSystemCats = new Set(allSnips.map(s => s.category));
+        isCoreLoreCached = true;
+    } else {
+        // 大知识库：只把硬约束类（规则/世界观）常驻，且设上限保护前缀缓存
+        const HARD_CATS = ["规则", "世界观"];
+        const SYSTEM_LORE_CAP = 8000; // 常驻知识文本上限（字符），超出则只留更关键的「规则」类
+        let hardSnips = allSnips.filter(s => HARD_CATS.includes(s.category));
+        let hardText = hardSnips.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
+        if (hardText.length > SYSTEM_LORE_CAP) {
+            const ruleOnly = allSnips.filter(s => s.category === "规则");
+            hardText = ruleOnly.map(s => `[${s.category}：${s.title}]\n${s.content}`).join("\n\n");
+            cachedSystemCats = new Set(hardText.length ? ["规则"] : []);
+        } else {
+            cachedSystemCats = new Set(HARD_CATS);
+        }
+        if (hardText.length) {
+            text = "\n\n# 世界观核心约束（规则·世界观·固定，命中缓存）\n\n以下为必须始终遵守的世界硬约束，请作为叙事依据：\n\n```\n" + hardText + "\n```";
+        }
+        // 人物/地点/冲突/事件/物品/势力等不进常驻段，由每轮动态 RAG 按需注入（受预算裁剪）
+        isCoreLoreCached = false;
+    }
+    if (strategy !== "none") {
+        S.cachedLoreHardPrompt = text;
+        S.cachedLoreHardWorldId = worldId;
+    }
+    return text;
+}
+
+// ★ Phase 5 L2：仅失效角色卡缓存段（编辑角色卡时用，保留 L1 core 与知识库硬约束段的缓存）。
+export function invalidateCharactersCache() {
+    S.cachedCharactersPrompt = null;
+    S.cachedCharactersWorldId = null;
+}
+
+// ★ Phase 5 L2：仅失效知识库硬约束缓存段（编辑知识库时用，保留 L1 core 与角色卡段的缓存）。
+export function invalidateLoreHardCache() {
+    S.cachedLoreHardPrompt = null;
+    S.cachedLoreHardWorldId = null;
 }
 
 export function buildTimeModeRules() {
@@ -427,6 +516,158 @@ export function buildHeroContext() {
         hero = "- 主角信息未指定，请根据玩家输入和世界观推理主角身份与能力。";
     }
     return anchor + "\n" + hero;
+}
+
+// ★ B1：人物卡上下文（纯函数，注入 system 静态段；可在 Node 单测，不触 DOM）。
+// world 缺省取 S.currentWorld；返回格式化文本块（含主角 + NPC）。无任何有效角色卡时返回 ""。
+export function buildCharactersContext(world) {
+    const w = world || S.currentWorld;
+    const chars = (w && Array.isArray(w.characters)) ? w.characters : [];
+    const valid = chars.filter(c => c && typeof c === "object");
+    if (!valid.length) return "";
+
+    const roleLabel = c => (c.role === "protagonist") ? "主角" : "NPC";
+    const line = (label, val) => (val && String(val).trim()) ? `- ${label}：${String(val).trim()}\n` : "";
+
+    // 主角排前、NPC 排后（各自保持原序）
+    const prot = valid.filter(c => c.role === "protagonist");
+    const npc = valid.filter(c => c.role !== "protagonist");
+    const blocks = [];
+    [...prot, ...npc].forEach(c => {
+        const title = c.name && String(c.name).trim()
+            ? c.name.trim()
+            : (c.role === "protagonist" ? "（玩家所扮演）" : "（未命名）");
+        let b = `【角色卡 · ${roleLabel(c)}】${title}\n`;
+        b += line("身份", c.identity);
+        b += line("性别/年龄", c.gender_age);
+        b += line("外貌", c.appearance);
+        b += line("性格", c.personality);
+        b += line("核心目标", c.motivation);
+        if (c.role !== "protagonist") {
+            b += line("与主角关系", c.relationship);
+            b += line("对主角态度", c.attitude);
+            b += line("当前状态", c.current_state);
+            b += line("声音标签", c.voice);
+            if (typeof c.affinity === "number") b += line("初始好感度", String(c.affinity));
+            if (Array.isArray(c.rel_tags) && c.rel_tags.length) b += line("关系标签", c.rel_tags.join("、"));
+        }
+        b += line("不可触碰设定", c.untouchable);
+        b += line("备注", c.notes);
+        blocks.push(b.replace(/\n+$/, ""));
+    });
+    if (!blocks.length) return "";
+    return "# 角色设定（人物卡）\n\n" +
+        "以下为本世界已确立的角色卡。请在处理相关角色时严格遵循其设定，尤其「不可触碰设定」不得违背；关系描述本身即故事状态，请保持前后一致：\n\n" +
+        blocks.join("\n\n") + "\n";
+}
+
+// ★ B2：玩家变量定义（静态，注入 system 段；编辑保存时 invalidateSystemPromptCache 重建）。
+// 只描述"有哪些变量、怎么更新"，不输出当前值（当前值在每轮 user 消息动态段注入，避免破坏前缀缓存）。
+// schema 为空（默认）时返回 ""，绝大多数世界无数字压力。
+export function buildVariablesContext(world) {
+    const w = world || S.currentWorld;
+    const vars = getEnabledVariables(w);
+    if (!vars.length) return "";
+
+    const lines = vars.map(v => {
+        const parts = [];
+        parts.push(`- ${v.name}（${v.id}）`);
+        if (v.type === "number") {
+            let range = "";
+            if (typeof v.min === "number" || typeof v.max === "number") {
+                range = `范围 ${v.min != null ? v.min : "-∞"}–${v.max != null ? v.max : "∞"}`;
+            }
+            const unit = v.unit ? `，单位 ${v.unit}` : "";
+            const def = (typeof v.default === "number") ? `，默认 ${v.default}` : "";
+            parts.push(`：数值型${range}${unit}${def}。`);
+        } else if (v.type === "toggle") {
+            parts.push(`：开关型（true/false）。`);
+        } else {
+            parts.push(`：文本型（字符串）。`);
+        }
+        if (v.desc) parts.push(`含义：${v.desc}。`);
+        return parts.join("");
+    });
+
+    return "# 玩家变量（由创作者定义）\n\n" +
+        "本世界含以下玩家可追踪变量。请在剧情需要时，于每轮返回的 state_changes.variables 中给出该变量**变化后的完整值**（不是增量）：\n" +
+        lines.join("\n") + "\n" +
+        "数值类直接给数字；文本类给字符串；开关类给 true/false。不要编造未列出的变量。\n";
+}
+
+// ★ B3：物品选项行为指令（常驻 system 静态段；背包已通过 buildCompactGameState 每轮注入，此处只给"行为偏好"，世界无关、不破前缀缓存）。
+export function buildItemUseHint() {
+    return `# 物品与选项（重要）
+
+玩家背包里的物品是可直接使用的叙事道具，应能在剧情中被反复调用，而非仅作背景。
+- 若「当前游戏状态」的 inventory 中存在可用物品（尤其标记为「关键」、类别为「武器 / 消耗品 / 线索」者），你应在给出的选项中优先包含围绕该物品的动作，例如「使用 X」「检查 X」「把 X 交给某人」「用 X 尝试…」。
+- 仅当当前场景确实不适合使用某物品（如物品与情境无关、或角色无法触及）时，才可不在本轮列出；不要为了列而列、强行塞入违和的选项。
+- 玩家使用物品后，若剧情需要，可在 state_changes.inventory 中返回对应变化（如消耗品 count -1、线索升级为关键等）；授予新物品时鼓励返回 category 与 is_key 字段——category 取值：武器/装备/消耗品/线索/书籍/货币/其他；is_key 为 true 表示关键物品（会在状态面板高亮、进入手记）。`;
+}
+
+// ★ B4：关系 / 好感度驱动选项的行为指令（常驻、世界无关、不破前缀缓存）
+export function buildBondHint() {
+    return `# 关系与选项（重要）
+
+玩家与 NPC 之间可能存在数值化的好感度（bonds 中的 affinity，-100 到 100）与关系标签（如 盟友 / 宿敌 / 暗恋对象），详见每轮「当前游戏状态」JSON 的 bonds 字段。好感度是 AI 的对话锚点，也应影响你给出的选项：
+- 若某 NPC 好感度较高（≥60）或带「盟友 / 信赖」类标签，可在选项中自然给出「倾诉」「委托」「求助」「并肩」等互动；
+- 若某 NPC 好感度较低（≤-40）或带「宿敌 / 戒备」类标签，可给出「对峙」「回避」「试探」「戒备」等互动；
+- 选项须贴合当下剧情与角色动机，不要生硬堆砌；当场景确实不适合关系互动时，可不列。
+- 玩家与某 NPC 的关系进展时，鼓励在 state_changes.bonds 中返回 { "NPC名": { "delta": ±数值, "tags": [标签], "desc": "关系新描述" } }（delta 为相对变化，夹取 -100~100；tags 与既有标签合并去重；desc 可选，会同步更新文字关系层）。`;
+}
+
+// ★ B2：把本回合的 state_changes 转成人类可读的「本回合变化」条目（纯函数，供 render.js 渲染）。
+// entry 需包含 entry.state_changes（AI 返回的原始变化）与 entry.varChanges（applyStateChanges 计算出的变量增减摘要）。
+// 返回字符串数组，空数组表示本回合无结构化变化。
+export function formatStateChanges(entry, world) {
+    const changes = (entry && entry.state_changes) || {};
+    const varChanges = (entry && entry.varChanges) || [];
+    const lines = [];
+    // 1) 玩家变量增减（已由 computeVariableUpdates 计算，含 from/to/type/unit）
+    for (const v of varChanges) {
+        if (v.type === "number") {
+            const delta = (typeof v.to === "number" && typeof v.from === "number") ? (v.to - v.from) : 0;
+            const sign = delta > 0 ? "+" : (delta < 0 ? "-" : "");
+            const deltaStr = delta !== 0 ? `（${sign}${Math.abs(delta)}${v.unit || ""}）` : "";
+            lines.push(`变量 · ${v.name}：${v.from} → ${v.to}${deltaStr}`);
+        } else if (v.type === "toggle") {
+            lines.push(`变量 · ${v.name}：${v.to ? "开" : "关"}`);
+        } else {
+            lines.push(`变量 · ${v.name}：${v.to}`);
+        }
+    }
+    // 2) 地点
+    if (changes.current_location) lines.push(`前往 ${changes.current_location}`);
+    // 3) 关系 / 好感度
+    if (changes.bonds && typeof changes.bonds === "object" && !Array.isArray(changes.bonds)) {
+        for (const [n, upd] of Object.entries(changes.bonds)) {
+            if (!upd || typeof upd !== "object") continue;
+            const deltaStr = (typeof upd.delta === "number" && upd.delta !== 0)
+                ? `（好感 ${upd.delta > 0 ? "+" : ""}${upd.delta}）` : "";
+            const tagsStr = (Array.isArray(upd.tags) && upd.tags.length) ? ` +标签[${upd.tags.join("/")}]` : "";
+            lines.push(`与 ${n} 关系更新${deltaStr}${tagsStr}`);
+        }
+    } else if (changes.relationships && Object.keys(changes.relationships).length) {
+        for (const [n, val] of Object.entries(changes.relationships)) {
+            if (val && String(val).trim()) lines.push(`与 ${n} 关系更新`);
+        }
+    }
+    // 4) 物品
+    if (Array.isArray(changes.inventory)) {
+        for (const op of changes.inventory) {
+            const keyMark = op.is_key === true ? " [关键]" : "";
+            if (op.op === "add") lines.push(`获得${keyMark} ${op.name || op.item_id}`);
+            else if (op.op === "remove") lines.push(`失去${keyMark} ${op.name || op.item_id}`);
+            else if (op.op === "clear_world") lines.push(`清空某界物品`);
+        }
+    }
+    // 5) 临时状态
+    if (Array.isArray(changes.status_effects) && changes.status_effects.length) {
+        for (const e of changes.status_effects) lines.push(`状态 · ${e.name || "效果"}`);
+    }
+    // 6) 死亡
+    if (changes.is_alive === false) lines.push(`角色死亡`);
+    return lines;
 }
 
 export function buildToneGuide() {
@@ -543,6 +784,10 @@ export function buildCompactGameState() {
         npc_activity: S.gameState.npc_activity || {},
         present_npcs: S.gameState.present_npcs || [],
         revealed_locations: S.gameState.revealed_locations || [],
+        // ★ B2：当前变量值（动态段，每轮跟随 user 消息；不在 system 静态段，避免破坏前缀缓存）
+        variables: S.gameState.variables || {},
+        // ★ B4：当前好感度（动态段，每轮跟随 user 消息；初始锚点在 buildCharactersContext，不破前缀缓存）
+        bonds: S.gameState.bonds || {},
         is_alive: S.gameState.is_alive
     };
     return JSON.stringify(state);

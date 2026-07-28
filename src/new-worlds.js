@@ -57,11 +57,11 @@ export function createCthulhuWorld() {
                 "心理抗性": "你的意志力尚可，但从未经历过真正考验——那些超越人类理解极限的景象，足以使最坚强的人陷入疯狂。"
             },
             inventory: [
-                { item_id: "notebook", name: "调查笔记", count: 1 },
-                { item_id: "pistol", name: "左轮手枪", count: 1, tags: ["has_firearm"] },
-                { item_id: "camera", name: "柯达相机", count: 1 },
-                { item_id: "ledger", name: "安吉尔教授的笔记盒", count: 1 },
-                { item_id: "cash", name: "旅费", count: 50 }
+                { item_id: "notebook", name: "调查笔记", count: 1, category: "线索" },
+                { item_id: "pistol", name: "左轮手枪", count: 1, category: "武器", tags: ["has_firearm"] },
+                { item_id: "camera", name: "柯达相机", count: 1, category: "装备" },
+                { item_id: "ledger", name: "安吉尔教授的笔记盒", count: 1, category: "线索", is_key: true },
+                { item_id: "cash", name: "旅费", count: 50, category: "货币" }
             ],
             completed_events: [],
             active_event: null,
@@ -80,8 +80,7 @@ export function createCthulhuWorld() {
                 "安吉尔教授": "已故，留下了一个锁闭的盒子和未解的谜题"
             },
             is_alive: true,
-            death_reason: null,
-            sanity: 100
+            death_reason: null
         },
         lore_kb: {
             ip: "克苏鲁神话",
@@ -116,12 +115,12 @@ export function createCthulhuWorld() {
             "你是《克苏鲁的呼唤》世界观下的 AI 文字游戏叙事主持人。风格定位：宇宙恐怖 + 20年代调查。",
             "",
             "世界观硬约束：",
-            "1. 时间设定在1920年代，背景基于 H.P.洛夫克拉夫特的克苏鲁神话体系。严禁出现现代科技（手机、电脑、互联网等）或与此时代不符的物品。",
-            "2. 核心主题是宇宙恐怖：人类在宇宙尺度上微不足道，旧日支配者的存在超越了善恶道德判断。每次揭示超自然或不可名状之物时，应对理智值（sanity）进行检查或削减。",
-            "3. 理智值规则：目睹克苏鲁本体削减20-50点；看到不可名状生物削减3-10点；阅读禁忌文献削减1-5点；发现震惊真相削减2-6点。当理智值低于30时出现轻度幻觉；低于10时严重精神错乱；低于0时游戏结束。",
-            "4. 力量体系：人类面对旧日支配者几乎没有对抗能力。最好的策略是逃亡、封印或阻止仪式。火药武器可对付低级仆从，但面对旧日支配者本人时，逃跑通常是唯一理智的选择。",
-            "5. 叙事风格：兼具20年代文学气息和恐怖氛围，使用细腻的环境描写铺垫恐惧。对话符合1920年代用语习惯。恐怖不必直白——暗示和氛围往往比直接描写更有效。",
-            "6. 输出必须是 JSON 格式，包含 narrative、choices、state 等字段。"
+            "1. 核心主题是宇宙恐怖：人类在宇宙尺度上微不足道，旧日支配者的存在超越了善恶道德判断。每次揭示超自然或不可名状之物时，应对理智值（sanity）进行检查或削减。",
+            "2. 理智值规则：目睹克苏鲁本体削减20-50点；看到不可名状生物削减3-10点；阅读禁忌文献削减1-5点；发现震惊真相削减2-6点。当理智值低于30时出现轻度幻觉；低于10时严重精神错乱；低于0时游戏结束。",
+            "3. 力量体系：人类面对旧日支配者几乎没有对抗能力。最好的策略是逃亡、封印或阻止仪式。火药武器可对付低级仆从，但面对旧日支配者本人时，逃跑通常是唯一理智的选择。",
+            "4. 叙事风格：兼具20年代文学气息和恐怖氛围，使用细腻的环境描写铺垫恐惧。对话符合1920年代用语习惯。恐怖不必直白——暗示和氛围往往比直接描写更有效。",
+            "5. 输出必须是 JSON 格式，包含 narrative、choices、state 等字段。",
+            "（注：本世界时间设定在1920年代，禁止现代科技/手机/电脑等违和物品——具体禁项见规则列表「禁项」，由一致性包自动生成。）"
         ].join("\n"),
         opening_narrative: [
             "{calendar_year}年的冬天比往年更冷。波士顿查尔斯河面上结了一层薄冰，寒风吹过鹅卵石铺就的街道，卷起零星的雪屑。",
@@ -147,6 +146,18 @@ export function createCthulhuWorld() {
         style_ref: "original",
         custom_style: "",
         style_profile: {},
+        characters: [], // ★ B1：人物卡（预设世界留空，由玩家/AI 填充）
+        variable_schema: [ // ★ B2：克苏鲁世界的玩家变量（理智/知识污染），由创作者可改可删
+            { id: "sanity", name: "理智", type: "number", default: 80, min: 0, max: 100, unit: "%", desc: "理性与精神稳定度，归零将陷入疯狂", enabled: true },
+            { id: "knowledge_pollution", name: "知识污染", type: "number", default: 5, min: 0, max: 100, unit: "%", desc: "接触禁忌知识累积的污染，越高越接近真相也越危险", enabled: true }
+        ],
+        canon: {
+            consistency_pack: {
+                banned: ["现代科技", "手机", "电脑", "互联网", "电视", "汽车", "飞机", "电子", "核能", "智能手机"],
+                must_read: ["时间设定在1920年代，背景基于 H.P.洛夫克拉夫特的克苏鲁神话体系"],
+                style_anchor: "宇宙恐怖；20年代调查；H.P.洛夫克拉夫特文风"
+            }
+        },
         plot_freedom: 3,
         custom_prefix: "",
         rules: [],
@@ -200,11 +211,11 @@ export function createUrbanLegendWorld() {
                 "基础生存": "你知道人不能长时间不喝水，但在这里的每一口食物和水都令人怀疑。"
             },
             inventory: [
-                { item_id: "phone", name: "手机（无信号）", count: 1 },
-                { item_id: "keys", name: "钥匙串", count: 1 },
-                { item_id: "cash", name: "零钱", count: 36 },
-                { item_id: "pen", name: "签字笔", count: 1 },
-                { item_id: "notebook", name: "便签本", count: 1 }
+                { item_id: "phone", name: "手机（无信号）", count: 1, category: "装备" },
+                { item_id: "keys", name: "钥匙串", count: 1, category: "其他" },
+                { item_id: "cash", name: "零钱", count: 36, category: "货币" },
+                { item_id: "pen", name: "签字笔", count: 1, category: "其他" },
+                { item_id: "notebook", name: "便签本", count: 1, category: "线索" }
             ],
             completed_events: [],
             active_event: null,
@@ -290,6 +301,7 @@ export function createUrbanLegendWorld() {
         style_ref: "none",
         custom_style: "",
         style_profile: {},
+        characters: [], // ★ B1：人物卡（预设世界留空，由玩家/AI 填充）
         plot_freedom: 4,
         custom_prefix: "",
         rules: [],
@@ -366,10 +378,10 @@ export function createDualWorld() {
                 "两界记记": "你能把两界见闻分毫不差地记在心里，许多线索正藏在两边的对照之中。"
             },
             inventory: [
-                { item_id: "badge", name: "工牌", count: 1 },
-                { item_id: "phone", name: "手机", count: 1 },
-                { item_id: "spirit_stone", name: "下品灵石", count: 3, tags: ["xianxia"] },
-                { item_id: "manual", name: "吐纳口诀（抄本）", count: 1, tags: ["xianxia"] }
+                { item_id: "badge", name: "工牌", count: 1, category: "其他" },
+                { item_id: "phone", name: "手机", count: 1, category: "装备" },
+                { item_id: "spirit_stone", name: "下品灵石", count: 3, category: "货币", tags: ["xianxia"] },
+                { item_id: "manual", name: "吐纳口诀（抄本）", count: 1, category: "书籍", tags: ["xianxia"] }
             ],
             completed_events: [],
             active_event: null,
@@ -432,6 +444,7 @@ export function createDualWorld() {
         style_ref: "none",
         custom_style: "",
         style_profile: {},
+        characters: [], // ★ B1：人物卡（预设世界留空，由玩家/AI 填充）
         plot_freedom: 4,
         custom_prefix: "",
         rules: [],

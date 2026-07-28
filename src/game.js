@@ -2,34 +2,33 @@
 // AetherNarrator · game.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts } from "./store.js";
-import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape } from "./utils.js";
+import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts, ensureWorldCanon, resolveCanonContext, applyConsistencyPack, computeVariableUpdates, computeBondUpdates } from "./store.js";
+import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape, logError } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
 import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartDate } from "./calendar.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory, styleToTemperature } from "./prompt.js";
-import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative } from "./llm.js";
+import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative, generateConsistencyPack } from "./llm.js";
 import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry, collectStylePrefs } from "./render.js";
 import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules, recordWorldviewNag } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
-import { runWorldCritic, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js"; // ★ Phase 3：审稿人
+import { runWorldCritic } from "./critic.js"; // ★ Phase 3：审稿人
 import { advanceWorldTime, collectDueDeadlines } from "./time-engine.js";
 import { activeTimelineKey, getTimelineTriggered, recordTrigger, resetTriggers, createBranch } from "./triggers.js";
 import { applySimulationChanges, createRestEvent, normalizeSimulationState } from "./simulation.js";
-import { acquireTurn, isSessionContextCurrent, releaseTurn } from "./turn-lifecycle.js";
+import { abortCurrentRequest, acquireTurn, isSessionContextCurrent, releaseTurn } from "./turn-lifecycle.js";
 
-// 以下函数体已拆分至 save.js / lore-ui.js；此处重新导出以保持 app.js / render.js 的导入不变
-import { abortCurrentRequest, startGame, continueLatestSave, loadSave, deleteSave, deleteWorld, createOrUpdateSave } from "./save.js";
-import { openLoreReview, editWorldLore, editSaveLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreRequireConfirm, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, extractAndMergeSourceLore } from "./lore-ui.js";
-export { abortCurrentRequest, startGame, continueLatestSave, loadSave, deleteSave, deleteWorld, createOrUpdateSave };
-export { openLoreReview, editWorldLore, editSaveLore, addLoreEntry, deleteLoreEntry, saveLoreReview, triggerLoreRevision, confirmLoreRevision, rejectLoreRevision, toggleLoreRequireConfirm, openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, triggerWorldCritic, confirmCriticRevision, rejectCriticRevision, extractAndMergeSourceLore };
+// 跨模块引用（函数体在 save.js / lore-ui.js）：只导入 game.js 自身用到的几个；
+// 历史重导出适配层已移除，app.js / render.js 改为直接从源模块导入（docs/34 #4）。
+import { startGame, createOrUpdateSave } from "./save.js";
+import { openLoreReview, triggerLoreRevision } from "./lore-ui.js";
 
 export function goHome() {
-    abortCurrentRequest();
+    abortCurrentRequest(S);
     showScreen("homeScreen");
 }
 
@@ -100,6 +99,7 @@ export async function generateWorld() {
     const customPrefix = (prefixEnabled && prefixEnabled.value === "on") ? document.getElementById("customPrefix").value.trim() : "";
     const worldPrefixEnabled = document.querySelector("input[name='worldPrefixEnable']:checked");
     const worldPrefix = (worldPrefixEnabled && worldPrefixEnabled.value === "on") ? document.getElementById("worldPrefix").value.trim() : "";
+    const keyDivergences = document.getElementById("keyDivergences") ? document.getElementById("keyDivergences").value.trim() : "";
 
     if (!name || !desc) {
         showToast("请填写世界名称和世界观描述", "error");
@@ -179,12 +179,40 @@ export async function generateWorld() {
             plot_freedom: plotFreedom,
             custom_prefix: customPrefix,
             rules: [], // ★ Phase 2：规则 DSL（创作者界面配置，见 docs/Phase2改造方案.md）
+            characters: [], // ★ B1：人物卡（主角 + NPC），编辑器可编辑，注入提示词
             temperature_preset: (() => {
                 const tEl = document.getElementById("worldTemp");
                 const v = tEl ? parseFloat(tEl.value) : NaN;
                 return Number.isFinite(v) ? v : styleToTemperature(customStyle);
             })()
         };
+        // ★ A2：用统一协调器收口 IP 身份（type / ip_name / 描述 / 上传文本 三路信号 → world.canon）。
+        // 冲突仅在 #4 的 UI 提示；这里先记录，绝不阻断建世界。
+        ensureWorldCanon(world);
+        world.canon.key_divergences = keyDivergences; // ★ A2 #4：用户声明的关键偏离，优先级高于生成的一致性包
+        const canonResolved = resolveCanonContext({
+            type,
+            ipName,
+            desc,
+            sourceFileContent: S.sourceFileContent
+        });
+        world.canon.mode = canonResolved.mode;
+        world.canon.ip_name = canonResolved.ip_name;
+        world.canon.source = canonResolved.source;
+        world.canon.detected = canonResolved.detected;
+        world.ip_name = canonResolved.ip_name || ipName; // 规范化显示用名（如别名→标准 IP 名）
+        if (canonResolved.conflicts.length) {
+            console.info("[A2 canon] 检测到 IP 信号冲突：", canonResolved.conflicts);
+        }
+        // ★ A2：建世界时由 AI 从源文本生成一致性包，禁项自动写入 world.bannedConcepts（经现有管线注入 system prompt）。
+        // 失败/无 API 均安全跳过，绝不阻断建世界；await 以保证落库时包已就位。
+        const canonSource = [name, desc, hero, world.system_prompt, world.source_content].filter(Boolean).join("\n\n");
+        try {
+            const pack = await generateConsistencyPack(canonSource, canonResolved.ip_name || ipName);
+            applyConsistencyPack(world, pack);
+        } catch (e) {
+            logError("consistencyPack", e);
+        }
         S.worlds.unshift(world);
         saveWorlds();
         // ★ Phase 3：生成后自动审稿（fire-and-forget，不阻塞"世界已创建"提示）
@@ -235,7 +263,7 @@ export async function generateWorld() {
 }
 
 export function showWorldList() {
-    abortCurrentRequest();
+    abortCurrentRequest(S);
     renderWorldList();
     showScreen("worldListScreen");
 }
@@ -451,6 +479,39 @@ export function applyStateChanges(changes) {
             }
         }
     }
+
+    // ★ B4：羁绊 / 好感度更新（叠加在文字关系层之上，不动 relationships 文字）
+    // AI 在 state_changes.bonds 返回 { [npcName]: { delta, tags, desc } }，纯函数累加。
+    if (changes.bonds && S.currentWorld) {
+        const pre = (s.bonds && typeof s.bonds === "object") ? { ...s.bonds } : {};
+        const upd = computeBondUpdates(changes.bonds, s.bonds);
+        s.bonds = upd.next;
+        // 若 AI 提供了 desc，同步回写文字关系层（保持两层一致）
+        for (const [name, b] of Object.entries(upd.next)) {
+            const descUpd = changes.bonds[name];
+            if (descUpd && typeof descUpd.desc === "string" && descUpd.desc.trim()) {
+                s.relationships[name] = descUpd.desc.trim();
+            }
+        }
+        // 关键羁绊手记：好感跨入极值（≥80 信赖 / ≤-80 宿敌）时强调
+        const keyed = [];
+        for (const [name, b] of Object.entries(upd.next)) {
+            const before = (pre[name] && typeof pre[name].affinity === "number") ? pre[name].affinity : 0;
+            const after = b.affinity;
+            const wasKey = before >= 80 || before <= -80;
+            const isKey = after >= 80 || after <= -80;
+            if (isKey && !wasKey) {
+                keyed.push({ name, label: after >= 80 ? "挚友 / 信赖" : "宿敌 / 决裂" });
+            }
+        }
+        if (keyed.length && typeof addBehaviorRecords === "function") {
+            addBehaviorRecords(keyed.map(k => ({
+                text: `与 ${k.name} 的关系发生质变：${k.label}`,
+                importance: 5,
+                type: "relationship"
+            })));
+        }
+    }
     if (changes.skills) {
         for (const [k, v] of Object.entries(changes.skills)) {
             if (typeof v === "string" && v.trim() !== "") {
@@ -463,9 +524,21 @@ export function applyStateChanges(changes) {
             }
         }
     }
+
+    // ★ B2：玩家变量更新（复用现有 state_changes 通道）
+    // AI 在 state_changes.variables 返回变化后的值；computeVariableUpdates 按 schema
+    // 校验类型、夹取 [min,max]、忽略未知/未启用变量，返回 { next, applied }。
+    if (changes.variables && S.currentWorld) {
+        const upd = computeVariableUpdates(changes.variables, S.currentWorld, s.variables);
+        s.variables = upd.next;
+        // 变量变化影响「本回合变化」展示与状态面板；若变量定义变化需重建缓存则已在编辑器保存处处理，
+        // 此处仅运行时值变化（动态段），无需失效 system 缓存。
+    }
+
     if (changes.progression) s.progression = { ...s.progression, ...changes.progression };
 
     if (changes.inventory) {
+        const newlyKeyItems = [];
         for (const op of changes.inventory) {
             const itemTags = (op.tags && Array.isArray(op.tags)) ? op.tags : null;
             if (op.op === "add") {
@@ -473,9 +546,11 @@ export function applyStateChanges(changes) {
                 if (found) {
                     found.count += op.count;
                     if (itemTags) found.tags = itemTags; // ★ A6：持有期间激活物品标签（如 has_firearm）
+                    // 合并时保留原 category/is_key（不覆盖；新物品的 category/is_key 在下方 push 分支写入）
                 } else {
-                    s.inventory.push({ item_id: op.item_id, name: op.name, count: op.count, world: op.world || null, tags: itemTags });
+                    s.inventory.push({ item_id: op.item_id, name: op.name, count: op.count, world: op.world || null, category: op.category || "", is_key: op.is_key === true, tags: itemTags });
                 }
+                if (op.is_key === true) newlyKeyItems.push(op.name || op.item_id);
             } else if (op.op === "remove") {
                 const found = s.inventory.find(i => i.item_id === op.item_id);
                 if (found) {
@@ -485,6 +560,14 @@ export function applyStateChanges(changes) {
             } else if (op.op === "clear_world") {
                 s.inventory = s.inventory.filter(i => i.world !== op.world);
             }
+        }
+            // ★ B3：关键物品获得 → 手记强调（importance 取上限 5、type=item）
+        if (newlyKeyItems.length && typeof addBehaviorRecords === "function") {
+            addBehaviorRecords(newlyKeyItems.map(n => ({
+                text: `获得关键物品：${n}（可能影响后续剧情走向）`,
+                importance: 5,
+                type: "item"
+            })));
         }
     }
 
@@ -704,6 +787,225 @@ export function chooseOption(index) {
     // 只填入，不自动发送，方便玩家修改
 }
 
+// ===== processTurn 阶段函数（docs/34 #2：拦截记录 → 重试调用 → 状态应用 → 定稿渲染） =====
+// 说明：跨模块共享状态一律走 S；回合局部量（pendingEntry / liveIndex / resp 等）用参数显式传递，
+// 各阶段不再各自 try/catch——异常统一抛回 processTurn 的 catch 处理。
+
+// 新建「待生成」日志条目（流式渲染占位；定稿或失败时由调用方回填）
+function buildPendingEntry(input) {
+    return {
+        player: input,
+        narrative: "",
+        retrieved: [],
+        period: S.gameState.current_date.period,
+        day: stepOf(S.gameState.current_date),
+        tcd: deepClone(S.gameState.current_date),
+        key_facts: [],
+        _pending: true
+    };
+}
+
+// 注入拦截：写 debugLog、把待生成条目改写为拦截提示并定稿（不入多轮历史）
+function handleInjectionBlocked(input, injectionCheck, pendingEntry, liveIndex) {
+    hideLoading();
+    const model = document.getElementById("modelName")?.value || "unknown";
+    const turnNum = S.debugLog.turns.length + 1;
+    S.debugLog.turns.push({
+        turn: turnNum,
+        time: new Date().toISOString(),
+        worldId: S.currentWorld ? S.currentWorld.id : null,
+        worldName: S.currentWorld ? S.currentWorld.name : null,
+        model: model,
+        temperature: getTemperature(),
+        status: "blocked",
+        rejectionReason: injectionCheck.label,
+        inputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0,
+        outputTokens: 0, totalTokens: 0, hitRate: "0",
+        playerInput: input.slice(0, 200)
+    });
+    pendingEntry.narrative = "（系统拦截）" + injectionCheck.reason;
+    pendingEntry.isWarning = true;
+    pendingEntry._pending = false;
+    replaceEntryDOM(liveIndex);
+    saveState();
+    renderChoices([]);
+    showToast(injectionCheck.reason, "warn");
+}
+
+// 调用 LLM：偶发坏响应（空白/JSON 损坏等）自动重试最多 2 次；返回 { resp, didStream }
+// （对应日志里 "JSON 无法修复" 偶发空白）
+async function callTurnLLMWithRetry(input, retrieved, liveIndex) {
+    const TURN_RETRIES = 2;
+    let didStream = false;
+    for (let attempt = 0; attempt <= TURN_RETRIES; attempt++) {
+        try {
+            const resp = await callLLM(input, retrieved, {
+                // ★ 实时流式：每收到一块累积文本就增量抽取 narrative 写到日志区
+                onPartial: (raw) => {
+                    didStream = true;
+                    hideLoading(); // 一旦开始出字，隐藏「正在思考」横幅，改用实时叙事
+                    updateLiveNarrative(liveIndex, (extractPartialNarrative(raw) || "") + "▌");
+                }
+            });
+            return { resp, didStream };
+        } catch (e) {
+            const retryable = /无法修复|JSON 解析失败|截断|结构损坏|空白|空响应|empty/i.test(String((e && e.message) || ""));
+            if (!retryable || attempt === TURN_RETRIES) throw e;
+            showToast(`AI 响应异常，正在重试 (${attempt + 1}/${TURN_RETRIES})...`, "warn");
+        }
+    }
+}
+
+// 正常故事回合：应用状态变更 → 规则 DSL → 世界观守卫/AI 裁判 → 回填条目 → 入多轮历史与行为记忆
+function applyNormalTurn(input, resp, retrieved, pendingEntry) {
+    // ✅ 正常故事内容
+    // ★ B2：先按变化前变量快照算出「本回合变化」摘要（与 applyStateChanges 内同一纯函数，保证一致）
+    let pendingVarChanges = [];
+    if (resp.state_changes && resp.state_changes.variables && S.currentWorld) {
+        const preVars = S.gameState.variables ? { ...S.gameState.variables } : {};
+        pendingVarChanges = computeVariableUpdates(resp.state_changes.variables, S.currentWorld, preVars).applied;
+    }
+    applyStateChanges(resp.state_changes);
+
+    // ★ Phase 2：规则 DSL 解释执行（用户配置的世界规则）
+    //   - tag 类动作：写回 gameState.tags（在 A2 守卫之前，使本回合新标签可影响禁律判定）
+    //   - ending 类动作：触发结局弹窗（复用现有 showGameOver）
+    {
+        const evaluated = evaluateRules(S.currentWorld, S.gameState, resp.narrative);
+        if (Array.isArray(evaluated.tagOps) && evaluated.tagOps.length) {
+            if (!Array.isArray(S.gameState.tags)) S.gameState.tags = [];
+            for (const op of evaluated.tagOps) {
+                if (op.op === "add") {
+                    if (!S.gameState.tags.includes(op.tag)) S.gameState.tags.push(op.tag);
+                } else if (op.op === "remove") {
+                    const i = S.gameState.tags.indexOf(op.tag);
+                    if (i >= 0) S.gameState.tags.splice(i, 1);
+                }
+            }
+        }
+        if (Array.isArray(evaluated.endings) && evaluated.endings.length) {
+            showGameOver(evaluated.endings[0].reason);
+        }
+    }
+
+    // ★ A2 生成后世界观合规守卫（柔和提醒，不阻断回合）
+    // 选项场景一致性修复（docs/18）：把玩家选项文本也并入扫描范围，
+    // 避免选项里出现世界观禁用概念（原实现只扫 narrative）。
+    const choiceText = (resp.choices || []).map(c => (c && c.text) ? c.text : "").join("\n");
+    const localViolations = findWorldviewViolations(
+        resp.narrative + "\n" + choiceText,
+        getBannedConceptRules(), getActiveConditionTags()
+    );
+    if (localViolations.length) {
+        const hit = localViolations[0].matched;
+        if (hit) {
+            // ★ 「3 次后静默」：同一概念累计提示满阈值则不再弹（仍照常检测，不影响剧情）
+            const nag = recordWorldviewNag("a2:" + hit, S.gameState.worldviewNagCounts);
+            if (nag.show) {
+                S.gameState.worldviewNagCounts = nag.counts;
+                showToast("⚠️ 叙事似乎偏离了世界观（出现「" + hit + "」），若非有意为之可重述或忽略。", "warn", 4000);
+            }
+        }
+    }
+
+    // ★ A7 AI 灵活世界观裁判（语义判断是否超出世界观，非阻断，仅提示）
+    // 异步进行，不阻塞回合渲染；裁判只看世界设定+叙事，不被玩家输入带偏
+    const judgeEnabled = shouldRunAIEnhancements({
+        enabled: S.aiEnhanced,
+        freedom: S.currentWorld && S.currentWorld.plot_freedom,
+        hasLore: !!(S.activeLoreKB && S.activeLoreKB.snippets && S.activeLoreKB.snippets.length)
+    });
+    const judgeContext = {
+        worldId: S.currentWorld && S.currentWorld.id,
+        epoch: S.currentSession.epoch,
+        turnId: S.conversationHistory.length + 1
+    };
+    if (judgeEnabled) judgeWorldviewConsistency(resp.narrative, resp.state_changes, { playerInput: input, choices: resp.choices }).then(result => {
+        const currentContext = {
+            worldId: S.currentWorld && S.currentWorld.id,
+            epoch: S.currentSession.epoch,
+            turnId: S.conversationHistory.length
+        };
+        if (!isEnhancementContextCurrent(judgeContext, currentContext)) return;
+        if (result && result.consistent === false && result.violations && result.violations.length) {
+            const v = result.violations.slice(0, 2).join("、");
+            const msg = result.severity === "hard"
+                ? "⚠️ AI 裁判：叙事似乎引入了世界观之外的内容（如：" + v + "）。若非有意为之，可重述或忽略。"
+                : "💡 AI 提示：以下内容可能与世界观不太契合（" + v + "），供参考。";
+            // ★ 「3 次后静默」：同一违和描述累计提示满阈值则不再弹（仍照常检测）
+            const nag = recordWorldviewNag("a7:" + (result.violations[0] || ""), S.gameState.worldviewNagCounts);
+            if (nag.show) {
+                S.gameState.worldviewNagCounts = nag.counts;
+                showToast(msg, "warn", 5000);
+            }
+        }
+    }).catch(() => { /* 裁判异常不影响主流程 */ });
+
+    pendingEntry.narrative = resp.narrative || "（无叙事）";
+    pendingEntry.retrieved = retrieved.map(s => s.title);
+    pendingEntry.period = S.gameState.current_date.period;
+    pendingEntry.day = stepOf(S.gameState.current_date);
+    pendingEntry.tcd = deepClone(S.gameState.current_date);
+    pendingEntry.key_facts = resp.key_facts || [];
+    // ★ 氛围提示（环境变化/危机预警，纯氛围文字，无硬数值；多数回合为 null）
+    pendingEntry.atmosphere = sanitizeAtmosphere(resp.atmosphere);
+    pendingEntry._pending = false;
+    // ★ B2：保存本回合结构化变化（变量增减摘要 + 原始 state_changes），供「本回合变化」面板渲染
+    pendingEntry.varChanges = pendingVarChanges;
+    pendingEntry.state_changes = resp.state_changes || {};
+
+    // 推入多轮对话历史（仅正常轮次，警告/错误轮次不入历史，避免污染上下文）
+    pushChatTurn(resp._turnUserContent, resp);
+
+    // 添加关键事实到 RAG
+    const facts = resp.key_facts || summarizeFactsFromChanges(input, resp.narrative, resp.state_changes);
+    addBehaviorRecords(facts);
+
+    // 如果刚死亡，立即显示横幅 + 禁用输入
+    if (S.gameState.is_alive === false) {
+        checkDeathBanner();
+        updateInputState();
+    }
+}
+
+// 定稿渲染：替换待生成条目 DOM；流式已实时出字则直接出选项，非流式回落打字机动画
+async function renderTurnOutcome(liveIndex, isWarning, finalChoices, didStream) {
+    replaceEntryDOM(liveIndex);
+    if (isWarning) { renderChoices([]); return; } // 警告内容不提供选项，也不做打字效果
+    if (!didStream) await startTypewriter(liveIndex);
+    renderChoices(finalChoices);
+    if (S.gameState.is_alive === false) setTimeout(showGameOver, 800);
+}
+
+// 错误回合：把失败详情写入 debugLog.turns（含错误类型分类），供「导出调试日志」排查
+function recordTurnErrorLog(input, e) {
+    // ★ 日志分离：即使 parse/API 失败也记录到 debugLog.turns
+    const model = document.getElementById("modelName")?.value || "unknown";
+    const temp = getTemperature();
+    const turnNum = S.debugLog.turns.length + 1;
+    S.debugLog.turns.push({
+        turn: turnNum,
+        time: new Date().toISOString(),
+        worldId: S.currentWorld ? S.currentWorld.id : null,
+        worldName: S.currentWorld ? S.currentWorld.name : null,
+        model: model,
+        temperature: temp,
+        status: "error",
+        errorType: e.message.includes("无法修复") ? "json_unrepairable" :
+                   e.message.includes("JSON 解析失败") ? "parse_failure" :
+                   e.message.includes("Failed to fetch") || e.message.includes("NetworkError") ? "network" :
+                   e.message.includes("超时") ? "timeout" : "unknown",
+        errorMessage: e.message,
+        inputTokens: 0,
+        cacheHitTokens: 0,
+        cacheMissTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        hitRate: "0",
+        playerInput: input.slice(0, 200)
+    });
+}
+
 export async function processTurn(input) {
     if (!S.gameState) return;
     if (S.gameState.is_alive === false) {
@@ -715,76 +1017,24 @@ export async function processTurn(input) {
     if (!acquireTurn(S)) { showToast("上一回合仍在生成，请稍候", "warn"); return; }
     const myEpoch = S.currentSession.epoch;
     const myWorldId = S.currentWorld && S.currentWorld.id;
-    try {
-    // ★ 实时流式：先建一条"待生成"日志条目并渲染，让叙事边生成边显示
+    // ★ 实时流式：先建一条「待生成」日志条目并渲染，让叙事边生成边显示
     // （首字延迟从「整段生成完」降到约 1~2 秒；生成完立即定稿+出选项，不再跑完整打字机）。
+    // 注意：liveIndex / pendingEntry 必须声明在 try 之外——catch 块要用它们回填失败信息，
+    // 若声明在 try 内，出错时 catch 反而会抛 ReferenceError 掩盖真实错误（集成测试抓到的 bug）。
     const liveIndex = S.conversationHistory.length;
-    const pendingEntry = {
-        player: input,
-        narrative: "",
-        retrieved: [],
-        period: S.gameState.current_date.period,
-        day: stepOf(S.gameState.current_date),
-        tcd: deepClone(S.gameState.current_date),
-        key_facts: [],
-        _pending: true
-    };
-    S.conversationHistory.push(pendingEntry);
-    renderLog();
+    const pendingEntry = buildPendingEntry(input);
+    try {
+        S.conversationHistory.push(pendingEntry);
+        renderLog();
+        showLoading("正在思考...");
 
-    showLoading("正在思考...");
-    // ★ 前端防注入检测
-    const injectionCheck = detectPromptInjection(input);
-    if (injectionCheck) {
-        hideLoading();
-        const model = document.getElementById("modelName")?.value || "unknown";
-        const turnNum = S.debugLog.turns.length + 1;
-        S.debugLog.turns.push({
-            turn: turnNum,
-            time: new Date().toISOString(),
-            worldId: S.currentWorld ? S.currentWorld.id : null,
-            worldName: S.currentWorld ? S.currentWorld.name : null,
-            model: model,
-            temperature: getTemperature(),
-            status: "blocked",
-            rejectionReason: injectionCheck.label,
-            inputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0,
-            outputTokens: 0, totalTokens: 0, hitRate: "0",
-            playerInput: input.slice(0, 200)
-        });
-        pendingEntry.narrative = "（系统拦截）" + injectionCheck.reason;
-        pendingEntry.isWarning = true;
-        pendingEntry._pending = false;
-        replaceEntryDOM(liveIndex);
-        saveState();
-        renderChoices([]);
-        showToast(injectionCheck.reason, "warn");
-        return;
-    }
+        // ★ 前端防注入检测（拦截后本回合终止，finally 仍会释放回合锁）
+        const injectionCheck = detectPromptInjection(input);
+        if (injectionCheck) { handleInjectionBlocked(input, injectionCheck, pendingEntry, liveIndex); return; }
+
         const retrieved = await retrieve(input);
-        // ★ 容错：游玩回合遇 AI 空白/JSON 损坏等偶发坏响应，自动重试最多 2 次再报错（对应日志里 "JSON 无法修复" 偶发空白）
-        let resp;
-        let didStream = false;
-        {
-            const TURN_RETRIES = 2;
-            for (let attempt = 0; attempt <= TURN_RETRIES; attempt++) {
-                try {
-                    resp = await callLLM(input, retrieved, {
-                        // ★ 实时流式：每收到一块累积文本就增量抽取 narrative 写到日志区
-                        onPartial: (raw) => {
-                            didStream = true;
-                            hideLoading(); // 一旦开始出字，隐藏"正在思考"横幅，改用实时叙事
-                            updateLiveNarrative(liveIndex, (extractPartialNarrative(raw) || "") + "▌");
-                        }
-                    });
-                    break;
-                } catch (e) {
-                    const retryable = /无法修复|JSON 解析失败|截断|结构损坏|空白|空响应|empty/i.test(String((e && e.message) || ""));
-                    if (!retryable || attempt === TURN_RETRIES) throw e;
-                    showToast(`AI 响应异常，正在重试 (${attempt + 1}/${TURN_RETRIES})...`, "warn");
-                }
-            }
-        }
+        const { resp, didStream } = await callTurnLLMWithRetry(input, retrieved, liveIndex);
+
         // ★ P0: 会话失效校验 —— 期间若发生导航/切换/重开，丢弃此响应
         if (resp._sessionEpoch !== myEpoch || resp._sessionWorldId !== (S.currentWorld && S.currentWorld.id)) {
             hideLoading();
@@ -797,7 +1047,6 @@ export async function processTurn(input) {
 
         // 检测是否为非故事内容（拒绝/限制/错误响应）
         const isWarning = isNonStoryResponse(resp.narrative);
-
         if (isWarning) {
             // ⚠️ 非故事内容：不应用状态变更、不写入知识库、不影响记忆
             pendingEntry.narrative = resp.narrative || "（无内容）";
@@ -806,105 +1055,7 @@ export async function processTurn(input) {
             pendingEntry.isWarning = true;
             pendingEntry._pending = false;
         } else {
-            // ✅ 正常故事内容
-            applyStateChanges(resp.state_changes);
-
-            // ★ Phase 2：规则 DSL 解释执行（用户配置的世界规则）
-            //   - tag 类动作：写回 gameState.tags（在 A2 守卫之前，使本回合新标签可影响禁律判定）
-            //   - ending 类动作：触发结局弹窗（复用现有 showGameOver）
-            {
-                const evaluated = evaluateRules(S.currentWorld, S.gameState, resp.narrative);
-                if (Array.isArray(evaluated.tagOps) && evaluated.tagOps.length) {
-                    if (!Array.isArray(S.gameState.tags)) S.gameState.tags = [];
-                    for (const op of evaluated.tagOps) {
-                        if (op.op === "add") {
-                            if (!S.gameState.tags.includes(op.tag)) S.gameState.tags.push(op.tag);
-                        } else if (op.op === "remove") {
-                            const i = S.gameState.tags.indexOf(op.tag);
-                            if (i >= 0) S.gameState.tags.splice(i, 1);
-                        }
-                    }
-                }
-                if (Array.isArray(evaluated.endings) && evaluated.endings.length) {
-                    showGameOver(evaluated.endings[0].reason);
-                }
-            }
-
-            // ★ A2 生成后世界观合规守卫（柔和提醒，不阻断回合）
-            // 选项场景一致性修复（docs/18）：把玩家选项文本也并入扫描范围，
-            // 避免选项里出现世界观禁用概念（原实现只扫 narrative）。
-            const choiceText = (resp.choices || []).map(c => (c && c.text) ? c.text : "").join("\n");
-            const localViolations = findWorldviewViolations(
-                resp.narrative + "\n" + choiceText,
-                getBannedConceptRules(), getActiveConditionTags()
-            );
-            if (localViolations.length) {
-                const hit = localViolations[0].matched;
-                if (hit) {
-                    // ★ 「3 次后静默」：同一概念累计提示满阈值则不再弹（仍照常检测，不影响剧情）
-                    const nag = recordWorldviewNag("a2:" + hit, S.gameState.worldviewNagCounts);
-                    if (nag.show) {
-                        S.gameState.worldviewNagCounts = nag.counts;
-                        showToast("⚠️ 叙事似乎偏离了世界观（出现「" + hit + "」），若非有意为之可重述或忽略。", "warn", 4000);
-                    }
-                }
-            }
-
-            // ★ A7 AI 灵活世界观裁判（语义判断是否超出世界观，非阻断，仅提示）
-            // 异步进行，不阻塞回合渲染；裁判只看世界设定+叙事，不被玩家输入带偏
-            const judgeEnabled = shouldRunAIEnhancements({
-                enabled: S.aiEnhanced,
-                freedom: S.currentWorld && S.currentWorld.plot_freedom,
-                hasLore: !!(S.activeLoreKB && S.activeLoreKB.snippets && S.activeLoreKB.snippets.length)
-            });
-            const judgeContext = {
-                worldId: S.currentWorld && S.currentWorld.id,
-                epoch: S.currentSession.epoch,
-                turnId: S.conversationHistory.length + 1
-            };
-            if (judgeEnabled) judgeWorldviewConsistency(resp.narrative, resp.state_changes, { playerInput: input, choices: resp.choices }).then(result => {
-                const currentContext = {
-                    worldId: S.currentWorld && S.currentWorld.id,
-                    epoch: S.currentSession.epoch,
-                    turnId: S.conversationHistory.length
-                };
-                if (!isEnhancementContextCurrent(judgeContext, currentContext)) return;
-                if (result && result.consistent === false && result.violations && result.violations.length) {
-                    const v = result.violations.slice(0, 2).join("、");
-                    const msg = result.severity === "hard"
-                        ? "⚠️ AI 裁判：叙事似乎引入了世界观之外的内容（如：" + v + "）。若非有意为之，可重述或忽略。"
-                        : "💡 AI 提示：以下内容可能与世界观不太契合（" + v + "），供参考。";
-                    // ★ 「3 次后静默」：同一违和描述累计提示满阈值则不再弹（仍照常检测）
-                    const nag = recordWorldviewNag("a7:" + (result.violations[0] || ""), S.gameState.worldviewNagCounts);
-                    if (nag.show) {
-                        S.gameState.worldviewNagCounts = nag.counts;
-                        showToast(msg, "warn", 5000);
-                    }
-                }
-            }).catch(() => { /* 裁判异常不影响主流程 */ });
-
-            pendingEntry.narrative = resp.narrative || "（无叙事）";
-            pendingEntry.retrieved = retrieved.map(s => s.title);
-            pendingEntry.period = S.gameState.current_date.period;
-            pendingEntry.day = stepOf(S.gameState.current_date);
-            pendingEntry.tcd = deepClone(S.gameState.current_date);
-            pendingEntry.key_facts = resp.key_facts || [];
-            // ★ 氛围提示（环境变化/危机预警，纯氛围文字，无硬数值；多数回合为 null）
-            pendingEntry.atmosphere = sanitizeAtmosphere(resp.atmosphere);
-            pendingEntry._pending = false;
-
-            // 推入多轮对话历史（仅正常轮次，警告/错误轮次不入历史，避免污染上下文）
-            pushChatTurn(resp._turnUserContent, resp);
-
-            // 添加关键事实到 RAG
-            const facts = resp.key_facts || summarizeFactsFromChanges(input, resp.narrative, resp.state_changes);
-            addBehaviorRecords(facts);
-
-            // 如果刚死亡，立即显示横幅 + 禁用输入
-            if (S.gameState.is_alive === false) {
-                checkDeathBanner();
-                updateInputState();
-            }
+            applyNormalTurn(input, resp, retrieved, pendingEntry);
         }
 
         // ★ P1.2.7: 选项先写回记录并持久化，再生成存档列表项，避免存档里选项为空
@@ -912,9 +1063,7 @@ export async function processTurn(input) {
         if (!isWarning) {
             // 计算最终选项（AI 返回空时兜底），必须存储 finalChoices 而非原始空值
             finalChoices = resp.choices;
-            if (!finalChoices || finalChoices.length === 0) {
-                finalChoices = buildSmartFallbackChoices();
-            }
+            if (!finalChoices || finalChoices.length === 0) finalChoices = buildSmartFallbackChoices();
             pendingEntry.choices = finalChoices;
             // ★ P0 性能：此处不再单独 saveState——下方 createOrUpdateSave() 内部已统一持久化（含本回合最终选项），避免重复写盘。
         }
@@ -930,25 +1079,7 @@ export async function processTurn(input) {
         }
 
         // ★ 实时流式：生成完立即把本条定稿为格式化叙事 + 氛围提示，并立刻出选项
-        // （不再跑完整打字机；非流式/模拟模式若 didStream 为 false 则回落到提速后的打字机动画）。
-        replaceEntryDOM(liveIndex);
-        if (!isWarning) {
-            if (didStream) {
-                renderChoices(finalChoices);
-                if (S.gameState.is_alive === false) {
-                    setTimeout(showGameOver, 800);
-                }
-            } else {
-                await startTypewriter(liveIndex);
-                renderChoices(finalChoices);
-                if (S.gameState.is_alive === false) {
-                    setTimeout(showGameOver, 800);
-                }
-            }
-        } else {
-            // 警告内容不提供选项，也不做打字效果
-            renderChoices([]);
-        }
+        await renderTurnOutcome(liveIndex, isWarning, finalChoices, didStream);
     } catch (e) {
         hideLoading();
         // 导航/切世界会递增 epoch 并中止请求；旧请求异常必须静默丢弃，禁止写入新会话。
@@ -956,31 +1087,7 @@ export async function processTurn(input) {
             { epoch: myEpoch, worldId: myWorldId },
             { epoch: S.currentSession.epoch, worldId: S.currentWorld && S.currentWorld.id }
         )) { removeLogEntry(liveIndex); return; }
-        // ★ 日志分离：即使 parse/API 失败也记录到 debugLog.turns
-        const model = document.getElementById("modelName")?.value || "unknown";
-        const temp = getTemperature();
-        const turnNum = S.debugLog.turns.length + 1;
-        S.debugLog.turns.push({
-            turn: turnNum,
-            time: new Date().toISOString(),
-            worldId: S.currentWorld ? S.currentWorld.id : null,
-            worldName: S.currentWorld ? S.currentWorld.name : null,
-            model: model,
-            temperature: temp,
-            status: "error",
-            errorType: e.message.includes("无法修复") ? "json_unrepairable" :
-                       e.message.includes("JSON 解析失败") ? "parse_failure" :
-                       e.message.includes("Failed to fetch") || e.message.includes("NetworkError") ? "network" :
-                       e.message.includes("超时") ? "timeout" : "unknown",
-            errorMessage: e.message,
-            inputTokens: 0,
-            cacheHitTokens: 0,
-            cacheMissTokens: 0,
-            outputTokens: 0,
-            totalTokens: 0,
-            hitRate: "0",
-            playerInput: input.slice(0, 200)
-        });
+        recordTurnErrorLog(input, e);
 
         // 网络/API 错误也作为警告展示，不影响游戏状态（填充已存在的待生成条目，不重复追加）
         pendingEntry.narrative = "请求失败：" + e.message;

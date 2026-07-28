@@ -2,12 +2,12 @@
 // AetherNarrator · rag.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { MEMORY_TYPES } from "./store.js";
+import { MEMORY_TYPES, getWorldLoreKB } from "./store.js";
 
 import { cosineSimilarity, isFuzzyFact, normFact, runPool } from "./utils.js";
 import { getEmbedConcurrency } from "./providers.js";
 import { formatTimeLabel, getTimeConfig } from "./theme.js";
-import { buildTurnUserMessage, isLoreFullInSystem } from "./prompt.js";
+import { isLoreFullInSystem } from "./prompt.js";
 import { showToast } from "./render.js";
 import { getLoreAnnIndex, embeddingRetrieveBruteforce } from "./ann-index.js";
 import { expandRelationNeighbors } from "./kg-graph.js"; // ★ Phase 4 增补：relations 实体图遍历召回（纯函数）
@@ -94,11 +94,6 @@ export function warmupEmbeddingWorker() {
     try {
         getEmbedWorker().postMessage({ id: ++_embedReqId, type: "warmup" });
     } catch (e) { /* Worker 不可用（如 Node 测试环境），忽略，运行时回落主线程 */ }
-}
-
-export function getWorldLoreKB() {
-    // ★ B7：优先使用当前存档的独立知识库副本（不污染 world 出厂默认）
-    return S.activeLoreKB || (S.currentWorld && S.currentWorld.lore_kb) || S.loreKB;
 }
 
 export function keywordRetrieve(input, topK = 5) {
@@ -189,14 +184,9 @@ export async function embeddingRetrieve(input, topK = 5, qVec = null) {
     return scored.slice(0, topK);
 }
 
-export async function computeEmbedding(text, isQuery = false) {
-    // ★ P0-3-E：优先走 Web Worker（不卡 UI）；任何失败回落主线程
-    try {
-        return await embedViaWorker(text, isQuery);
-    } catch (e) {
-        console.warn("Worker 向量计算失败，回落主线程:", e && e.message);
-    }
-    // 主线程回落（动态加载 transformers，避免首屏下载 880KB；与 embedding-worker 共用模型/维度）
+// ★ docs/34 #8：主线程回落共用——动态加载 transformers（避免首屏下载 880KB）并初始化共用嵌入模型，
+// 与 embedding-worker 共用模型/维度；失败抛错交由调用方降级（关键词检索）。
+async function ensureMainThreadTransformers(failMsg) {
     if (typeof window.transformers === "undefined") {
         try {
             const mod = await import("../vendor/transformers/transformers.min.js");
@@ -208,14 +198,25 @@ export async function computeEmbedding(text, isQuery = false) {
             }
             window.transformers = mod;
         } catch (err) {
-            throw new Error("transformers 不可用（主线程回落加载失败）");
+            throw new Error(failMsg);
         }
     }
     if (!S.embeddingModel) {
         S.embeddingModel = await window.transformers.pipeline("feature-extraction", EMBED_MODEL);
     }
+    return S.embeddingModel;
+}
+
+export async function computeEmbedding(text, isQuery = false) {
+    // ★ P0-3-E：优先走 Web Worker（不卡 UI）；任何失败回落主线程
+    try {
+        return await embedViaWorker(text, isQuery);
+    } catch (e) {
+        console.warn("Worker 向量计算失败，回落主线程:", e && e.message);
+    }
+    const model = await ensureMainThreadTransformers("transformers 不可用（主线程回落加载失败）");
     const input = isQuery ? BGE_QUERY_PREFIX + text : text;
-    const out = await S.embeddingModel(input, { pooling: "mean", normalize: true });
+    const out = await model(input, { pooling: "mean", normalize: true });
     return Array.from(out.data);
 }
 
@@ -229,26 +230,9 @@ export async function computeEmbeddingBatch(texts, isQuery = false, embedFn = nu
     } catch (e) {
         console.warn("Worker 批量向量计算失败，回落主线程:", e && e.message);
     }
-    // 主线程回落（动态加载 transformers，避免首屏下载 880KB；与 embedding-worker 共用模型/维度）
-    if (typeof window.transformers === "undefined") {
-        try {
-            const mod = await import("../vendor/transformers/transformers.min.js");
-            const e = mod.env;
-            e.allowRemoteModels = false;                       // 禁止回退到远程下载
-            e.localModelPath = "models";                       // 相对文档根 → 项目根/models/
-            if (e.backends && e.backends.onnx && e.backends.onnx.wasm) {
-                e.backends.onnx.wasm.wasmPaths = "vendor/transformers/";
-            }
-            window.transformers = mod;
-        } catch (err) {
-            throw new Error("transformers 不可用（主线程批量回落加载失败）");
-        }
-    }
-    if (!S.embeddingModel) {
-        S.embeddingModel = await window.transformers.pipeline("feature-extraction", EMBED_MODEL);
-    }
+    const model = await ensureMainThreadTransformers("transformers 不可用（主线程批量回落加载失败）");
     const inputs = isQuery ? texts.map(t => BGE_QUERY_PREFIX + t) : texts;
-    const out = await S.embeddingModel(inputs, { pooling: "mean", normalize: true });
+    const out = await model(inputs, { pooling: "mean", normalize: true });
     return splitBatchTensor(out);
 }
 

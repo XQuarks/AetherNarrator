@@ -1,11 +1,11 @@
 # AetherNarrator 测试套件说明（AI 维护者指南）
 
 > 本文件供接手本项目的 AI / 维护者快速理解 `test/` 下的测试脚本：**每个测试守护什么、依赖什么、如何运行**。人类读者亦可参考。
-> 维护结论：38 个测试文件全部有效，无孤儿模块、无失效测试、无空测试。请勿凭"看起来重复"误删（见第六节互补说明）。
+> 维护结论：现有测试文件全部有效，无孤儿模块、无失效测试、无空测试。请勿凭"看起来重复"误删（见第六节互补说明）。
 
 ## 一、总览
 
-- 测试位置：`test/*.test.js`，共 **38 个文件、约 284 个用例**（含 `describe` 嵌套子测试）。
+- 测试位置：`test/*.test.js`。**文件数与用例数以 `npm test` 实时输出为准**（截至 2026-07-27 统计：49 个文件、371 项用例，全部通过）。
 - 测试框架：Node 内置 `node:test`（无需额外安装）。
 - 收录机制：`package.json` 的 `test` 脚本为 `node --test test/*.test.js`，**只要文件命名为 `<name>.test.js` 就会自动被收录**，新增测试无需改配置。
 - 隔离性：Node 测试运行器默认**每个测试文件在独立子进程中执行**，文件间全局状态（`src/store.js` 的 `S` 等）不串扰，可放心在单文件内 setup / teardown 全局状态。
@@ -13,7 +13,7 @@
 ## 二、如何运行
 
 ```bash
-npm test                 # 跑全部 38 个测试文件
+npm test                 # 跑全部测试文件
 npm run verify           # 全套：语法 → 模块 → 加载 → 测试 → 浏览器冒烟
 npm run check:syntax     # 仅语法检查（tools/syntax_check.cjs）
 npm run check:modules    # 模块引用校验（tools/verify-modules.cjs）
@@ -26,7 +26,7 @@ npm run check:load       # 浏览器加载桩校验（tools/load-check.mjs）
 ## 三、运行环境约定（写新测试必读）
 
 1. **DOM 桩**：`game.js` / `app.js` / `render.js` / `lore-ui.js` 等模块加载时会访问 `document` / `window`。需要 import 它们的测试（`cognitive-state`、`fallback-choices`、`orphan-save`、`s5-critic-time`、`s5-opening-fix`、`s5-opening-optimize`、`world-tags-ai`）在文件顶部注入一个 Proxy 宽容 stub（`const any = new Proxy(function(){}, {...})`，再把 `window/document/navigator/location/fetch` 等挂到 `globalThis`）。**新增同类测试请复用该模式**（参考 `test/cognitive-state.test.js` 顶部）。
-2. **IndexedDB**：仅 `cognitive-state.test.js` 用 `import("fake-indexeddb/auto")`，其余用 `localStorage` 的 Map 桩或全局桩，不依赖真实 IndexedDB。
+2. **IndexedDB**：`fake-indexeddb` 已列入 `package.json` 的 devDependencies（`npm install` 后即可用）。`cognitive-state`、`process-turn`、`32-inventory`、`33-bonds` 四个测试文件在顶部用 `try { await import("fake-indexeddb/auto") } catch { ... }` 加载：装了依赖走真实 IndexedDB 桩；万一未安装则降级为吞掉 `idb.js` 写库的 unhandledRejection（断言所依赖的状态在写库前已就绪，结论不受影响，但降级时不校验持久化路径）。其余测试用 `localStorage` 的 Map 桩或全局桩，不依赖 IndexedDB。
 3. **Embedding / 向量**：`ann`、`behavior-embeddings-concurrent`、`query-vector-dedup`、`timeline-embedding-cache`、`memory-isolation` **全部用 mock，不真实加载 transformers / hnswlib-wasm / Worker**。它们只守护向量**调度与缓存契约**（跳过已算、并发补算、查询复用、模型变更重算、缓存失效）；真实模型加载与召回质量由浏览器侧实测覆盖，node 单测不烧模型。
 4. **LLM（`callXxxLLM`）**：`s5-critic-time`、`s5-opening-fix`、`s5-opening-optimize`、`world-tags-ai` 通过 `document.getElementById` 返回 `{checked:true}` 触发 `llm.js` 的 mock 模式（或 mock `fetch` 截获 prompt），**不真实请求 API**。
 5. **全局状态 `S`**：直接读写 `S.currentWorld` / `S.gameState` 的测试都在文件内用 setup 函数管理，互不跨文件污染。
@@ -44,6 +44,8 @@ npm run check:load       # 浏览器加载桩校验（tools/load-check.mjs）
 | G. 基础设施 / 回合 | `reliability` | 回合锁、会话上下文、损坏配置回退、deadline、休息事件 |
 
 ## 五、测试详细清单
+
+> 注：下方分类表为早期整理的快照，未逐一收录后续新增文件（如 `29-*`、`30-characters`、`31-variables`、`32-inventory`、`33-bonds`、`process-turn`、`s26/s27/s29-*` 等）。新增文件遵循第三节环境约定与第七节命名约定，完整清单以 `test/` 目录实际文件为准。
 
 ### A. 时间系统（Time & Calendar）
 

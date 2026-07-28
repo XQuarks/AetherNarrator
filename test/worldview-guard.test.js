@@ -64,18 +64,26 @@ test("背包持有时期火器（左轮）仅解锁时期火器，不放行现�
     const prevWorld = S.currentWorld;
     try {
         // 物品本身未打 has_firearm 标签，但名称含「左轮手枪」→ 引擎应自动放行时期火器
-        S.currentWorld = undefined;
+        // ★ A2 #5：禁项不再来自全局 DEFAULT，这里显式给出带 unlockTags 的火器禁项来测解锁机制
+        S.currentWorld = {
+            plot_freedom: 3,
+            rules: [],
+            bannedConcepts: [
+                { concept: "手枪", aliases: ["左轮"], unlockTags: ["has_firearm"], severity: "soft" },
+                { concept: "突击步枪", aliases: ["AK-47"], unlockTags: ["has_modern_firearm"], severity: "hard" }
+            ]
+        };
         S.gameState = { inventory: [{ item_id: "pistol", name: "左轮手枪", count: 1 }] };
         const tags = getActiveConditionTags();
         assert.equal(tags.has("has_firearm"), true, "持有左轮应自动激活 has_firearm");
         assert.equal(tags.has("has_modern_firearm"), false, "持有左轮不应激活 has_modern_firearm");
         const banned = getBannedConcepts();
-        // 时期火器应解锁（「步枪」概念已移除，避免与「突击步枪」子串冲突）
-        for (const w of ["手枪", "左轮", "子弹", "霰弹枪", "火枪"]) {
+        // 时期火器应解锁（用手枪/左轮代表；概念以 bannedConcepts 的 concept 为准）
+        for (const w of ["手枪", "左轮"]) {
             assert.equal(banned.includes(w), false, `时期火器「${w}」应被解锁`);
         }
-        // 现代火器仍禁用（AK-47 类需现代火器标签）
-        for (const w of ["突击步枪", "自动步枪", "冲锋枪", "机枪", "加特林"]) {
+        // 现代火器仍禁用（突击步枪需现代火器标签）
+        for (const w of ["突击步枪"]) {
             assert.equal(banned.includes(w), true, `现代火器「${w}」应仍被禁用`);
         }
     } finally {
@@ -88,7 +96,15 @@ test("背包持有现代火器仅解锁现代火器，不反向解锁时期火�
     const prevGs = S.gameState;
     const prevWorld = S.currentWorld;
     try {
-        S.currentWorld = undefined;
+        // ★ A2 #5：显式给出带 unlockTags 的火器禁项来测解锁机制（不再依赖全局 DEFAULT）
+        S.currentWorld = {
+            plot_freedom: 3,
+            rules: [],
+            bannedConcepts: [
+                { concept: "手枪", aliases: ["左轮"], unlockTags: ["has_firearm"], severity: "soft" },
+                { concept: "突击步枪", aliases: ["AK-47"], unlockTags: ["has_modern_firearm"], severity: "hard" }
+            ]
+        };
         S.gameState = { inventory: [{ item_id: "ak", name: "突击步枪", count: 1 }] };
         const tags = getActiveConditionTags();
         assert.equal(tags.has("has_modern_firearm"), true, "持有突击步枪应激活 has_modern_firearm");
@@ -106,7 +122,15 @@ test("同时持有两类火器时 A2 中文层全部放行，但纯拉丁写法�
     const prevGs = S.gameState;
     const prevWorld = S.currentWorld;
     try {
-        S.currentWorld = undefined;
+        // ★ A2 #5：显式给出带 unlockTags 的火器禁项来测解锁机制（不再依赖全局 DEFAULT）
+        S.currentWorld = {
+            plot_freedom: 3,
+            rules: [],
+            bannedConcepts: [
+                { concept: "手枪", aliases: ["左轮"], unlockTags: ["has_firearm"], severity: "soft" },
+                { concept: "突击步枪", aliases: ["AK-47"], unlockTags: ["has_modern_firearm"], severity: "hard" }
+            ]
+        };
         S.gameState = { inventory: [
             { item_id: "pistol", name: "左轮手枪", count: 1 },
             { item_id: "ak", name: "突击步枪", count: 1 }

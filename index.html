@@ -12,7 +12,7 @@
       若需在受控环境彻底去掉 'unsafe-inline'，请先迁移所有静态 HTML onclick 为事件委托，
       再运行 tools/recompute-csp-hash.js 生成 hash-source 版 CSP。
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
     <title>以太叙事 · AetherNarrator</title>
     <!-- ★ P0 性能优化（2026-07-24）：解决手机打开首屏慢
          - transformers（880KB）原在 head 以 type=module 同步加载；因 module 按文档顺序 defer，
@@ -355,6 +355,11 @@
                 <div class="form-group">
                     <label>世界观描述</label>
                     <textarea id="worldDesc" placeholder="可以直接填写原作的世界观概述，也可以在此基础上修改...&#10;例如：在原著的世界观基础上，增加了一个隐秘的地下组织..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>关键偏离（可选，优先级最高）</label>
+                    <textarea id="keyDivergences" placeholder="如果你改动了原作的关键设定，可在此声明，例如：时间线改到2025年 / 主角替换为原创角色 / 伏地魔已被击败..."></textarea>
+                    <div class="hint">基于已有 IP 但做了关键性修改时填写。此声明高于 AI 自动生成的一致性包，确保剧情始终跟随你的版本。</div>
                 </div>
             </div>
             <!-- 步骤 4：微调（可选） -->
@@ -704,6 +709,50 @@
         <div class="modal-footer">
             <button class="btn secondary" data-action="closeModal" data-modal="ruleEditorModal">取消</button>
             <button class="btn primary" data-action="saveRuleReview">保存规则</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 角色卡编辑弹窗（B1） ================= -->
+<div class="modal-overlay" id="characterEditorModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="characterEditorTitle">
+        <div class="modal-header">
+            <h2 id="characterEditorTitle">角色卡编辑</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="characterEditorModal">×</button>
+        </div>
+        <div class="modal-body" id="characterEditorBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="characterEditorModal">取消</button>
+            <button class="btn secondary" data-action="generateCharactersAI">🤖 AI 生成</button>
+            <button class="btn primary" data-action="saveCharacterReview">保存角色</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="variableEditorModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="variableEditorTitle">
+        <div class="modal-header">
+            <h2 id="variableEditorTitle">玩家变量编辑</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="variableEditorModal">×</button>
+        </div>
+        <div class="modal-body" id="variableEditorBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="variableEditorModal">取消</button>
+            <button class="btn primary" data-action="saveVariableReview">保存变量</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="itemEditorModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="itemEditorTitle">
+        <div class="modal-header">
+            <h2 id="itemEditorTitle">初始物品编辑</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="itemEditorModal">×</button>
+        </div>
+        <div class="modal-body" id="itemEditorBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="itemEditorModal">取消</button>
+            <button class="btn primary" data-action="saveItemReview">保存物品</button>
         </div>
     </div>
 </div>

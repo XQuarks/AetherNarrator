@@ -28,7 +28,7 @@ import assert from "node:assert/strict";
 
 const { S } = await import("../src/store.js");
 const { renderSaveList, renderSaveDetail } = await import("../src/render.js");
-const { loadSave } = await import("../src/game.js");
+const { loadSave } = await import("../src/save.js");
 
 // 可捕获 innerHTML/textContent 的轻量假 DOM（覆盖 render.js 的 getElementById 调用）
 function makeEl() {

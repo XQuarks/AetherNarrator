@@ -6,7 +6,6 @@ import { DEFAULT_PERIOD_LABELS, DEFAULT_PERIOD_ORDER, normalizeTimeConfig, calen
 import { getWorldSchema } from "./utils.js";
 import { formatCalendarDate, normalizeCurrentDate } from "./calendar.js";
 import { showToast } from "./render.js";
-import { applyStateChanges } from "./game.js";
 
 const DATED_MODES = ["gregorian", "lunar", "custom_calendar"];
 

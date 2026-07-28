@@ -2,7 +2,7 @@
 // AetherNarrator · storage.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { STORAGE_KEYS } from "./store.js";
+import { STORAGE_KEYS, ensureWorldCanon, applyConsistencyPack, ensureWorldCharacters } from "./store.js";
 import { deepClone, defaultWorldSchema } from "./utils.js";
 import { closeModal, showToast } from "./render.js";
 import { parseStoredArray, parseStoredObject } from "./migrations.js";
@@ -44,6 +44,20 @@ export async function loadWorlds() {
     S.worlds = parsed.value.map(w => {
         const out = (w && typeof w === "object") ? w : {};
         if (!Array.isArray(out.behavior_records)) out.behavior_records = [];
+        ensureWorldCanon(out); // ★ A2：确保 canon 模型始终存在（给 #2 协调器/一致性包注入兜底）
+        ensureWorldCharacters(out); // ★ B1：确保人物卡数组始终存在
+        // ★ A2 #5：预设世界种子包（canon.consistency_pack）→ 转成玩家可编辑的 rules「禁项」规则
+        const seed = out.canon && out.canon.consistency_pack;
+        if (seed && Array.isArray(seed.banned) && seed.banned.length) {
+            if (!Array.isArray(out.rules)) out.rules = [];
+            const hasBan = out.rules.some(r => r && r.then && r.then.type === "ban");
+            if (!hasBan) applyConsistencyPack(out, {
+                banned: seed.banned,
+                must_read: seed.must_read,
+                style_anchor: seed.style_anchor,
+                _seed: true
+            });
+        }
         return out;
     });
     // 迁移：删除全部旧的 demo 世界（红楼梦/魔法学院/蒸汽与魔法），注入新世界

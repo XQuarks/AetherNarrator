@@ -319,3 +319,49 @@ export function normalizeCurrentDate(currentDate, timeConfig = {}) {
     return ensureCurrentDate(cd, timeConfig);
 }
 
+// ---------- 自定义历法可视化编辑器辅助（docs/35 / UI-1 方案 C）----------
+
+// 预设月历表：农历=现成 DEFAULT_LUNAR；科幻历=示例（10 个「周期」各 36 天，360 天年）。
+export const CUSTOM_CALENDAR_PRESETS = {
+    lunar: DEFAULT_LUNAR.months.map(m => ({ name: m.name, days: m.days })),
+    scifi: Array.from({ length: 10 }, (_, i) => ({ name: `周期 ${i + 1}`, days: 36 }))
+};
+
+// 夹紧自定义月份数组：≤24 月、天数夹取 1–400、月名空回退「月N」、剥离非法项。
+// 与 store.normalizeTimeConfig 的 custom_calendar 归一化保持一致（≤24 月、days 1–400、label≤20）。
+export function clampCustomCalendarMonths(months) {
+    const arr = Array.isArray(months) ? months : [];
+    return arr.slice(0, 24).map((m, i) => ({
+        name: (m && typeof m.name === "string" && m.name.trim()) ? m.name.trim().slice(0, 10) : `月${i + 1}`,
+        days: Math.min(400, Math.max(1, Number.isFinite(m && m.days) ? (m.days | 0) : 30))
+    }));
+}
+
+// 统计自定义历法：月数与一年总天数，并给一个示例日期串（供编辑器实时展示）。
+export function summarizeCustomCalendar(cc) {
+    const months = (cc && cc.months) || [];
+    const monthCount = months.length;
+    const yearDays = months.reduce((s, m) => s + (Number.isFinite(m && m.days) ? m.days : 0), 0);
+    const label = (cc && cc.label) || "星历";
+    const sample = monthCount ? `${label} 第1年 ${months[0].name} 1日` : "（尚未配置月份）";
+    return { monthCount, yearDays, sample };
+}
+
+// 重排月份：把 from 位置元素移到 to 位置（越界夹紧，不改变数组长度）。
+export function reorderMonths(months, from, to) {
+    const arr = Array.isArray(months) ? months.slice() : [];
+    if (from < 0 || from >= arr.length) return arr;
+    const t = Math.min(arr.length - 1, Math.max(0, to));
+    const [item] = arr.splice(from, 1);
+    arr.splice(t, 0, item);
+    return arr;
+}
+
+// 插入闰月：在 afterIdx 之后插入一个名为 name 的月份（默认 30 天）。
+export function insertLeapMonth(months, afterIdx, name = "闰月", days = 30) {
+    const arr = Array.isArray(months) ? months.slice() : [];
+    const idx = (afterIdx == null) ? arr.length - 1 : Math.min(arr.length, Math.max(-1, afterIdx));
+    arr.splice(idx + 1, 0, { name: String(name).slice(0, 10), days: Math.min(400, Math.max(1, days | 0)) });
+    return arr;
+}
+

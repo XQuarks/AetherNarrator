@@ -1,12 +1,14 @@
 // ============================================================
 // AetherNarrator · render.js（由 app.js 模块化拆分自动生成）
 // ============================================================
-import { S, calendarLabel, MEMORY_TYPE_LABELS } from "./store.js";
+import { S, calendarLabel, MEMORY_TYPE_LABELS, getEnabledVariables } from "./store.js";
 
-import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema } from "./utils.js";
+import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema, computeWorldCompletion } from "./utils.js";
 import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, formatTimeLabel, formatDeadlineLabel, stepOf, updateFontSizeButtons, getAllTimelineViews, formatDateOnly, tempLabelText } from "./theme.js";
-import { abortCurrentRequest, chooseOption, confirmRestart, continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./game.js";
-import { styleToTemperature } from "./prompt.js";
+// 注：页面按钮的 chooseOption / startGame / loadSave 等动作均通过 data-action 属性由 app.js 事件接线分发，
+// 本模块不直接引用这些函数，不反向依赖 game.js / save.js，避免循环引用（docs/34 #1）。
+import { abortCurrentRequest } from "./turn-lifecycle.js";
+import { styleToTemperature, formatStateChanges } from "./prompt.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
 
 export function showScreen(id) {
@@ -473,7 +475,7 @@ function bindDetailTabs(bodyId) {
 }
 
 export function showWorldDetail(worldId) {
-    abortCurrentRequest();
+    abortCurrentRequest(S);
     S.currentWorld = S.worlds.find(w => w.id === worldId);
     if (!S.currentWorld) return;
     document.getElementById("detailWorldTitle").textContent = S.currentWorld.name;
@@ -495,10 +497,58 @@ export function showWorldDetail(worldId) {
     const rules = Array.isArray(w.rules) ? w.rules : [];
     const ruleNames = rules.slice(0, 5).map((r, i) => `<div class="form-group" style="margin-bottom:8px"><label>${escapeHtml(r.name || ("规则 " + (i + 1)))}</label><p style="margin:0;font-size:13px;color:var(--text-secondary)">${r.enabled === false ? "已停用" : "启用中"}</p></div>`).join("");
 
+    // ★ B1：角色卡列表
+    const chars = Array.isArray(w.characters) ? w.characters : [];
+    const charCards = chars.length ? chars.map(c => `
+        <div class="char-chip">
+            <span class="char-role ${c.role === "protagonist" ? "char-role-p" : "char-role-n"}">${c.role === "protagonist" ? "主角" : "NPC"}</span>
+            <b>${escapeHtml(c.name || (c.role === "protagonist" ? "（玩家所扮演）" : "未命名"))}</b>
+            ${c.identity ? `<span class="muted"> · ${escapeHtml(c.identity)}</span>` : ""}
+            ${c.role !== "protagonist" && typeof c.affinity === "number" ? `<span class="muted"> · 好感 ${c.affinity}</span>` : ""}
+        </div>`).join("") : `<p class="muted">该世界还没有角色卡。</p>`;
+
+    // ★ B2：玩家变量列表
+    const varDefs = getEnabledVariables(w);
+    const varCards = varDefs.length ? varDefs.map(v => {
+        const typeLabel = v.type === "number" ? "数值" : v.type === "toggle" ? "开关" : "文本";
+        const def = (v.type === "number" && typeof v.default === "number") ? `，默认 ${v.default}` : "";
+        const range = (v.type === "number" && (typeof v.min === "number" || typeof v.max === "number"))
+            ? `（${v.min != null ? v.min : "−∞"}–${v.max != null ? v.max : "∞"}${v.unit ? v.unit : ""}）` : "";
+        return `<div class="char-chip">
+            <span class="char-role char-role-n">${typeLabel}</span>
+            <b>${escapeHtml(v.name || v.id)}</b>
+            <span class="muted">${escapeHtml(v.id)}${def}${range}</span>
+        </div>`;
+    }).join("") : `<p class="muted">该世界还没有玩家变量（默认无数字压力，可选添加）。</p>`;
+
+    // ★ B3：初始物品列表
+    const initInv = (w.initial_state && Array.isArray(w.initial_state.inventory)) ? w.initial_state.inventory : [];
+    const itemCards = initInv.length ? initInv.map(it => `
+        <div class="char-chip">
+            <span class="char-role ${it.is_key === true ? "char-role-key" : "char-role-n"}">${it.is_key === true ? "关键" : (it.category || "物品")}</span>
+            <b>${escapeHtml(it.name || it.item_id)}</b>
+            <span class="muted">${escapeHtml(it.item_id || "")}${typeof it.count === "number" ? " ×" + it.count : ""}</span>
+        </div>`).join("") : `<p class="muted">该世界开局没有初始物品（默认空背包，物品由剧情动态授予）。</p>`;
+
     // 时间体系
     const tc = schema.time_config || {};
     const modeLabel = { gregorian: "公历", lunar: "农历", custom: "自定义历法", none: "无（步数制）" }[tc.mode] || tc.mode || "—";
     const startDate = tc.calendar_start ? (tc.calendar_start.month || "?") + "月" + (tc.calendar_start.date || "?") + "日" : "—";
+
+    // ★ A3：创作完成度清单（纯派生，不阻塞游玩，不新增数据模型）
+    const completion = computeWorldCompletion(w);
+    const completionItems = completion.items.map(it => `
+        <span class="completion-item ${it.done ? "done" : "todo"}">${it.done ? "✓" : "○"} ${escapeHtml(it.label)}</span>`).join("");
+    const completionCard = `
+        <div class="completion-card">
+            <div class="completion-head">
+                <span class="completion-title">创作完成度</span>
+                <span class="completion-score">${completion.done} / ${completion.total} · ${escapeHtml(completion.grade)}</span>
+            </div>
+            <div class="completion-bar"><span class="completion-fill" style="width:${completion.pct}%"></span></div>
+            <div class="completion-items">${completionItems}</div>
+            <p class="completion-note">不完整的项不影响开始游玩，补全可让世界更扎实。</p>
+        </div>`;
 
     document.getElementById("detailWorldBody").innerHTML = `
         <div class="detail-tabs">
@@ -506,8 +556,12 @@ export function showWorldDetail(worldId) {
             <button class="detail-tab" data-detail-tab="lore">知识库</button>
             <button class="detail-tab" data-detail-tab="rules">规则</button>
             <button class="detail-tab" data-detail-tab="time">时间体系</button>
+            <button class="detail-tab" data-detail-tab="characters">角色</button>
+            <button class="detail-tab" data-detail-tab="variables">变量</button>
+            <button class="detail-tab" data-detail-tab="items">物品</button>
         </div>
         <div class="detail-tab-content active" data-detail-tab-content="overview">
+            ${completionCard}
             <div class="form-group"><label>世界类型</label><p style="margin:0;font-size:15px;">${w.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p></div>
             ${w.ip_name ? `<div class="form-group"><label>作品名称</label><p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(w.ip_name)}</p></div>` : ""}
             <div class="form-group"><label>世界观描述</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.desc)}</p></div>
@@ -533,6 +587,18 @@ export function showWorldDetail(worldId) {
             <div class="form-group"><label>历法</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${modeLabel}</p></div>
             <div class="form-group"><label>起始日期</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${startDate}</p></div>
             <p class="muted">时间体系的编辑入口在「知识库 → 时间体系」页签中。</p>
+        </div>
+        <div class="detail-tab-content" data-detail-tab-content="characters">
+            <div class="char-list">${charCards}</div>
+            <button class="btn secondary" data-action="openCharacterEditor" data-id="${id}">编辑角色</button>
+        </div>
+        <div class="detail-tab-content" data-detail-tab-content="variables">
+            <div class="char-list">${varCards}</div>
+            <button class="btn secondary" data-action="openVariableEditor" data-id="${id}">编辑变量</button>
+        </div>
+        <div class="detail-tab-content" data-detail-tab-content="items">
+            <div class="char-list">${itemCards}</div>
+            <button class="btn secondary" data-action="openItemEditor" data-id="${id}">编辑物品</button>
         </div>
     `;
 
@@ -671,6 +737,10 @@ export function renderStatusTabs() {
     if (schema.has_skills) {
         tabs.push({ key: "skills", label: schema.skill_label || "技能" });
     }
+    // ★ B2：仅当世界定义了玩家变量时才显示「变量」页签（默认空世界不出现数字压力）
+    if (getEnabledVariables(S.currentWorld).length) {
+        tabs.push({ key: "variables", label: "变量" });
+    }
     tabs.push({ key: "goals", label: "目标" });
     tabs.push({ key: "memory", label: "记忆" });
     tabs.push({ key: "timeline", label: "时间线" });
@@ -787,36 +857,89 @@ export function renderStatusPanel(tab) {
             `;
             break;
 
-        case "relations":
-            const relEntries = Object.entries(s.relationships);
+        case "relations": {
+            // ★ B4：羁绊 / 好感度页签（数值条 + 标签 + 关键金色高亮置顶；文字关系层并行显示）
+            const bonds = (s.bonds && typeof s.bonds === "object") ? s.bonds : {};
+            const rels = (s.relationships && typeof s.relationships === "object") ? s.relationships : {};
+            const names = new Set([...Object.keys(bonds), ...Object.keys(rels)]);
+            const list = [...names].map(name => ({ name, bond: bonds[name] || null, rel: rels[name] || "" }));
+            list.sort((a, b) => {
+                const ka = (a.bond && (a.bond.affinity >= 80 || a.bond.affinity <= -80)) ? 1 : 0;
+                const kb = (b.bond && (b.bond.affinity >= 80 || b.bond.affinity <= -80)) ? 1 : 0;
+                return kb - ka;
+            });
             container.innerHTML = `
                 <div class="status-section">
-                    <div class="status-section-title">人物关系</div>
-                    ${relEntries.length ? relEntries.map(([name, value]) => `
-                        <div class="status-card">
-                            <div class="row"><span class="label">${escapeHtml(name)}</span></div>
-                            <div class="text-block">${renderTextValue(value)}</div>
-                        </div>
-                    `).join("") : '<div class="empty-hint">暂无人物关系</div>'}
+                    <div class="status-section-title">羁绊 / 好感度</div>
+                    ${list.length ? list.map(({ name, bond, rel }) => {
+                        const aff = bond ? bond.affinity : 0;
+                        const isKey = bond && (aff >= 80 || aff <= -80);
+                        const pct = Math.max(0, Math.min(100, (aff + 100) / 2));
+                        const side = aff >= 0 ? "pos" : "neg";
+                        const tags = bond && Array.isArray(bond.tags) ? bond.tags : [];
+                        const desc = (bond && bond.desc) || rel || "";
+                        return `
+                        <div class="status-card ${isKey ? "bond-key" : ""}">
+                            <div class="row"><span class="label">${isKey ? "★ " : ""}${escapeHtml(name)}</span><span class="value">${aff > 0 ? "+" : ""}${aff}</span></div>
+                            <div class="bond-bar"><div class="bond-fill ${side}" style="width:${pct}%"></div></div>
+                            ${tags.length ? `<div class="bond-tags">${tags.map(t => `<span class="bond-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+                            ${desc ? `<div class="text-block">${escapeHtml(desc)}</div>` : ""}
+                        </div>`;
+                    }).join("") : '<div class="empty-hint">暂无人物关系</div>'}
                 </div>
             `;
             break;
+        }
 
-        case "items":
+        case "items": {
+            // ★ B3：关键物品置顶 + 金色高亮；每件显示分类标签
+            const items = s.inventory.slice().sort((a, b) => (b.is_key === true) - (a.is_key === true));
             container.innerHTML = `
                 <div class="status-section">
                     <div class="status-section-title">背包物品</div>
-                    ${s.inventory.length ? s.inventory.map(i => `
-                        <div class="status-card">
+                    ${items.length ? items.map(i => `
+                        <div class="status-card ${i.is_key === true ? "item-key" : ""}">
                             <div class="row">
-                                <span class="label">${escapeHtml(i.name)}</span>
+                                <span class="label">${i.is_key === true ? "★ " : ""}${escapeHtml(i.name)}</span>
                                 <span class="value">x${i.count}</span>
                             </div>
+                            ${i.category ? `<div class="item-cat">${escapeHtml(i.category)}</div>` : ""}
                         </div>
                     `).join("") : '<div class="empty-hint">背包空空如也</div>'}
                 </div>
             `;
             break;
+        }
+
+        case "variables": {
+            const varDefs = getEnabledVariables(S.currentWorld);
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">玩家变量</div>
+                    ${varDefs.length ? varDefs.map(def => {
+                        const val = (s.variables && def.id in s.variables) ? s.variables[def.id] : def.default;
+                        if (def.type === "number") {
+                            const min = (typeof def.min === "number") ? def.min : 0;
+                            const max = (typeof def.max === "number") ? def.max : 100;
+                            const pct = (max > min) ? Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100)) : 0;
+                            const unit = def.unit ? ` ${def.unit}` : "";
+                            return `<div class="status-card">
+                                <div class="row"><span class="label">${escapeHtml(def.name)}</span><span class="value">${val}${unit}</span></div>
+                                <div class="stat-bar"><div style="width:${pct}%"></div></div>
+                            </div>`;
+                        }
+                        if (def.type === "toggle") {
+                            return `<div class="status-card"><div class="row"><span class="label">${escapeHtml(def.name)}</span><span class="value">${val ? "开" : "关"}</span></div></div>`;
+                        }
+                        return `<div class="status-card">
+                            <div class="row"><span class="label">${escapeHtml(def.name)}</span></div>
+                            <div class="text-block">${escapeHtml(val == null ? "" : String(val))}</div>
+                        </div>`;
+                    }).join("") : '<div class="empty-hint">本世界未定义玩家变量</div>'}
+                </div>
+            `;
+            break;
+        }
 
         case "skills":
             const skillEntries = Object.entries(s.skills || {});
@@ -1036,12 +1159,22 @@ export function renderLog(reset) {
             ${entry.player ? `<div class="player-text">${escapeHtml(entry.player)}</div>` : ""}
             <div class="narrative">${renderNarrative(entry.narrative, entry.isWarning)}</div>
             ${entry.atmosphere ? `<div class="log-whisper"><span>◈ ${escapeHtml(entry.atmosphere)}</span></div>` : ""}
+            ${renderTurnChanges(entry)}
         </div>
         `;
         log.insertBefore(createElementFromHTML(html), document.getElementById("choicesArea"));
     }
     S.renderedEntryCount = S.conversationHistory.length;
     log.scrollTop = log.scrollHeight;
+}
+
+// ★ B2：渲染「本回合变化」块（叙事+氛围之后）。无变化时返回空字符串。
+export function renderTurnChanges(entry) {
+    const lines = formatStateChanges(entry, S.currentWorld);
+    if (!lines.length) return "";
+    return `<div class="turn-changes"><div class="turn-changes-title">本回合变化</div>` +
+        lines.map(l => `<div class="turn-change-item">${escapeHtml(l)}</div>`).join("") +
+        `</div>`;
 }
 
 // ★ 实时流式：把模型正在生成的叙事（部分文本）直接写进指定日志条目的 .narrative，
@@ -1058,22 +1191,29 @@ export function updateLiveNarrative(index, text) {
     log.scrollTop = log.scrollHeight;
 }
 
-// ★ 实时流式：移除某条已渲染的日志条目（DOM + 数组 + 渲染计数同步）
-export function removeLogEntry(index) {
+// ★ 实时流式：只移除某条日志的 DOM（不动 conversationHistory 数组），供重渲染复用
+function removeEntryDOMOnly(index) {
     const log = document.getElementById("gameLog");
     if (log) {
         const entries = log.querySelectorAll(".log-entry");
         const el = entries[index];
         if (el) el.remove();
     }
-    if (S.conversationHistory.length > index) S.conversationHistory.splice(index, 1);
     if (S.renderedEntryCount > index) S.renderedEntryCount = index;
+}
+
+// ★ 实时流式：移除某条已渲染的日志条目（DOM + 数组 + 渲染计数同步），供丢弃过期响应等场景用
+export function removeLogEntry(index) {
+    removeEntryDOMOnly(index);
+    if (S.conversationHistory.length > index) S.conversationHistory.splice(index, 1);
 }
 
 // ★ 实时流式：用最新数据重渲染指定条目（提交为格式化叙事 + 氛围提示）。
 // 先移除旧 DOM，再让 renderLog 从该下标重新追加（该下标之后通常无其它条目）。
+// 注意：这里只能删 DOM、不能动数组——若误用 removeLogEntry 会把刚定稿的回合从
+// conversationHistory 里删掉，导致剧情数据丢失（processTurn 集成测试抓到的 bug）。
 export function replaceEntryDOM(index) {
-    removeLogEntry(index);
+    removeEntryDOMOnly(index);
     renderLog();
 }
 

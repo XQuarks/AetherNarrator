@@ -3,9 +3,11 @@
 > ⚠️ 过时说明：本文档「时间体系卡」若提及「季节」输入框/显示，该元素已于 **方案 23（docs/23_彻底移除季节机制.md）** 彻底移除（编辑卡不再有「季节」输入框，顶栏不再显示季节），仅「天气」保留。
 
 > 本手册用于把项目的**每一个界面**完整记录下来，便于交给其他 AI / 设计师在不读源码的情况下理解现有 UI，并据此提出或实施界面优化方案。
-> 截图是界面的**视觉真源**（位于 `docs/_shots/` 目录，共 23 张）；文字规格是结构的精确描述；代码定位便于直接修改。
+> 截图是界面的**视觉真源**（位于 `docs/_shots/` 目录，脚本 `tools/_ui_capture.mjs` 复拍，共 22 张：01-home / 02-settings / 03-api / 04-worldlist / 05~08-create / 09-savelist / 10-worlddetail / 11-lore-kb / 12-lore-graph / 13-lore-time / 14-critic / 15-openingfix / 16-rule / 17-game / 17b-game-log / 18-status / 19-gamesettings / 20-authornote / 21-gameover / 22-savedetail）。2026-07-27 已重拍 **01–15**（覆盖旧基线）；**16–22 待本机重跑补齐**（沙箱在 openingfix 步之后偶发退出）。文字规格是结构的精确描述；代码定位便于直接修改。
 
 > ⚠️ **本手册为 2026-07-22 基线，未含 2026-07-23 的 UI 重设计。** 2026-07-23 已上线一轮界面重设计（输入框改多行 textarea、氛围 whisper 提示、手机端底部导航、760px 居中、弹窗移动端底部化等），详见 `docs/ui-redesign/设计方案.md` 与 `docs/ui-redesign/交接说明.md`。本手册中的截图与布局描述均为**重设计前**状态，**需按交接说明第 6 项复拍受影响截图**后再作为真源使用。
+
+> 📸 **2026-07-27 复拍进度**：已用 `tools/_ui_capture.mjs` 重拍 `docs/_shots/` 的 **01–15**（重设计后当前 UI）；**16–22 待本机重跑补齐**（沙箱在 openingfix 步之后偶发退出）。本手册**文字描述仍为重设计前**，仅截图已更新——引用时以截图为准，文字待后续整体修订。
 
 ---
 
@@ -56,7 +58,7 @@
 | `--primary` | `#9E7D4E` |
 | `--primary-light` | `#B8955E` |
 
-- **字体**：标题与正文使用衬线中文（Noto Serif SC，由 `fonts.googleapis.com` 加载，CSP 已放行）；代码/输入用系统无衬线。
+- **字体**：标题与正文使用衬线中文系统字体栈（Noto/思源宋体 → 宋体/Georgia 回退；2026-07-27 已移除 Google Fonts CDN，CSP 同步收紧）；代码/输入用系统无衬线。
 - **装饰**：主界面与游戏界面有全屏 `canvas` 星尘（`#homeMotes`/`#gameMotes`）、`.mist` 雾层、`.vignette` 暗角，均为 `pointer-events:none` 的纯装饰层。
 - **动效**：菜单按钮 `rise` 上浮入场；弹窗 `.modal-overlay.show` 淡入 + `.modal` 上滑（`translateY`）；按钮 hover 有位移/描边高亮。
 

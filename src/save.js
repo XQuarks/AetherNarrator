@@ -1,10 +1,10 @@
 // ============================================================
 // AetherNarrator · save.js（由 game.js 拆分：会话/存档管理）
 // 说明：本模块聚合「会话失效 + 存档读写 + 世界加载」逻辑，
-// 仅依赖 storage / simulation / render / prompt / theme / migrations / utils，
+// 仅依赖 storage / simulation / render / prompt / theme / migrations / utils / turn-lifecycle，
 // 不反向依赖 game.js，避免循环引用。
 // ============================================================
-import { S } from "./store.js";
+import { S, syncVariablesToSchema, initBondsFromWorld } from "./store.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState } from "./storage.js";
 import {
     stopTypewriter, showScreen, renderLog, renderChoices, updateGameDayInfo,
@@ -18,21 +18,10 @@ import { formatWorldTime, stepOf, ensureTimelineState, getTimeConfig } from "./t
 import { normalizeCurrentDate } from "./calendar.js";
 import { LATEST_SAVE_SCHEMA_VERSION } from "./migrations.js";
 import { invalidateAllLoreAnn } from "./ann-index.js";
-
-export function abortCurrentRequest() {
-    if (S.currentAbortController) {
-        try { S.currentAbortController.abort(); } catch (e) {}
-        S.currentAbortController = null;
-    }
-    for (const controller of S.auxiliaryControllers) {
-        try { controller.abort(); } catch (_) {}
-    }
-    S.auxiliaryControllers.clear();
-    S.currentSession.epoch++; // 任何尚未返回的响应将因 epoch 不匹配而被丢弃
-}
+import { abortCurrentRequest } from "./turn-lifecycle.js";
 
 export async function startGame(opts = {}) {
-    abortCurrentRequest(); // ★ P0: 失效在途请求，避免旧响应串入新周目
+    abortCurrentRequest(S); // ★ P0: 失效在途请求，避免旧响应串入新周目
     invalidateAllLoreAnn(); // ★ Phase 1：切换/重开世界，释放旧 ANN 索引
     closeModal("worldDetailModal");
     if (!S.currentWorld) return;
@@ -56,6 +45,10 @@ export async function startGame(opts = {}) {
     S.gameState.current_date = normalizeCurrentDate(S.gameState.current_date, getTimeConfig().timeConfig);
     // Phase 2：多世界时初始化/补齐全线 current_date（非多世界为 no-op）
     ensureTimelineState(S.gameState, getTimeConfig());
+    // ★ B2：按世界 variable_schema 初始化/同步运行时变量值（开局补默认、清脏 key）
+    S.gameState.variables = syncVariablesToSchema(S.currentWorld, S.gameState.variables);
+    // ★ B4：新游戏从世界定义初始化好感度 map（characters + initial_state.relationships 二者纳入）
+    S.gameState.bonds = initBondsFromWorld(S.currentWorld);
 
     // ★ B7：从世界出厂默认深拷贝知识库为当前存档副本（后续编辑只改副本）
     S.activeLoreKB = S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null;
@@ -111,7 +104,7 @@ export function continueLatestSave(worldId) {
 // ★ 载入会话：把存档数据灌入运行时（S.currentWorld / S.gameState / S.activeLoreKB / 历史等），不跳转界面。
 // loadSave 与「存档详情-存档知识库」编辑共用，保证进入游戏前/知识库编辑前状态一致。
 export function prepareSessionFromSave(save) {
-    abortCurrentRequest(); // ★ P0: 失效在途请求
+    abortCurrentRequest(S); // ★ P0: 失效在途请求
     invalidateAllLoreAnn(); // ★ Phase 1：载入存档/切换世界，释放旧 ANN 索引
     stopTypewriter();
     S.currentWorld = S.worlds.find(w => w.id === save.worldId);
@@ -121,6 +114,11 @@ export function prepareSessionFromSave(save) {
     if (S.gameState) S.gameState.current_date = normalizeCurrentDate(S.gameState.current_date, getTimeConfig().timeConfig);
     // Phase 2：多世界时恢复/补齐全线 current_date（非多世界为 no-op）
     ensureTimelineState(S.gameState, getTimeConfig());
+    // ★ B2：读档时按当前世界 variable_schema 同步变量（新增变量补默认、已删变量清除）
+    if (S.gameState) S.gameState.variables = syncVariablesToSchema(S.currentWorld, S.gameState.variables);
+    // ★ B4：读档仅兜底 bonds 字段（不回填老档 → 不兼容旧存档，老档关系页签只显示文字层）
+    if (S.gameState) S.gameState.bonds = (S.gameState.bonds && typeof S.gameState.bonds === "object" && !Array.isArray(S.gameState.bonds)) ? S.gameState.bonds : {};
+
     // ★ B7：恢复存档独立知识库（若存档无副本则从 world 出厂默认深拷贝，兼容老存档）
     S.activeLoreKB = (save.lore_kb) ? deepClone(save.lore_kb) : (S.currentWorld && S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null);
     S.activeBehaviorRecords = deepClone(save.behavior_records || []);

@@ -18,6 +18,15 @@ export const ENTITY_COLOR = "#7c83ff";
 // 链接边配色（s.links，对应 store.js 的 LINK_RELATION_LABELS）
 export const REL_COLORS = { causal: "#ff6464", related: "#6496ff", explains: "#64c864", contains: "#c8b464" };
 
+// 类别哈希配色（知识库树/图谱预览卡共用；原在 lore-ui.js，拆分时移入本纯函数模块）
+const CATEGORY_COLOR_SEED = ["#C9A87C", "#6496ff", "#64c864", "#ff6464", "#c8b464", "#b48cff", "#4fc9c9", "#ff9f64"];
+export function categoryColor(cat) {
+    const s = String(cat || "补充");
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return CATEGORY_COLOR_SEED[h % CATEGORY_COLOR_SEED.length];
+}
+
 // 抽取关系（relations 三元组）调色板：不同中文关系分配不同稳定色
 export const KG_REL_PALETTE = [
     "#ff6b6b", "#ffa94d", "#ffd43b", "#69db7c", "#38d9a9", "#4dabf7",

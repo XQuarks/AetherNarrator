@@ -55,6 +55,10 @@ export function normalizeSimulationState(state) {
     out.completed_events = (Array.isArray(out.completed_events) ? out.completed_events : [])
         .map(event => normalizeEvent(event, "completed"));
     out.npc_activity = normalizeNpcActivity(out.npc_activity);
+    // ★ B2：确保 variables 为对象（老存档兜底；具体值与 schema 的同步在 save.js 开局/读档时做）
+    out.variables = (out.variables && typeof out.variables === "object" && !Array.isArray(out.variables)) ? out.variables : {};
+    // ★ B4：确保 bonds 为对象（兜底 undefined，不回填老档 → 不兼容旧存档）
+    out.bonds = (out.bonds && typeof out.bonds === "object" && !Array.isArray(out.bonds)) ? out.bonds : {};
     return out;
 }
 
