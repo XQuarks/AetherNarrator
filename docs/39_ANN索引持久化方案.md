@@ -1,7 +1,8 @@
 # docs/39 · ANN 索引持久化方案（对应 docs/34 #14）
 
-> 状态：**方案稿（待黎总确认范围后实施）**。本文基于代码实测，非猜测。
+> 状态：**已实施（2026-07-28，路径 A）**。本文基于代码实测，非猜测。
 > 关联：docs/34 §3.4 #14、docs/20 §1.5/§5、docs/Phase0-Phase1改造方案.md:110、docs/架构评估与方案脑暴.md:95。
+> 实施落点：`src/ann-index.js`（snippetFingerprint / annFileName / getLoreAnnIndex 持久化路径 / clearLoreAnnCache 清除缓存）；新增 `test/41-ann-persist.test.js`（3 项）+ `test/42-ann-clear-cache.test.js`（2 项）。验证：`syntax_check`+`verify-modules`+`npm test` 全绿（414/414）。设置界面「选项」页已加「清除索引缓存」入口（呼应 #16）。
 
 ---
 
@@ -35,7 +36,7 @@
 - `loadHnswlib()`（`hnswlib.js` 尾部）**已经初始化了 IDBFS**。
 - 但当前 `ann-index.js` 构造索引传 `autoSaveFilename=""` 关掉自动存盘，且**从没人调用 `syncFileSystem`** 把虚拟 FS 刷进 IndexedDB。
 
-→ "持久化"在库层面是现成的，只是被关了 + 没接 sync 这一步。**写入侧（autoSave→虚拟FS）确定可用；读取侧（loadIndex）需探针验证（见 §六第 0 步）。**
+→ "持久化"在库层面是现成的，只是被关了 + 没接 sync 这一步。**写入侧（autoSave→虚拟FS）确定可用；读取侧（loadIndex）已用探针确认存在（见 §九）。**
 
 ---
 
@@ -93,10 +94,42 @@
 
 ---
 
-## 八、需黎总拍板
+## 八、决策已落地（2026-07-28）
 
-1. **路径 A（真持久化）/ B（异步解卡）/ 组合？**
-2. 若 A：接受 **IDBFS 整 FS 镜像**的存储方式（单世界约 4MB×世界数）吗？
-3. 是否先让我跑**第 0 步探针**（不改动正式代码，只在 `tools/` 临时脚本）确认 `loadIndex` 可用，再写正式实现？
+黎总确认：**走路径 A（真·持久化）**。三件事一并确认：
+1. **路径 A** 已实施（见 §九）。
+2. 接受 **IDBFS 整 FS 镜像**存储方式（单世界约 4MB×世界数；IndexedDB 容量充足，待加"清除 ANN 索引缓存"入口）。
+3. **第 0 步探针已跑**——结论：`loadIndex`/`writeIndex`/`saveIndex` 均存在于内联 wasm（用 base64 解码后搜 embind 字符串确认），`HierarchicalNSW`/`initIndex`/`addPoint`/`searchKnn` 亦在。Node 因 wasm 仅编译给浏览器环境无法实跑，但方法存在性已确证。
 
 > 注：#14 实质是"功能"非"债"（docs/38 §六 已单列），复杂度高于一般小修；故按项目"大改动先出方案"规矩走此文档。
+
+---
+
+## 九、实施记录（2026-07-28，路径 A）
+
+### 落地方案（与 §四/§六 方案一致，细节微调）
+- **文件名含"内容指纹"**而非仅 `dim`：`ann_<worldId>_<dim>_<fp>_v1.idx`。
+  - `fp = FNV-1a(snippets 的 id+category+title+content+keywords)`。编辑任一片段文本 → fp 变 → 旧文件名失配 → `loadIndex` 找不到 → 自动重建。
+  - **好处**：无需在 `invalidateLoreAnn` 里显式删文件；天然抗"编辑后未检索就刷新"的边角情况（旧文件只是成为孤儿，不影响正确性）。
+- **读回顺序**：`loadHnswlib` 后首次调用 `syncFileSystem("read")` 把 IDBFS 从 IndexedDB 恢复到虚拟 FS（每会话一次）→ `loadIndex(fileName)`；命中则跳过 `addPoint`。
+- **写出**：`buildLoreIndex` 后 `index._raw.writeIndex(fileName)`（写虚拟 FS）→ `_glue.syncFileSystem("write")` 刷 IndexedDB。
+- **优雅降级（不破坏现有行为）**：
+  - 库未暴露 `loadIndex`（无该方法的环境）→ 跳过读回，走内存重建；`getLoreAnnIndex` 仍正常缓存。
+  - `syncFileSystem`/`writeIndex` 任一步抛错 → `catch` 静默忽略，内存索引仍可用；最终由 `rag.js` 的 O(n) 兜底承接。
+  - 读回的索引 `size===0`（无有效向量）→ 视为未命中，回落重建并抛"没有可索引的有效向量" → `rag.js` 兜底。
+- **改动文件**：仅 `src/ann-index.js`（主，+wrapLoreIndex/snippetFingerprint/annFileName + getLoreAnnIndex 持久化分支）。`rag.js`/`lore-ui.js`/`save.js` 的 `invalidateLoreAnn` 调用点**无需改动**——内容指纹自动处理失效。
+
+### 测试
+- 新增 `test/41-ann-persist.test.js`（3 项，mock 注入支持 loadIndex/writeIndex）：
+  1. 首次构建并 writeIndex；`invalidate` 后读回应不重建（addPoint 调用数不变）。
+  2. 编辑片段 content → fp 变 → 写入不同名新文件（旧文件孤儿化），验证自动失效。
+  3. 库无 loadIndex 时优雅回落（缓存/失效行为不变）。
+- 新增 `test/42-ann-clear-cache.test.js`（2 项，带 FS.readdir/unlink 的 mock）：
+  1. `clearLoreAnnCache` 仅删 `ann_*.idx`（保留 notes.txt 等非 idx/非 ann 文件），返回删除计数。
+  2. 库无 FS 时优雅返回 0（不抛错）。
+- 全量 `npm test`：414/414 通过（原 409 + 5），`syntax_check`/`verify-modules` 全绿。
+
+### 残留待办（非阻塞）
+- ~~**孤儿文件清扫**：编辑历史会在 IDBFS 留下不同 fp 的旧 `.idx`（每世界累计若干，单文件约 4MB）。~~ ✅ **已做**：设置界面「选项」页新增「清除索引缓存」卡片与按钮，`clearLoreAnnCache` 利用 hnswlib 模块暴露的 `FS`（EXPORTED_RUNTIME_METHODS 含 'FS'）`readdir`+`unlink` 删除全部 `ann_*.idx` 并 `syncFileSystem("write")` 刷盘；两次点击确认（禁用原生 confirm），失败静默降级、不影响存档/剧情。
+- ~~**"清除索引缓存"入口**：用户手动腾空间/排错用。~~ ✅ 已落地（见上）。
+- **浏览器手测**：大世界刷新前后检索延迟对比（沙箱无浏览器，待本机跑）。

@@ -136,7 +136,7 @@ export async function generateWorld() {
                 onProgress: (done, total) => { btn.textContent = `生成中 (已完成 ${done}/${total})...`; },
                 onChunkError: (idx, err) => {
                     showToast(`第 ${idx}/${chunkCount} 段知识库生成失败，已跳过：${err.message}`, "error");
-                    console.warn(err);
+                    logError("extractLore", err);
                     if (S.debugLog && S.debugLog.chunkErrors) {
                         S.debugLog.chunkErrors.push({ time: new Date().toISOString(), chunkIndex: idx, total: chunkCount, errorMessage: err && err.message });
                     }
@@ -144,7 +144,7 @@ export async function generateWorld() {
             });
             loreKb = { ip: name, snippets: extracted.snippets };
             try { await ensureLoreEmbeddings(loreKb, (done, total) => { btn.textContent = `生成中 (向量化 ${done}/${total})...`; }); }
-            catch (e) { console.warn("知识库向量预计算失败，将降级为关键词检索:", e.message); }
+            catch (e) { logError("loreEmbedPrecompute", e); }
         } else {
             // 小书：沿用原有单次生成
             const rawGen2 = await callWorldGenerationLLM(name, type, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix);
@@ -153,7 +153,7 @@ export async function generateWorld() {
             loreKb = generated.lore_kb;
             if (loreKb) {
                 try { await ensureLoreEmbeddings(loreKb, (done, total) => { btn.textContent = `生成中 (向量化 ${done}/${total})...`; }); }
-                catch (e) { console.warn("世界生成后向量预计算失败，将降级为关键词检索:", e.message); }
+                catch (e) { logError("loreEmbedPrecomputeSmall", e); }
             }
         }
         const world = {
@@ -216,7 +216,7 @@ export async function generateWorld() {
         S.worlds.unshift(world);
         saveWorlds();
         // ★ Phase 3：生成后自动审稿（fire-and-forget，不阻塞"世界已创建"提示）
-        runWorldCritic(world).catch(e => console.warn("自动审稿失败：", e && e.message));
+        runWorldCritic(world).catch(e => logError("worldCritic", e));
         // 调试日志：记录世界创建
         S.debugLog.worldCreations.push({
             time: new Date().toISOString(),
@@ -255,7 +255,7 @@ export async function generateWorld() {
             errorMsg = "网络请求失败（大概率是 CORS 跨域限制）。请在 API 配置中填写 CORS 代理 URL，或使用浏览器 CORS 插件。";
         }
         showToast("生成失败：" + errorMsg, "error");
-        console.error(e);
+        logError("createWorld", e);
     } finally {
         btn.disabled = false;
         btn.textContent = "确认生成";
@@ -613,7 +613,7 @@ export function applyStateChanges(changes) {
     if (timeChange) {
         const result = advanceWorldTime(s.current_date, timeChange, timeCtx);
         s.current_date = result.currentDate;
-        if (result.rejected) console.warn("AI 试图回退时间，已忽略", timeChange);
+        if (result.rejected) logError("timeRollbackIgnored", new Error("AI 试图回退时间，已忽略 " + JSON.stringify(timeChange)));
     } else {
         // 无时间变更：保持原状，仅规范化形状（补齐 step 等）
         s.current_date = ensureCurrentDate(s.current_date, tc.timeConfig);
@@ -939,7 +939,7 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
                 showToast(msg, "warn", 5000);
             }
         }
-    }).catch(() => { /* 裁判异常不影响主流程 */ });
+    }).catch(e => logError("worldviewJudge", e));
 
     pendingEntry.narrative = resp.narrative || "（无叙事）";
     pendingEntry.retrieved = retrieved.map(s => s.title);
@@ -1038,7 +1038,7 @@ export async function processTurn(input) {
         // ★ P0: 会话失效校验 —— 期间若发生导航/切换/重开，丢弃此响应
         if (resp._sessionEpoch !== myEpoch || resp._sessionWorldId !== (S.currentWorld && S.currentWorld.id)) {
             hideLoading();
-            console.warn("丢弃过期/串世界的响应：会话标识不匹配");
+            logError("staleResponseDiscarded", new Error("丢弃过期/串世界的响应：会话标识不匹配"));
             removeLogEntry(liveIndex); // 撤掉这条尚未定稿的待生成条目，避免残留空条
             return;
         }
@@ -1102,7 +1102,7 @@ export async function processTurn(input) {
             errorMsg = "网络请求失败（大概率是 CORS 跨域限制）。请在 API 配置中填写 CORS 代理 URL，或使用浏览器 CORS 插件。详见配置弹窗中的提示说明。";
         }
         showToast("出错了：" + errorMsg, "error");
-        console.error(e);
+        logError("processTurn", e);
     } finally {
         releaseTurn(S);
     }

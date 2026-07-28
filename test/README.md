@@ -108,6 +108,8 @@ npm run check:load       # 浏览器加载桩校验（tools/load-check.mjs）
 | 测试文件 | 被测模块:函数（src） | 用例 | 运行依赖 | 核心守护点 |
 |---|---|---|---|---|
 | `ann.test.js` | `ann-index.js`: `buildLoreIndex/getLoreAnnIndex/invalidateLoreAnn/embeddingRetrieveBruteforce` | 5 | mock hnswlib（`__setTestHnswLib`） | ANN 索引构建/查询映射/缓存失效/抛错兜底（不真实加载 wasm） |
+| `41-ann-persist.test.js` | `ann-index.js`: `getLoreAnnIndex` 持久化路径（#14） | 3 | 支持 loadIndex/writeIndex 的 mock hnswlib | 首次构建写盘 / 失效后读回不重建 / 编辑片段改文件名（内容指纹自动失效） |
+| `42-ann-clear-cache.test.js` | `ann-index.js`: `clearLoreAnnCache`（设置界面「清除索引缓存」） | 2 | 带 FS.readdir/unlink 的 mock hnswlib | 仅删 ann_*.idx（保留其它文件）/ 库无 FS 时优雅返回 0 |
 | `behavior-embeddings-concurrent.test.js` | `rag.js`: `ensureBehaviorEmbeddings/EMBED_MODEL/EMBED_DIM`；`store.js`: `S` | 4 | `window/Worker` 桩 + mock 向量 | 已算跳过 + 并发补算 + 模型变更重算（防逐条串行） |
 | `query-vector-dedup.test.js` | `rag.js`: `embeddingRetrieve/retrieveBehaviorRecords/EMBED_DIM` | 4 | `window/Worker` 桩 + mock 向量 | 「传入 qVec 复用不重算」契约，无模型时降级关键词 |
 | `timeline-embedding-cache.test.js` | `rag.js`: `embedTimelineSegment/EMBED_MODEL/EMBED_DIM` | 4 | mockEmbed（直接返回数组） | 同段只算一次 + 并发去重 + 模型变更重算 |

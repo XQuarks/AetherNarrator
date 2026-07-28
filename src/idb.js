@@ -6,6 +6,8 @@
 // 值统一以字符串存储，以兼容 storage.js 中既有的 parseStored* 解析逻辑。
 // ============================================================
 
+import { logError } from "./utils.js";
+
 const DB_NAME = "aigame_db";
 const STORE_NAME = "kv";
 const DB_VERSION = 1;
@@ -48,7 +50,7 @@ export async function idbGet(key) {
     }
 }
 
-// 写入：内部吞错，调用方可不等待（fire-and-forget）
+// 写入：返回 boolean（成功 true / 失败 false），调用方可据以决定是否提示用户
 export async function idbSet(key, value) {
     try {
         const db = await openDB();
@@ -58,12 +60,14 @@ export async function idbSet(key, value) {
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
         });
+        return true;
     } catch (e) {
-        console.warn("idbSet 失败（可能空间不足）:", e.message);
+        logError("idbSet:" + String(key), e);
+        return false;
     }
 }
 
-// 批量写入：在单个事务内写入多个键值对（saveState 用，减少每回合写盘事务数）
+// 批量写入：在单个事务内写入多个键值对（saveState 用，减少每回合写盘事务数）；返回 boolean
 export async function idbSetMulti(entries) {
     try {
         const db = await openDB();
@@ -75,12 +79,14 @@ export async function idbSetMulti(entries) {
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
         });
+        return true;
     } catch (e) {
-        console.warn("idbSetMulti 失败（可能空间不足）:", e.message);
+        logError("idbSetMulti", e);
+        return false;
     }
 }
 
-// 删除：内部吞错，调用方可不等待
+// 删除：返回 boolean（成功 true / 失败 false）
 export async function idbDel(key) {
     try {
         const db = await openDB();
@@ -90,7 +96,9 @@ export async function idbDel(key) {
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
         });
+        return true;
     } catch (e) {
-        console.warn("idbDel 失败:", e.message);
+        logError("idbDel:" + String(key), e);
+        return false;
     }
 }

@@ -1,19 +1,66 @@
 import { chromium } from 'playwright-core';
+import http from 'http';
 import fs from 'fs';
+import path from 'path';
+
+// 全局兜底：崩了能看到原因，而不是静默 exit 1
+process.on('unhandledRejection', (e) => { console.error('[unhandledRejection]', e); });
+process.on('uncaughtException', (e) => { console.error('[uncaughtException]', e); });
 
 const ROOT = 'C:/Users/guoxiaoyan/Desktop/AetherNarrator';
+const ROOT_N = path.normalize(ROOT);
+const PORT = 8137;
 const DIR = ROOT + '/docs/_shots';
 fs.mkdirSync(DIR, { recursive: true });
-const URL = 'http://127.0.0.1:8137/index.html';
-const EXE = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 
-const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox', '--disable-gpu'] });
+// ---- 内置静态服务器：本机直接跑，无需另外起服务 ----
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.css': 'text/css', '.json': 'application/json',
+  '.wasm': 'application/wasm', '.onnx': 'application/octet-stream',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+  '.map': 'application/json', '.txt': 'text/plain', '.md': 'text/plain',
+};
+const server = http.createServer((req, res) => {
+  try {
+    const u = new URL(req.url, 'http://localhost');
+    let p = decodeURIComponent(u.pathname);
+    if (p === '/') p = '/index.html';
+    const filePath = path.normalize(path.join(ROOT, p));
+    if (!filePath.startsWith(ROOT_N)) { res.writeHead(403); res.end('forbidden'); return; }
+    fs.readFile(filePath, (err, data) => {
+      if (err) { res.writeHead(404); res.end('not found'); return; }
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream' });
+      res.end(data);
+    });
+  } catch (e) { console.error('[server] handler error:', e); res.writeHead(500); res.end('error'); }
+});
+server.on('error', (e) => { console.error(`[server] 启动失败（端口 ${PORT} 可能被占用）:`, e.message); process.exit(1); });
+await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
+console.log(`[server] 已启动: http://127.0.0.1:${PORT}  (Ctrl+C 停止)`);
+
+// 仅起服务器模式：可在你自己浏览器里手动点： node tools/_ui_capture.mjs --server
+if (process.argv.includes('--server')) {
+  process.on('SIGINT', () => { server.close(); process.exit(0); });
+  await new Promise(() => {});
+}
+
+const APP_URL = `http://127.0.0.1:${PORT}/index.html`;
+const EXE = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+if (!fs.existsSync(EXE)) {
+  console.error(`[error] 没找到 Chrome: ${EXE}\n可设置环境变量 CHROME_PATH 指向你的 chrome.exe，例如：\n  set CHROME_PATH="C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"`);
+  server.close();
+  process.exit(1);
+}
+
+const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, deviceScaleFactor: 1 });
 page.setDefaultTimeout(10000);
 const errors = [];
 page.on('pageerror', e => errors.push('PAGEERR: ' + e.message));
 
-await page.goto(URL, { waitUntil: 'load' }).catch(e => console.log('goto warn:', e.message));
+await page.goto(APP_URL, { waitUntil: 'load' }).catch(e => console.log('goto warn:', e.message));
 await page.waitForTimeout(3500);
 await page.addStyleTag({ content: '#bgMotes,.mist,.vignette{pointer-events:none!important;}' }).catch(()=>{});
 
@@ -109,4 +156,5 @@ console.log('OK  :', ok.length, '->', ok.join(', '));
 console.log('FAIL:', fail.length, '->', fail.join(' | '));
 console.log('ERRORS:', errors.length ? JSON.stringify(errors.slice(0, 12)) : 'none');
 await browser.close();
+server.close();
 console.log('DONE');

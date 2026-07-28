@@ -509,7 +509,7 @@ export async function callStructured(messages, toolName, opts = {}) {
         const isParse = /JSON 解析失败/.test((e && e.message) || "");
         const isAbort = e && e.name === "AbortError";
         if (useStream && !isParse && !isAbort) {
-            console.warn("Structured streaming failed, falling back to non-streaming:", e && e.message);
+            logError("streamFallback", e);
             return await callLLMNonStreaming(url, apiKey, model, body, provider);
         }
         throw e;

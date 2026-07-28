@@ -6,7 +6,7 @@
 // ============================================================
 import { S, LINK_RELATION_LABELS, normalizeTimeConfig } from "./store.js";
 import { validateStartDate, CUSTOM_CALENDAR_PRESETS, clampCustomCalendarMonths, summarizeCustomCalendar, reorderMonths, insertLeapMonth } from "./calendar.js";
-import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets, detectTimeConflict, formatConflictMessage } from "./utils.js";
+import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets, detectTimeConflict, formatConflictMessage, logError } from "./utils.js";
 import { showModal, closeModal, showToast, getSelectedStyleRef } from "./render.js";
 import { ensureLoreEmbeddings } from "./rag.js";
 import { createOrUpdateSave, prepareSessionFromSave } from "./save.js";
@@ -471,7 +471,7 @@ if (typeof document !== "undefined") {
         const row = e.target.closest && e.target.closest(".cc-month-row");
         if (!row) return;
         ccDragFrom = parseInt(row.dataset.idx, 10);
-        if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(ccDragFrom)); } catch (_) {} }
+        if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(ccDragFrom)); } catch (e) { logError("dragDataSet", e); } }
         row.classList.add("cc-dragging");
     });
     document.addEventListener("dragover", (e) => {
@@ -529,7 +529,7 @@ export async function regenerateOpening(mode) {
         renderOpeningFixModal();
         showModal("openingFixModal");
     } catch (e) {
-        console.warn("S5-4' 开场白生成失败：", e && e.message);
+        logError("regenerateOpening", e);
         showToast("生成失败：" + (e && e.message || "未知错误"), "error");
     }
 }
@@ -546,7 +546,7 @@ export async function optimizeOpening() {
         renderOpeningFixModal();
         showModal("openingFixModal");
     } catch (e) {
-        console.warn("开场白剧情优化生成失败：", e && e.message);
+        logError("optimizeOpening", e);
         showToast("生成失败：" + (e && e.message || "未知错误"), "error");
     }
 }
@@ -916,7 +916,7 @@ export async function saveLoreReview() {
     const candidateKB = { ...deepClone(S.activeLoreKB || {}), snippets: list };
     const context = { worldId: S.currentWorld.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
     try { await ensureLoreEmbeddings(candidateKB); }
-    catch (e) { console.warn("知识库编辑后向量重算失败，降级关键词：", e.message); }
+    catch (e) { logError("loreEditEmbed", e); }
     const current = { worldId: S.currentWorld?.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
     if (!isEnhancementContextCurrent(context, current)) { showToast("会话已切换，本次知识库保存已取消", "warn"); return; }
     S.activeLoreKB = candidateKB;
@@ -973,7 +973,7 @@ export async function confirmLoreRevision() {
     const context = { worldId: S.currentWorld?.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
     const candidateKB = deepClone(S.activeLoreKB);
     candidateKB.snippets = applyLoreRevisionDiff(candidateKB.snippets, S._loreRevisionBuffer);
-    try { await ensureLoreEmbeddings(candidateKB); } catch (e) {}
+    try { await ensureLoreEmbeddings(candidateKB); } catch (e) { logError("loreRevisionEmbed", e); }
     const current = { worldId: S.currentWorld?.id, epoch: S.currentSession.epoch, turnId: S.conversationHistory.length };
     if (!isEnhancementContextCurrent(context, current)) { showToast("会话已切换，本次修订已取消", "warn"); return; }
     S.activeLoreKB = candidateKB;
@@ -1045,7 +1045,7 @@ export async function extractAndMergeSourceLore(worldId) {
         const merged = mergeLoreSnippets(currentKB.snippets, extracted.snippets);
         const newKB = { ip: world.name, snippets: merged };
         try { await ensureLoreEmbeddings(newKB); }
-        catch (e) { console.warn("补抽后向量重算失败，降级为关键词检索：", e && e.message); }
+        catch (e) { logError("loreResampleEmbed", e); }
         world.lore_kb = newKB;
         if (S.currentWorld && S.currentWorld.id === world.id) S.activeLoreKB = newKB;
         invalidateLoreHardCache(); // ★ Phase 5 L2：知识库改动仅失效「知识库硬约束」缓存段（角色卡段保留命中）

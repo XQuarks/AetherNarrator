@@ -89,7 +89,7 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - attribute_labels: 属性中文映射，键为 courage/perception/patience/luck/will，值为中文名
    - time_mode: "periods"（按时段推进）| "continuous"（自由时间描述，period填任意字符串）| "hidden"（不展示时间）
    - time_periods: 时间段映射，如 {"morning":"早晨", ...}（periods 模式必填，可自定义任意数量和名称）
-   - time_config: 时间系统统一配置对象（可选，强烈建议填写以增强沉浸感）：{ era_label: "纪元/年份，如「建安十三年」「星际历70498」「1920年代」「明朝末年」，无则留空", calendar_mode: "day"(第N天) | "gregorian"(月日+星期) | "lunar"(阴历月日) | "custom_calendar"(新历法) | "none"(不显示日期), clock_mode: "period"(时段标签) | "clock"(具体时钟) | "none", season: "春/夏/秋/冬/自定义，可空", weather: "当前天气，可空", show: true, deadlines: [] }。根据 IP 自动判定：历史/科幻填 era_label，国风/武侠填 lunar，校园/都市填 gregorian，星际/架空填 custom_calendar 或 none。
+   - time_config: 时间系统统一配置对象（可选，强烈建议填写以增强沉浸感）：{ era_label: "纪元/年份，如「建安十三年」「星际历70498」「1920年代」「明朝末年」，无则留空", calendar_mode: "day"(第N天) | "gregorian"(月日+星期) | "lunar"(阴历月日) | "custom_calendar"(新历法) | "none"(不显示日期), clock_mode: "period"(时段标签) | "clock"(具体时钟) | "none", weather: "当前天气，可空", show: true, deadlines: [] }。根据 IP 自动判定：历史/科幻填 era_label，国风/武侠填 lunar，校园/都市填 gregorian，星际/架空填 custom_calendar 或 none。
      【时间填写规则·重要】① 年份/年代一律写进 era_label（如「1920年代」），**不要**在 calendar_start 里写 year 字段——calendar_start 只填 month/date（可只填其一或都留空）。② 若填具体 month/date，必须真实合法：公历注意闰年（平年没有 2月29日）、各月天数；农历月份须在历法表内、日期不超当月天数（闰月须确认该农历年确实存在）。③ deadlines 同样只填 {month, date, period}，不填 year。
 
 2. initial_state: 玩家初始状态对象。**主角的初始能力/身份/技能必须如实反映主角设定中的描述**，不要将其降级为初学者。包含：

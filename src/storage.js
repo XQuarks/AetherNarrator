@@ -4,7 +4,7 @@
 import { S } from "./store.js";
 import { STORAGE_KEYS, ensureWorldCanon, applyConsistencyPack, ensureWorldCharacters } from "./store.js";
 import { deepClone, defaultWorldSchema } from "./utils.js";
-import { closeModal, showToast } from "./render.js";
+import { closeModal, showToast, notifyError } from "./render.js";
 import { parseStoredArray, parseStoredObject } from "./migrations.js";
 import { idbGet, idbSet, idbDel, idbSetMulti } from "./idb.js";
 import { PROVIDERS, detectProvider } from "./providers.js";
@@ -126,11 +126,13 @@ export async function loadSaves() {
 }
 
 export async function saveWorlds() {
-    await idbSet(STORAGE_KEYS.worlds, JSON.stringify(S.worlds));
+    const ok = await idbSet(STORAGE_KEYS.worlds, JSON.stringify(S.worlds));
+    if (!ok) notifyError("saveWorlds", new Error("IndexedDB 写入失败"), "世界保存失败，数据可能未持久化");
 }
 
 export async function saveSaves() {
-    await idbSet(STORAGE_KEYS.saves, JSON.stringify(S.saves));
+    const ok = await idbSet(STORAGE_KEYS.saves, JSON.stringify(S.saves));
+    if (!ok) notifyError("saveSaves", new Error("IndexedDB 写入失败"), "存档列表保存失败，数据可能未持久化");
 }
 
 export async function saveState(serialized) {
@@ -140,12 +142,13 @@ export async function saveState(serialized) {
     const chatStr = serialized ? serialized.chatHistory : JSON.stringify(S.chatHistory);
     const summaryStr = JSON.stringify(S.chatSummary);
     // ★ P0 性能：4 个键合并进同一个 IndexedDB 事务，避免 4 次独立事务写放大（每回合重复写盘的主因）
-    await idbSetMulti([
+    const ok = await idbSetMulti([
         [STORAGE_KEYS.state, stateStr],
         [STORAGE_KEYS.history, historyStr],
         [STORAGE_KEYS.chatHistory, chatStr],
         [STORAGE_KEYS.chatSummary, summaryStr]
     ]);
+    if (!ok) notifyError("saveState", new Error("IndexedDB 写入失败"), "游戏进度保存失败，当前进度可能未持久化");
 }
 
 export async function saveConfig() {
@@ -160,7 +163,8 @@ export async function saveConfig() {
         embedConcurrency: (() => { const v = parseInt(document.getElementById("embedConcurrency").value, 10); return Number.isFinite(v) && v >= 1 ? v : 100; })(),
         provider: detectProvider(baseUrl)
     };
-    await idbSet(STORAGE_KEYS.config, JSON.stringify(cfg));
+    const ok = await idbSet(STORAGE_KEYS.config, JSON.stringify(cfg));
+    if (!ok) notifyError("saveConfig", new Error("IndexedDB 写入失败"), "API 配置保存失败，配置可能未持久化");
 }
 
 // 模型预设下拉切换时：自动填入对应默认 Base URL 与模型名称

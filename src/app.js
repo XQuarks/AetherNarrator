@@ -4,17 +4,19 @@
 import { S } from "./store.js";
 import { STORAGE_KEYS } from "./store.js";
 import { warmupEmbeddingWorker } from "./rag.js";
-import { deepClone } from "./utils.js";
+import { deepClone, logError } from "./utils.js";
+import { installGlobalErrorGuard } from "./error-guard.js";
 import { applyFontSize, applyTheme, changeFontSize, toggleTheme } from "./theme.js";
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
-import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev } from "./render.js";
+import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev, showToast } from "./render.js";
 import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline } from "./game.js";
 import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./save.js";
 import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
 import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
 import { openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview } from "./lore-editors.js";
+import { clearLoreAnnCache } from "./ann-index.js";
 
 // 小工具（docs/34 #7 消重）：fetch 数据文件，失败时告警并返回兜底值，各文件独立降级互不影响
 async function fetchDataSafe(url, fallback, asText = false) {
@@ -33,6 +35,7 @@ async function idbGetJson(key, fallback) {
 }
 
 async function init() {
+    installGlobalErrorGuard();
     applyTheme();
     applyFontSize();
     await loadConfig();
@@ -136,6 +139,8 @@ const ACTIONS = {
     showStatusPanel: () => showStatusPanel(),
     exportStory: () => exportStory(),
     exportDebugLog: () => exportDebugLog(),
+    // 设置界面：清除向量索引缓存（两次点击确认，禁用原生 confirm）
+    clearAnnCache: (el) => handleClearAnnCache(el),
     goHome: () => goHome(),
     submitInput: () => submitInput(),
     hideStatusPanel: () => hideStatusPanel(),
@@ -301,6 +306,40 @@ if (playerInputEl) {
         playerInputEl.style.height = "auto";
         playerInputEl.style.height = Math.min(playerInputEl.scrollHeight, 120) + "px";
     });
+}
+
+// 设置界面「清除索引缓存」：两次点击确认（禁用原生 confirm；第一次点变「确认清除？再次点击」，4 秒后自动复位）
+let _clearAnnPending = false;
+let _clearAnnTimer = null;
+async function handleClearAnnCache(el) {
+    if (!el) return;
+    if (!_clearAnnPending) {
+        _clearAnnPending = true;
+        const original = el.textContent;
+        el.textContent = "确认清除？再次点击";
+        el.classList.add("danger");
+        _clearAnnTimer = setTimeout(() => {
+            _clearAnnPending = false;
+            el.textContent = original;
+            el.classList.remove("danger");
+        }, 4000);
+        return;
+    }
+    clearTimeout(_clearAnnTimer);
+    _clearAnnPending = false;
+    const original = el.textContent;
+    el.textContent = "清除中…";
+    el.disabled = true;
+    el.classList.remove("danger");
+    try {
+        const n = await clearLoreAnnCache();
+        showToast(`已清除 ${n} 个索引缓存，下次进入世界将重新构建`, "success");
+    } catch (e) {
+        showToast("清除索引缓存失败（不影响存档与剧情）", "error");
+    } finally {
+        el.textContent = "清除索引缓存";
+        el.disabled = false;
+    }
 }
 
 init();

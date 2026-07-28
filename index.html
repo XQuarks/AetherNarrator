@@ -103,6 +103,11 @@
         <div class="settings-card" style="text-align:center;">
             <button class="btn primary" data-action="exportDebugLog" style="padding:12px 20px;font-size:13px;">导出调试日志</button>
         </div>
+        <div class="settings-card">
+            <label class="settings-label">清除向量索引缓存</label>
+            <div class="settings-hint">知识库向量索引会缓存在浏览器本地（IndexedDB）以加快检索。编辑知识库后旧索引会自动失效，但会残留占用空间。点此可手动清空所有索引缓存，下次进入世界会重新构建（不影响存档与剧情）。</div>
+            <button class="btn secondary" data-action="clearAnnCache" style="padding:12px 20px;font-size:13px;">清除索引缓存</button>
+        </div>
     </div>
 </div>
 

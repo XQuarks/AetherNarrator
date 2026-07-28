@@ -3,7 +3,7 @@
 // ============================================================
 import { S, calendarLabel, MEMORY_TYPE_LABELS, getEnabledVariables } from "./store.js";
 
-import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema, computeWorldCompletion } from "./utils.js";
+import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema, computeWorldCompletion, logError } from "./utils.js";
 import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, formatTimeLabel, formatDeadlineLabel, stepOf, updateFontSizeButtons, getAllTimelineViews, formatDateOnly, tempLabelText } from "./theme.js";
 // 注：页面按钮的 chooseOption / startGame / loadSave 等动作均通过 data-action 属性由 app.js 事件接线分发，
 // 本模块不直接引用这些函数，不反向依赖 game.js / save.js，避免循环引用（docs/34 #1）。
@@ -1383,6 +1383,14 @@ export function showToast(msg, type = "", duration = 2000) {
         el.classList.remove("show");
         S.toastTimer = null;
     }, duration);
+}
+
+// ★ #10 Phase 1：Tier2 提示档——关键路径失败时既留痕（logError）又弹 toast。
+// 区别于 Tier1 静默降级（logError 不弹窗），用于"用户操作/关键持久化失败"等用户应当知晓的场景。
+export function notifyError(scope, err, msg) {
+    logError(scope, err);
+    const detail = (err && err.message) ? err.message : String(err);
+    showToast(msg || ("操作失败：" + detail), "error");
 }
 
 export function showLoading(msg) {
