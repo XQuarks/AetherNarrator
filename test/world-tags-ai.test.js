@@ -4,7 +4,7 @@
 //  2) sanitizeWorldConfig 放行并清洗 tags（短串/去重/限量/非字符串过滤）
 //  3) mockGenerateWorld 返回自由标签（含非 18 词表的词，如「赛博朋克」）
 //  4) pickWorldTags 优先用 AI 标签、正则兜底；analyzeWorldTags 不再写来源标签
-//  5) 三个预设的 tags 不再含与 type 徽章重复的「原创 / 已有IP」
+//  5) 三个预设的 tags 不再含与 type 徽章（原创/同人/改编IP/共享宇宙/公共领域）重复的来源标签
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildWorldGenerationPrompt } from "../src/prompt.js";
@@ -20,7 +20,7 @@ test("提示词：buildWorldGenerationPrompt 含顶层 tags 字段且要求自�
     assert.ok(p.includes("tags"), "prompt 应包含 tags 字段要求");
     assert.ok(p.includes("自由判断") || p.includes("不受任何固定词表限制"), "应明说不受固定词表限制");
     assert.ok(p.includes("赛博朋克"), "示例标签应出现「赛博朋克」");
-    assert.ok(p.includes("原创") && p.includes("已有 IP"), "应提示不要与 type 徽章（原创/已有IP）重复");
+    assert.ok(p.includes("原创") && p.includes("共享宇宙"), "应提示不要与 type 徽章（原创/同人/改编IP/共享宇宙/公共领域）重复");
 });
 
 test("sanitizeWorldConfig：放行并清洗 tags", () => {

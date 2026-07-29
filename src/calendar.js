@@ -122,44 +122,47 @@ function cnDay(d) {
 
 // ---------- 通用月历表推进（保证月末夹紧 + 天数进位/借位）----------
 
-function addByTable(cd, change, months) {
+// 通用「加时间」：months 仅用于取 M（月总数）；月长由 lenFn(year, mIdx0) 逐年计算，
+// 避免跨年（尤其闰年 2 月）因静态月表长度不一致导致的差一天 bug（UI-3 流速同步会传大天数增量）。
+function addByTable(cd, change, months, lenFn) {
     const M = months.length;
     if (M === 0) return { ...cd };
     const years = change.years || 0;
     const monthsAdd = change.months || 0;
     const daysAdd = change.days || 0;
+    const len = (yy, mi) => (typeof lenFn === "function") ? lenFn(yy, mi) : ((months[mi] && months[mi].days) || 30);
     let y = (cd.year || 0) + years;
     let mIdx = (cd.month || 1) - 1 + monthsAdd;
     y += Math.floor(mIdx / M);
     mIdx = ((mIdx % M) + M) % M;
     // 月末夹紧：先把起始日夹紧到目标月长度，再加天数增量（如 1月31日 +1月 = 2月28日，而非 3月3日）
-    let d = Math.min(cd.date || 1, months[mIdx].days) - 1; // 0-based 便于借位
+    let d = Math.min(cd.date || 1, len(y, mIdx)) - 1; // 0-based 便于借位
     d += daysAdd;
-    while (d >= months[mIdx].days) { d -= months[mIdx].days; mIdx++; if (mIdx >= M) { mIdx -= M; y++; } }
-    while (d < 0) { mIdx--; if (mIdx < 0) { mIdx += M; y--; } d += months[mIdx].days; }
+    while (d >= len(y, mIdx)) { d -= len(y, mIdx); mIdx++; if (mIdx >= M) { mIdx -= M; y++; } }
+    while (d < 0) { mIdx--; if (mIdx < 0) { mIdx += M; y--; } d += len(y, mIdx); }
     return { year: y, month: mIdx + 1, date: d + 1 };
 }
 
 // ---------- 各模式「加时间」----------
 
-// gregorian：按真实月长（含闰年），月末夹紧。
+// gregorian：按真实月长（含闰年），月末夹紧。lenFn 按实际年份取月长，跨闰年 2 月正确。
 export function addGregorian(cd, change = {}) {
     const y0 = cd.year || 0;
     const yTarget = y0 + (change.years || 0);
     const months = [];
     for (let m = 1; m <= 12; m++) months.push({ name: String(m), days: daysInMonth(yTarget, m) });
-    return addByTable(cd, change, months);
+    return addByTable(cd, change, months, (yy, mi) => daysInMonth(yy, mi + 1));
 }
 
 export function addLunar(cd, change = {}, lunar = DEFAULT_LUNAR) {
-    return addByTable(cd, change, lunar.months);
+    return addByTable(cd, change, lunar.months, (yy, mi) => lunar.months[mi].days);
 }
 
 export function addCustom(cd, change = {}, custom = null) {
     const months = (custom && Array.isArray(custom.months) && custom.months.length)
         ? custom.months
         : DEFAULT_LUNAR.months;
-    return addByTable(cd, change, months);
+    return addByTable(cd, change, months, (yy, mi) => months[mi].days);
 }
 
 // 按模式分派
@@ -363,5 +366,225 @@ export function insertLeapMonth(months, afterIdx, name = "闰月", days = 30) {
     const idx = (afterIdx == null) ? arr.length - 1 : Math.min(arr.length, Math.max(-1, afterIdx));
     arr.splice(idx + 1, 0, { name: String(name).slice(0, 10), days: Math.min(400, Math.max(1, days | 0)) });
     return arr;
+}
+
+// ---------- 多时间线（multiverse）纯函数辅助（docs/43 / UI-2 方案 C）----------
+// 与引擎解耦：仅构造/夹紧 time_config.timelines 字典与 active_timeline，不改日期推进逻辑。
+// 可在 Node 下单测（无 DOM、无 S 依赖）。
+
+const TL_CAL_MODES = ["day", "gregorian", "lunar", "custom_calendar", "none"];
+
+function tlClone(o) {
+    if (o == null) return null;
+    try { return typeof structuredClone !== "undefined" ? structuredClone(o) : JSON.parse(JSON.stringify(o)); }
+    catch (_) { return JSON.parse(JSON.stringify(o)); }
+}
+
+// 夹紧单条时间线字段（名称≤30 / 纪元≤40 / 天气≤20 / 历法合法 / 日期边界 / current_date 保底）
+export function clampTimelineLine(line) {
+    const l = (line && typeof line === "object") ? line : {};
+    const mode = TL_CAL_MODES.includes(l.calendar_mode) ? l.calendar_mode : "day";
+    let current_date = (l.current_date && typeof l.current_date === "object") ? tlClone(l.current_date) : null;
+    if (!current_date) {
+        current_date = (mode === "day" || mode === "none") ? { step: 1 } : { year: 1, month: 1, date: 1 };
+    }
+    const out = {
+        name: typeof l.name === "string" ? l.name.slice(0, 30) : "",
+        calendar_mode: mode,
+        calendar_start: (l.calendar_start && typeof l.calendar_start === "object") ? tlClone(l.calendar_start) : null,
+        current_date,
+        era_label: typeof l.era_label === "string" ? l.era_label.slice(0, 40) : "",
+        weather: typeof l.weather === "string" ? l.weather.slice(0, 20) : "",
+        custom_calendar: null
+    };
+    // 自定义历法月历表夹紧（与 normalizeTimeConfig 一致）
+    if (l.custom_calendar && Array.isArray(l.custom_calendar.months) && l.custom_calendar.months.length) {
+        out.custom_calendar = {
+            label: typeof l.custom_calendar.label === "string" ? l.custom_calendar.label.slice(0, 20) : "",
+            months: clampCustomCalendarMonths(l.custom_calendar.months)
+        };
+    }
+    // UI-3：流速比同步规则（格式校验；ref 存在性在 normalizeTimeConfig/clampSyncRules 统一过滤）
+    out.sync_rules = Array.isArray(l.sync_rules)
+        ? l.sync_rules
+            .filter(r => r && typeof r === "object" && typeof r.ref === "string" && r.ref.trim() && Number.isFinite(r.ratio) && r.ratio > 0)
+            .map(r => ({ ref: r.ref.trim().slice(0, 30), ratio: r.ratio }))
+        : [];
+    // UI-4：线级默认穿越策略（缺省 null，回落世界级 default_timetravel_strategy）
+    out.timetravel_strategy = (l.timetravel_strategy === "keep" || l.timetravel_strategy === "reset" || l.timetravel_strategy === "branch") ? l.timetravel_strategy : null;
+    return out;
+}
+
+// 单线模式 time_config → 种子出默认 timelines 字典（继承现有单线配置，避免作者白填）
+export function seedDefaultTimelines(tc) {
+    const t = (tc && typeof tc === "object") ? tc : {};
+    const mode = TL_CAL_MODES.includes(t.calendar_mode) ? t.calendar_mode : "day";
+    const cs = (t.calendar_start && typeof t.calendar_start === "object") ? tlClone(t.calendar_start) : null;
+    let current_date;
+    if (mode === "day" || mode === "none") {
+        current_date = { step: 1 };
+    } else {
+        current_date = {
+            year: (cs && Number.isFinite(cs.year)) ? cs.year : 1,
+            month: (cs && Number.isFinite(cs.month)) ? cs.month : 1,
+            date: (cs && Number.isFinite(cs.date)) ? cs.date : 1
+        };
+    }
+    let custom_calendar = null;
+    if (mode === "custom_calendar" && t.custom_calendar && Array.isArray(t.custom_calendar.months) && t.custom_calendar.months.length) {
+        custom_calendar = {
+            label: typeof t.custom_calendar.label === "string" ? t.custom_calendar.label.slice(0, 20) : "",
+            months: clampCustomCalendarMonths(t.custom_calendar.months)
+        };
+    }
+    const lineName = (t.era_label && String(t.era_label).trim()) || "主线";
+    return {
+        main: clampTimelineLine({
+            name: lineName,
+            calendar_mode: mode,
+            calendar_start: cs,
+            current_date,
+            era_label: t.era_label || "",
+            weather: t.weather || "",
+            custom_calendar
+        })
+    };
+}
+
+// 新增一条时间线（保证 id 唯一）；返回新 id
+export function addTimeline(tc, opts = {}) {
+    if (!tc || typeof tc !== "object") return null;
+    if (!tc.timelines || typeof tc.timelines !== "object") tc.timelines = {};
+    let id = (opts && opts.id) || `line_${Object.keys(tc.timelines).length + 1}`;
+    let n = 1, base = id;
+    while (tc.timelines[id]) { id = `${base}_${n++}`; }
+    const o = (opts && opts.line) ? opts.line : {
+        name: (opts && opts.name) || "新时间线",
+        calendar_mode: (opts && opts.calendar_mode) || "day",
+        calendar_start: null,
+        current_date: { year: 1, month: 1, date: 1 },
+        era_label: (opts && opts.era_label) || "",
+        weather: "",
+        custom_calendar: null
+    };
+    tc.timelines[id] = clampTimelineLine(o);
+    if (!tc.active_timeline || !tc.timelines[tc.active_timeline]) tc.active_timeline = id;
+    return id;
+}
+
+// 删除一条时间线（至少保留 1 条；修正 active）
+export function deleteTimeline(tc, id) {
+    if (!tc || !tc.timelines || !tc.timelines[id]) return false;
+    if (Object.keys(tc.timelines).length <= 1) return false;
+    delete tc.timelines[id];
+    if (tc.active_timeline === id) tc.active_timeline = Object.keys(tc.timelines)[0];
+    return true;
+}
+
+// 重命名时间线 key（迁移数据 + 修正 active；拒绝空/重名/与原名相同）
+export function renameTimelineKey(tc, oldId, newId) {
+    if (!tc || !tc.timelines || !tc.timelines[oldId]) return false;
+    newId = (newId || "").trim();
+    if (!newId || newId === oldId) return false;
+    if (tc.timelines[newId]) return false;
+    tc.timelines[newId] = tc.timelines[oldId];
+    delete tc.timelines[oldId];
+    if (tc.active_timeline === oldId) tc.active_timeline = newId;
+    return true;
+}
+
+// 设定当前活动线（不存在则失败）
+export function setActiveTimeline(tc, id) {
+    if (!tc || !tc.timelines || !tc.timelines[id]) return false;
+    tc.active_timeline = id;
+    return true;
+}
+
+// 双界穿梭模板（一键载入 earth/xianxia 两线，与 new-worlds.js 双界样例一致）
+export const MULTIVERSE_TEMPLATES = {
+    "双界穿梭": {
+        active_timeline: "earth",
+        timelines: {
+            earth: clampTimelineLine({ name: "现实", calendar_mode: "gregorian", calendar_start: { year: 2003, month: 1, date: 1 }, current_date: { year: 2003, month: 3, date: 15 }, era_label: "公元2003年", weather: "", custom_calendar: null }),
+            xianxia: clampTimelineLine({ name: "异界", calendar_mode: "lunar", calendar_start: null, current_date: { year: 3024, month: 1, date: 1 }, era_label: "大周天历3024年", weather: "", custom_calendar: null })
+        }
+    }
+};
+
+// 套用多时间线模板（替换 tc.timelines 与 active_timeline）
+export function applyMultiverseTemplate(tc, key) {
+    const tpl = MULTIVERSE_TEMPLATES[key];
+    if (!tc || !tpl) return false;
+    tc.timelines = tlClone(tpl.timelines);
+    tc.active_timeline = tpl.active_timeline;
+    return true;
+}
+
+// ---------- 时间流速比同步（UI-3 / docs/44）----------
+
+// 单调整数「日历日序号」：给定 current_date 与模式，返回从历元起的第几个日历日。
+// 用于计算一条线推进了多少日历日（跨 gregorian/lunar/custom 一致；闰年近似无所谓，仅用于按因子同步）。
+export function calendarDayIndex(cd, mode, custom = null) {
+    const y = (cd && Number.isFinite(cd.year)) ? cd.year : 0;
+    const m = (cd && Number.isFinite(cd.month)) ? cd.month : 1;
+    const d = (cd && Number.isFinite(cd.date)) ? cd.date : 1;
+    if (mode === "gregorian") {
+        let days = 0;
+        for (let yy = 0; yy < y; yy++) days += isLeapYear(yy) ? 366 : 365;
+        for (let mm = 1; mm < m; mm++) days += daysInMonth(y, mm);
+        return days + (d - 1);
+    }
+    const tbl = (custom && Array.isArray(custom.months) && custom.months.length) ? custom.months : DEFAULT_LUNAR.months;
+    let days = 0;
+    for (let yy = 0; yy < y; yy++) for (const mm of tbl) days += mm.days;
+    for (let mm = 0; mm < m - 1; mm++) days += (tbl[mm] && tbl[mm].days) || 30;
+    return days + (d - 1);
+}
+
+// 把某条时间线推进 totalDays 个日历日（按该线自身 mode 分派；day/none 退化为推进 step）。
+// 直接修改 line.current_date（调用方负责传入需更新的对象）。
+function advanceLineByDays(line, totalDays) {
+    const mode = line && line.calendar_mode ? line.calendar_mode : "day";
+    if (mode === "day" || mode === "none") {
+        const cd = (line.current_date && typeof line.current_date === "object") ? line.current_date : { step: 1 };
+        cd.step = (cd.step || 0) + Math.round(totalDays);
+        line.current_date = cd;
+        return;
+    }
+    const cur = (line.current_date && typeof line.current_date === "object") ? line.current_date : { year: 1, month: 1, date: 1 };
+    const adv = addCalendar(cur, { days: Math.round(totalDays) }, mode, line.custom_calendar);
+    line.current_date = { ...cur, year: adv.year, month: adv.month, date: adv.date };
+    if (line.current_date.step == null) line.current_date.step = 1;
+}
+
+// 跨线流速同步：当 sourceId 线推进 deltaDays 个日历日后，按各 sync_rule 推进其 ref 线。
+// 仅作用于 timelines 字典里的其它线（source 自身已在外层推进）；ref 不存在/等于 source/ratio<=0 跳过。
+export function applySyncRules(timelines, sourceId, deltaDays) {
+    if (!timelines || typeof timelines !== "object") return timelines;
+    if (!Number.isFinite(deltaDays) || deltaDays === 0) return timelines;
+    const src = timelines[sourceId];
+    if (!src || !Array.isArray(src.sync_rules) || !src.sync_rules.length) return timelines;
+    for (const rule of src.sync_rules) {
+        if (!rule || !rule.ref || rule.ref === sourceId) continue;
+        const ref = timelines[rule.ref];
+        if (!ref) continue;
+        const ratio = Number.isFinite(rule.ratio) ? rule.ratio : 0;
+        if (ratio <= 0) continue;
+        advanceLineByDays(ref, deltaDays * ratio);
+    }
+    return timelines;
+}
+
+// 过滤 timelines 内各线的 sync_rules：丢弃 ref 不存在 / 指向自身 / ratio 非正 的规则（store 归一化时调用）。
+export function clampSyncRules(tc) {
+    if (!tc || !tc.timelines || typeof tc.timelines !== "object") return tc;
+    const ids = new Set(Object.keys(tc.timelines));
+    for (const [key, line] of Object.entries(tc.timelines)) {
+        if (!line || !Array.isArray(line.sync_rules)) continue;
+        line.sync_rules = line.sync_rules
+            .filter(r => r && ids.has(r.ref) && r.ref !== key && Number.isFinite(r.ratio) && r.ratio > 0)
+            .map(r => ({ ref: r.ref, ratio: r.ratio }));
+    }
+    return tc;
 }
 

@@ -3,7 +3,7 @@
 // 说明：聚合「规则 DSL / 人物卡 / 玩家变量 / 初始物品」四个独立编辑器弹窗，
 // 均为『草稿缓冲 → 保存写回 world.xxx』同一模式，互不依赖，也不依赖 lore-ui。
 // ============================================================
-import { S, defaultCharacter, ensureWorldCharacters } from "./store.js";
+import { S, defaultCharacter, ensureWorldCharacters, normalizeRetriggerPolicy } from "./store.js";
 import { deepClone, escapeHtml } from "./utils.js";
 import { showModal, closeModal, showToast } from "./render.js";
 import { saveWorlds } from "./storage.js";
@@ -32,16 +32,23 @@ function syncRuleEditFromDOM() {
         if (name) r.name = name.value;
         const en = g("ru_enabled_");
         if (en) r.enabled = en.checked;
+        // 读 dropdown-select 当前值：取 .selected item 的 data-value；无 selected 时回退到 S._ruleEdit
+        const ddValue = (id) => {
+            const el = g(id);
+            if (!el) return undefined;
+            const sel = el.querySelector(".dropdown-item.selected");
+            return sel ? sel.dataset.value : undefined;
+        };
         const wt = g("ru_when_");
         if (wt) {
-            const type = wt.value;
+            const type = ddValue("ru_when_") || r.when?.type || "always";
             r.when = { type };
             if (type === "concept") {
                 const t = g("ru_when_term_"); if (t) r.when.term = t.value.trim();
                 const tg = g("ru_when_tags_"); if (tg) r.when.unlessTags = tg.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean);
             } else if (type === "state") {
                 const f = g("ru_when_field_"); if (f) r.when.field = f.value.trim();
-                const op = g("ru_when_op_"); if (op) r.when.op = op.value;
+                r.when.op = ddValue("ru_when_op_") || r.when.op || "==";
                 const v = g("ru_when_val_"); if (v) r.when.value = v.value.trim();
             } else if (type === "tag") {
                 const tg = g("ru_when_tagtag_"); if (tg) r.when.tag = tg.value.trim();
@@ -49,19 +56,19 @@ function syncRuleEditFromDOM() {
         }
         const tt = g("ru_then_");
         if (tt) {
-            const type = tt.value;
+            const type = ddValue("ru_then_") || r.then?.type || "ban";
             if (type === "ban") {
-                const c = g("ru_ban_concept_"), a = g("ru_ban_aliases_"), s = g("ru_ban_sev_"), tg = g("ru_ban_tags_");
+                const c = g("ru_ban_concept_"), a = g("ru_ban_aliases_"), tg = g("ru_ban_tags_");
                 r.then = {
                     type: "ban",
                     concept: c ? c.value.trim() : "",
                     aliases: a ? a.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean) : [],
-                    severity: s ? s.value : "soft",
+                    severity: ddValue("ru_ban_sev_") || r.then?.severity || "soft",
                     unlessTags: tg ? tg.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean) : []
                 };
             } else if (type === "tag") {
-                const op = g("ru_tag_op_"), tg = g("ru_tag_tag_");
-                r.then = { type: "tag", op: op ? op.value : "add", tag: tg ? tg.value.trim() : "" };
+                const tg = g("ru_tag_tag_");
+                r.then = { type: "tag", op: ddValue("ru_tag_op_") || r.then?.op || "add", tag: tg ? tg.value.trim() : "" };
             } else if (type === "ending") {
                 const rs = g("ru_end_reason_");
                 r.then = { type: "ending", reason: rs ? rs.value.trim() : "" };
@@ -110,11 +117,30 @@ function renderRuleEditorBody() {
     }
     const whenLabels = { always: "始终", concept: "文本出现词", state: "状态数值", tag: "标签活跃" };
     const thenLabels = { ban: "禁止概念", tag: "设置标签", ending: "触发结局" };
+    const opLabels = { "<": "<", "<=": "≤", "==": "=", ">=": "≥", ">": ">", "!=": "≠" };
+    const sevLabels = { soft: "软(提示)", hard: "硬(拦截)" };
+    const tagopLabels = { add: "添加", remove: "移除" };
     list.forEach((r, i) => {
         const when = r.when || {};
         const then = r.then || {};
         const whenType = when.type || "always";
         const thenType = then.type || "ban";
+        // 类 select 风格的自定义下拉（替换原生 <select>，避免浏览器默认浮层无法自定义）
+        // labels 是 { value: 显示文本 }；kind 决定点击后切哪个 sub 区域；sub 用 data-kind + data-type 标记
+        function ddSelect(idSuffix, value, labels, kind) {
+            const fullId = idSuffix + "_" + i;
+            const items = Object.keys(labels).map(v => {
+                const sel = v === value ? " selected" : "";
+                return `<button type="button" class="dropdown-item${sel}" data-action="selectRule" data-value="${v}" data-kind="${kind}" data-idx="${i}">${escapeHtml(labels[v])}</button>`;
+            }).join("");
+            return `<div class="dropdown dropdown-select" id="${fullId}" data-align="right">
+                <button type="button" class="dropdown-trigger" data-action="toggleDropdown">
+                    <span class="dropdown-label">${escapeHtml(labels[value] || value)}</span>
+                    <span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="dropdown-menu">${items}</div>
+            </div>`;
+        }
         html += `<div class="rule-card">
             <div class="rule-card-head">
                 <input id="ru_name_${i}" class="rule-name" placeholder="规则名称（如：破产结局）" value="${escapeHtml(r.name || "")}">
@@ -124,36 +150,32 @@ function renderRuleEditorBody() {
             <div class="rule-summary">${escapeHtml(ruleSummary(r))}</div>
             <div class="rule-row">
                 <span class="rule-label">如果</span>
-                <select id="ru_when_${i}" data-action="ruleTypeChange" data-kind="when" data-idx="${i}">
-                    ${["always", "concept", "state", "tag"].map(t => `<option value="${t}" ${whenType === t ? "selected" : ""}>${whenLabels[t]}</option>`).join("")}
-                </select>
-                <span class="rule-sub" style="display:${whenType === "concept" ? "inline" : "none"}">
+                ${ddSelect("ru_when", whenType, whenLabels, "when")}
+                <span class="rule-sub" data-kind="when" data-type="concept" style="display:${whenType === "concept" ? "inline-flex" : "none"}">
                     词<input id="ru_when_term_${i}" value="${escapeHtml(when.term || "")}" size="10">解锁标签<input id="ru_when_tags_${i}" value="${escapeHtml((when.unlessTags || []).join(" "))}" size="12" placeholder="空格分隔">
                 </span>
-                <span class="rule-sub" style="display:${whenType === "state" ? "inline" : "none"}">
+                <span class="rule-sub" data-kind="when" data-type="state" style="display:${whenType === "state" ? "inline-flex" : "none"}">
                     字段<input id="ru_when_field_${i}" value="${escapeHtml(when.field || "")}" size="8" placeholder="如 gold">
-                    <select id="ru_when_op_${i}">${["<", "<=", "==", ">=", ">", "!="].map(o => `<option value="${o}" ${when.op === o ? "selected" : ""}>${o}</option>`).join("")}</select>
+                    ${ddSelect("ru_when_op", when.op || "==", opLabels, "op")}
                     值<input id="ru_when_val_${i}" value="${escapeHtml(String(when.value ?? ""))}" size="6">
                 </span>
-                <span class="rule-sub" style="display:${whenType === "tag" ? "inline" : "none"}">
+                <span class="rule-sub" data-kind="when" data-type="tag" style="display:${whenType === "tag" ? "inline-flex" : "none"}">
                     标签<input id="ru_when_tagtag_${i}" value="${escapeHtml(when.tag || "")}" size="12">
                 </span>
             </div>
             <div class="rule-row">
                 <span class="rule-label">就</span>
-                <select id="ru_then_${i}" data-action="ruleTypeChange" data-kind="then" data-idx="${i}">
-                    ${["ban", "tag", "ending"].map(t => `<option value="${t}" ${thenType === t ? "selected" : ""}>${thenLabels[t]}</option>`).join("")}
-                </select>
-                <span class="rule-sub" style="display:${thenType === "ban" ? "inline" : "none"}">
+                ${ddSelect("ru_then", thenType, thenLabels, "then")}
+                <span class="rule-sub" data-kind="then" data-type="ban" style="display:${thenType === "ban" ? "inline-flex" : "none"}">
                     概念<input id="ru_ban_concept_${i}" value="${escapeHtml(then.concept || "")}" size="10">别名<input id="ru_ban_aliases_${i}" value="${escapeHtml((then.aliases || []).join(" "))}" size="12" placeholder="空格分隔">
-                    强度<select id="ru_ban_sev_${i}"><option value="soft" ${then.severity !== "hard" ? "selected" : ""}>软(提示)</option><option value="hard" ${then.severity === "hard" ? "selected" : ""}>硬(拦截)</option></select>
+                    强度${ddSelect("ru_ban_sev", then.severity || "soft", sevLabels, "sev")}
                     解锁标签<input id="ru_ban_tags_${i}" value="${escapeHtml((then.unlessTags || []).join(" "))}" size="12" placeholder="空格分隔">
                 </span>
-                <span class="rule-sub" style="display:${thenType === "tag" ? "inline" : "none"}">
-                    <select id="ru_tag_op_${i}"><option value="add" ${(then.op || "add") !== "remove" ? "selected" : ""}>添加</option><option value="remove" ${then.op === "remove" ? "selected" : ""}>移除</option></select>
+                <span class="rule-sub" data-kind="then" data-type="tag" style="display:${thenType === "tag" ? "inline-flex" : "none"}">
+                    ${ddSelect("ru_tag_op", then.op || "add", tagopLabels, "tagop")}
                     标签<input id="ru_tag_tag_${i}" value="${escapeHtml(then.tag || "")}" size="12">
                 </span>
-                <span class="rule-sub" style="display:${thenType === "ending" ? "inline" : "none"}">
+                <span class="rule-sub" data-kind="then" data-type="ending" style="display:${thenType === "ending" ? "inline-flex" : "none"}">
                     结局说明<input id="ru_end_reason_${i}" value="${escapeHtml(then.reason || "")}" size="20" placeholder="如：你破产了，故事结束">
                 </span>
             </div>
@@ -194,24 +216,80 @@ export function deleteRule(idx) {
 }
 
 export function ruleTypeChange(el) {
-    syncRuleEditFromDOM();
     const i = parseInt(el.dataset.idx);
     const kind = el.dataset.kind;
-    const r = S._ruleEdit && S._ruleEdit[i];
+    const row = el.closest(".rule-row");
+    selectRuleType(row, kind, i, el.value);
+}
+
+/**
+ * 切换规则的"如果"/"就"类型（或"状态数值"的操作符/强度/添加移除等子选项）。
+ * 由原生 <select> 的 change 委托调用，也由 .dropdown-select 自定义下拉的 item 点击调用（app.js::selectRule）。
+ * 行为：仅切兄弟 .rule-sub 的 display，不重建弹窗，避免"下拉消失"错觉。
+ * @param {HTMLElement|null} row   - 所属 .rule-row；传 null 则走整体重渲染兜底
+ * @param {"when"|"then"|"op"|"sev"|"tagop"} kind
+ * @param {number} idx    - 规则行索引
+ * @param {string} value  - 新选项值
+ */
+export function selectRuleType(row, kind, idx, value) {
+    syncRuleEditFromDOM();
+    const r = S._ruleEdit && S._ruleEdit[idx];
     if (!r) return;
-    if (kind === "when") {
-        const t = el.value;
-        r.when = { type: t };
-        if (t === "concept") r.when.term = "";
-        else if (t === "state") { r.when.field = ""; r.when.op = "=="; r.when.value = ""; }
-        else if (t === "tag") r.when.tag = "";
-    } else if (kind === "then") {
-        const t = el.value;
-        if (t === "ban") r.then = { type: "ban", concept: "", aliases: [], severity: "soft", unlessTags: [] };
-        else if (t === "tag") r.then = { type: "tag", op: "add", tag: "" };
-        else if (t === "ending") r.then = { type: "ending", reason: "" };
+    const newType = value;
+    // 找不到行（极端情况）才走整体重渲染兜底；正常路径直接切兄弟 rule-sub 的 display，不重建 DOM。
+    if (!row) {
+        if (kind === "when") r.when = { type: newType };
+        else if (kind === "then") {
+            if (newType === "ban") r.then = { type: "ban", concept: "", aliases: [], severity: "soft", unlessTags: [] };
+            else if (newType === "tag") r.then = { type: "tag", op: "add", tag: "" };
+            else if (newType === "ending") r.then = { type: "ending", reason: "" };
+        }
+        renderRuleEditorBody();
+        return;
     }
-    renderRuleEditorBody();
+    // 隐藏当前 row 内所有 rule-sub，再显示新 type 对应的那一个
+    row.querySelectorAll(":scope > .rule-sub").forEach(sub => { sub.style.display = "none"; });
+    const target = row.querySelector(`:scope > .rule-sub[data-kind="${kind}"][data-type="${newType}"]`);
+    if (target) target.style.display = "inline-flex";
+    // 更新数据
+    if (kind === "when") {
+        const cur = r.when || {};
+        r.when = {
+            type: newType,
+            // 保留已有字段值（用户切换类型前可能已经填过）；如果新类型不需要该字段则忽略
+            term: newType === "concept" ? (cur.term || "") : undefined,
+            unlessTags: newType === "concept" ? (Array.isArray(cur.unlessTags) ? cur.unlessTags : []) : undefined,
+            field: newType === "state" ? (cur.field || "") : undefined,
+            op: newType === "state" ? (cur.op || "==") : undefined,
+            value: newType === "state" ? (cur.value ?? "") : undefined,
+            tag: newType === "tag" ? (cur.tag || "") : undefined
+        };
+    } else if (kind === "then") {
+        const cur = r.then || {};
+        if (newType === "ban") {
+            r.then = {
+                type: "ban",
+                concept: cur.concept || "",
+                aliases: Array.isArray(cur.aliases) ? cur.aliases : [],
+                severity: cur.severity === "hard" ? "hard" : "soft",
+                unlessTags: Array.isArray(cur.unlessTags) ? cur.unlessTags : []
+            };
+        } else if (newType === "tag") {
+            r.then = { type: "tag", op: cur.op === "remove" ? "remove" : "add", tag: cur.tag || "" };
+        } else if (newType === "ending") {
+            r.then = { type: "ending", reason: cur.reason || "" };
+        }
+    }
+    // 同步数据到对应的隐藏 input，让保存时拿得到
+    syncRuleSubToInput(row, kind, newType, r);
+}
+
+/**
+ * 切换 type 后，把当前数据写回到该 row 的隐藏 input（或保持原值不重建 DOM）。
+ * 现在不再依赖隐藏 input（所有数据都在 S._ruleEdit[idx]），但保留 hook 以备未来需要。
+ */
+function syncRuleSubToInput(row, kind, newType, r) {
+    // no-op：syncRuleEditFromDOM 在保存时统一从 S._ruleEdit 读
 }
 
 export function importBannedAsRules() {
@@ -676,5 +754,156 @@ export function saveItemReview() {
     S._itemEdit = null;
     closeModal("itemEditorModal");
     showToast(`初始物品已保存（${cleaned.length} 个）`, "success");
+}
+
+// ============================================================
+// ★ UI-5：世界时限 / 截止事件编辑器（time_config.deadlines）
+// 每条：title / 触发日期（模式自适应：dated 用 年/月/日，day/none/period/multiverse 用 第 N 天）/ retrigger_policy（once | repeatable+max_repeats+cooldown_steps）
+// 草稿缓冲 S._deadlineEdit → 保存写回 world.schema.time_config.deadlines，复用 store.normalizeRetriggerPolicy。
+// ============================================================
+
+export function openDeadlineEditor(worldId) {
+    const w = S.worlds.find(x => x.id === worldId) || S.currentWorld;
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    S.currentWorld = w;
+    if (!w.schema) w.schema = {};
+    if (!w.schema.time_config || typeof w.schema.time_config !== "object") w.schema.time_config = {};
+    if (!Array.isArray(w.schema.time_config.deadlines)) w.schema.time_config.deadlines = [];
+    S._deadlineEdit = deepClone(w.schema.time_config.deadlines);
+    renderDeadlineEditorBody();
+    showModal("deadlineEditorModal");
+}
+
+function getDeadlineEditTC() {
+    const w = S.currentWorld;
+    if (!w || !w.schema || !w.schema.time_config) return { mode: "day" };
+    return w.schema.time_config;
+}
+
+function syncDeadlineForm() {
+    if (!Array.isArray(S._deadlineEdit)) S._deadlineEdit = [];
+    const tc = getDeadlineEditTC();
+    const dated = (tc.mode === "gregorian" || tc.mode === "lunar" || tc.mode === "custom_calendar");
+    S._deadlineEdit = S._deadlineEdit.map((v, i) => {
+        const title = (document.getElementById("dl_title_" + i) || {}).value || "";
+        let policy = "once";
+        const policyMode = (document.querySelector('input[name="dl_policy_' + i + '"]:checked') || {}).value;
+        if (policyMode === "repeatable") {
+            const maxRaw = (document.getElementById("dl_max_" + i) || {}).value;
+            const cdRaw = (document.getElementById("dl_cd_" + i) || {}).value;
+            policy = normalizeRetriggerPolicy({
+                mode: "repeatable",
+                max_repeats: maxRaw === "" ? 0 : (parseInt(maxRaw, 10) || 0),
+                cooldown_steps: cdRaw === "" ? 0 : (parseInt(cdRaw, 10) || 0)
+            });
+        }
+        const out = {
+            id: (document.getElementById("dl_id_" + i) || {}).value || "",
+            title: title.slice(0, 60),
+            day: 0,
+            period: "",
+            year: null,
+            month: null,
+            date: null,
+            retrigger_policy: policy
+        };
+        if (dated) {
+            const y = parseInt((document.getElementById("dl_year_" + i) || {}).value, 10);
+            const m = parseInt((document.getElementById("dl_month_" + i) || {}).value, 10);
+            const d = parseInt((document.getElementById("dl_date_" + i) || {}).value, 10);
+            out.year = Number.isFinite(y) ? y : null;
+            out.month = Number.isFinite(m) ? Math.min(12, Math.max(1, m)) : null;
+            out.date = Number.isFinite(d) ? Math.max(1, d) : null;
+        } else {
+            const day = parseInt((document.getElementById("dl_day_" + i) || {}).value, 10);
+            out.day = Number.isFinite(day) ? Math.max(0, day) : 0;
+            out.period = (document.getElementById("dl_period_" + i) || {}).value || "";
+        }
+        return out;
+    });
+}
+
+function renderDeadlineEditorBody() {
+    const body = document.getElementById("deadlineEditorBody");
+    if (!body) return;
+    const tc = getDeadlineEditTC();
+    const dated = (tc.mode === "gregorian" || tc.mode === "lunar" || tc.mode === "custom_calendar");
+    const list = S._deadlineEdit || [];
+    if (!list.length) {
+        body.innerHTML = `<p class="muted">该世界还没有截止事件。截止事件用于在世界时间到达某点时触发剧情/目标，并可设置「重触发策略」（一次性或周期性重复）。点下方「＋ 添加截止」创建。</p>
+            <div class="rule-toolbar"><button class="btn-secondary-sm" data-action="addDeadline">＋ 添加截止</button></div>`;
+        return;
+    }
+    let html = `<div class="rule-toolbar"><button class="btn-secondary-sm" data-action="addDeadline">＋ 添加截止</button></div>`;
+    list.forEach((v, i) => {
+        const pol = v.retrigger_policy && typeof v.retrigger_policy === "object" ? v.retrigger_policy : null;
+        const isRepeat = !!pol;
+        const dateFields = dated
+            ? `<div class="time-cfg-start-row">
+                <input id="dl_year_${i}" class="tc-num" type="number" min="0" max="9999" placeholder="年" value="${v.year != null ? v.year : ""}">
+                <input id="dl_month_${i}" class="tc-num" type="number" min="1" max="12" placeholder="月" value="${v.month != null ? v.month : ""}">
+                <input id="dl_date_${i}" class="tc-num" type="number" min="1" max="31" placeholder="日" value="${v.date != null ? v.date : ""}">
+            </div>`
+            : `<div class="time-cfg-start-row">
+                <input id="dl_day_${i}" class="tc-num" type="number" min="0" placeholder="第 N 天(步)" value="${typeof v.day === "number" ? v.day : 0}">
+                <input id="dl_period_${i}" class="char-role-select" style="width:90px" placeholder="时段(可选)" value="${escapeHtml(v.period || "")}">
+            </div>`;
+        html += `<div class="char-card">
+            <div class="char-card-head">
+                <input id="dl_id_${i}" class="char-role-select" style="width:120px" placeholder="事件键(id)" value="${escapeHtml(v.id || "")}">
+                <input id="dl_title_${i}" class="char-name" placeholder="事件标题（如 魔王复活）" value="${escapeHtml(v.title || "")}">
+                <button class="btn-secondary-sm danger" data-action="deleteDeadline" data-idx="${i}">删除</button>
+            </div>
+            <div class="form-group"><label>${dated ? "触发日期（年/月/日，可部分留空）" : "触发步数（第 N 天）"}</label>${dateFields}</div>
+            <div class="form-group"><label>重触发策略</label>
+                <div class="radio-row">
+                    <label class="radio-option${!isRepeat ? " selected" : ""}"><input type="radio" name="dl_policy_${i}" value="once" ${!isRepeat ? "checked" : ""} data-action="dlPolicyChanged" data-idx="${i}" data-event="change"><span class="radio-title">一次性 (S1)</span><small>到达后触发一次</small></label>
+                    <label class="radio-option${isRepeat ? " selected" : ""}"><input type="radio" name="dl_policy_${i}" value="repeatable" ${isRepeat ? "checked" : ""} data-action="dlPolicyChanged" data-idx="${i}" data-event="change"><span class="radio-title">可重复 (S2)</span><small>满足条件可多次触发</small></label>
+                </div>
+                ${isRepeat ? `<div class="dl-repeat-fields">
+                    <label>最大次数(0=无限)<input id="dl_max_${i}" class="tc-num" type="number" min="0" value="${pol.max_repeats || 0}"></label>
+                    <label>冷却步数<input id="dl_cd_${i}" class="tc-num" type="number" min="0" value="${pol.cooldown_steps || 0}"></label>
+                </div>` : ""}
+            </div>
+        </div>`;
+    });
+    body.innerHTML = html;
+}
+
+export function addDeadline() {
+    syncDeadlineForm();
+    if (!Array.isArray(S._deadlineEdit)) S._deadlineEdit = [];
+    if (S._deadlineEdit.length >= 12) { showToast("最多 12 条截止事件", "warn"); return; }
+    S._deadlineEdit.push({ id: "", title: "", day: 0, period: "", year: null, month: null, date: null, retrigger_policy: "once" });
+    renderDeadlineEditorBody();
+}
+
+export function deleteDeadline(idx) {
+    syncDeadlineForm();
+    const i = parseInt(idx);
+    if (Array.isArray(S._deadlineEdit) && i >= 0 && i < S._deadlineEdit.length) {
+        S._deadlineEdit.splice(i, 1);
+        renderDeadlineEditorBody();
+    }
+}
+
+export function dlPolicyChanged(el) {
+    // 切换 once/repeatable：先同步已填值，再重渲染该卡片以展开/收起重复字段
+    syncDeadlineForm();
+    renderDeadlineEditorBody();
+}
+
+export function saveDeadlineReview() {
+    syncDeadlineForm();
+    if (!S.currentWorld) { closeModal("deadlineEditorModal"); return; }
+    const list = (S._deadlineEdit || []).filter(v => v.title && v.title.trim());
+    if (list.length > 12) { showToast("最多 12 条截止事件", "error"); return; }
+    if (!S.currentWorld.schema) S.currentWorld.schema = {};
+    if (!S.currentWorld.schema.time_config) S.currentWorld.schema.time_config = {};
+    S.currentWorld.schema.time_config.deadlines = list;
+    saveWorlds();
+    S._deadlineEdit = null;
+    closeModal("deadlineEditorModal");
+    showToast(`世界时限已保存（${list.length} 条）`, "success");
 }
 

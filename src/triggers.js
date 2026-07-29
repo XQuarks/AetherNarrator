@@ -138,3 +138,15 @@ export function createBranch(state, branchLabel, targetDate, tc) {
     state.current_date = clone(targetDate);
     return branchId;
 }
+
+// UI-4：解析时间穿越的默认策略（世界级默认 + 线级覆盖 + 指令显式 三层组合，docs/20 §11.3）。
+//   - 若穿越指令已显式带 reset_triggers / branch → 返回 null（尊重指令，调用方不套默认）。
+//   - 否则按 线级 timetravel_strategy → 世界级 default_timetravel_strategy → "keep" 回落。
+// 返回 "keep" | "reset" | "branch" | null。
+export function resolveTimeTravelStrategy(change, tc, lineId) {
+    if (change && (change.reset_triggers || change.branch)) return null;
+    const t = (tc && typeof tc === "object") ? tc : {};
+    const lineStrat = (lineId && t.timelines && t.timelines[lineId] && t.timelines[lineId].timetravel_strategy) || null;
+    const worldStrat = (t.default_timetravel_strategy === "reset" || t.default_timetravel_strategy === "branch") ? t.default_timetravel_strategy : null;
+    return lineStrat || worldStrat || "keep";
+}

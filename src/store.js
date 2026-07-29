@@ -66,7 +66,7 @@ export const S = {
 
 // Phase 2：规则 DSL 解释器（纯函数，无 store 反向依赖，避免循环引用）
 import { evaluateRules, legacyBanEntry } from "./worldview.js";
-import { validateStartDate } from "./calendar.js";
+import { validateStartDate, clampSyncRules } from "./calendar.js";
 import { detectIp, matchKnownIp } from "./utils.js";
 
 // ★ B7：读取当前生效知识库——优先当前存档的独立副本（不污染 world 出厂默认）。
@@ -117,6 +117,7 @@ export const DEFAULT_TIME_CONFIG = {
     clock_mode: "period",     // period(时段标签) | clock(具体时钟) | none(不显示时刻)
     weather: "",              // 当前天气，可随剧情变化
     show: true,               // 是否展示时间（false 等同 hidden）
+    default_timetravel_strategy: "keep", // 世界级默认时间穿越策略（keep=保留记录 S1 / reset=重置回放 S3 / branch=分支隔离 S4）
     deadlines: []             // 世界级截止（方案 B：dated 模式用 {year,month,date,period}；day 模式用 {step,period}）
 };
 
@@ -188,6 +189,16 @@ export function normalizeTimeConfig(raw) {
                         era_label: typeof l.era_label === "string" ? l.era_label.slice(0, 40) : "",
                         weather: typeof l.weather === "string" ? l.weather.slice(0, 20) : ""
                     };
+                    // UI-3：流速比同步规则（格式校验；ref 存在性由 clampSyncRules 统一过滤）
+                    if (Array.isArray(l.sync_rules)) {
+                        nl.sync_rules = l.sync_rules
+                            .filter(r => r && typeof r.ref === "string" && r.ref.trim() && Number.isFinite(r.ratio) && r.ratio > 0)
+                            .map(r => ({ ref: r.ref.trim().slice(0, 30), ratio: r.ratio }));
+                    }
+                    // UI-4：线级默认穿越策略（缺省无，回落世界级）
+                    if (l.timetravel_strategy === "keep" || l.timetravel_strategy === "reset" || l.timetravel_strategy === "branch") {
+                        nl.timetravel_strategy = l.timetravel_strategy;
+                    }
                     if (l.custom_calendar && Array.isArray(l.custom_calendar.months) && l.custom_calendar.months.length) {
                         nl.custom_calendar = {
                             label: typeof l.custom_calendar.label === "string" ? l.custom_calendar.label.slice(0, 20) : "",
@@ -209,10 +220,13 @@ export function normalizeTimeConfig(raw) {
                 cfg.active_timeline = raw.active_timeline;
             }
         }
+        clampSyncRules(cfg); // UI-3：过滤 timelines 内无效的 sync_rules（ref 不存在/自指/ratio<=0）
         const clkModes = ["period", "none"]; // 仅允许「时段标签」或「不显示」；禁用「具体时钟」以免界面出现具体小时
         if (clkModes.includes(raw.clock_mode)) cfg.clock_mode = raw.clock_mode;
         if (typeof raw.weather === "string" && raw.weather.trim()) cfg.weather = raw.weather.slice(0, 20);
         if (typeof raw.show === "boolean") cfg.show = raw.show;
+        // UI-4：世界级默认时间穿越策略（缺省 keep）
+        if (raw.default_timetravel_strategy === "keep" || raw.default_timetravel_strategy === "reset" || raw.default_timetravel_strategy === "branch") cfg.default_timetravel_strategy = raw.default_timetravel_strategy;
         if (Array.isArray(raw.deadlines)) {
             cfg.deadlines = raw.deadlines.slice(0, 12).map(d => {
                 const out = {
@@ -241,6 +255,20 @@ export function normalizeTimeConfig(raw) {
     // S5-2 必带字段保底（顶层）：dated 模式须带起点、自定义历法须带月历表，否则回退「第 N 天」
     enforceTimeConfigRequired(cfg);
     return cfg;
+}
+
+// UI-5：归一化单条事件的重触发策略（S1/S2）。
+//   "once"（默认）/ {mode:"repeatable",max_repeats,cooldown_steps}（max_repeats=0 表示不限次）。
+// 与 normalizeTimeConfig 内 deadlines 的 retrigger_policy 归一化一致，供事件/截止编辑器复用与单测。
+export function normalizeRetriggerPolicy(p) {
+    if (p && typeof p === "object" && p.mode === "repeatable") {
+        return {
+            mode: "repeatable",
+            max_repeats: Number.isFinite(p.max_repeats) ? Math.max(1, p.max_repeats | 0) : 0,
+            cooldown_steps: Number.isFinite(p.cooldown_steps) ? Math.max(0, p.cooldown_steps | 0) : 0
+        };
+    }
+    return "once";
 }
 
 // 把"第 N 天"推导为月/日标签（E3 历法）；monthLen 可配置（默认每月 30 天）

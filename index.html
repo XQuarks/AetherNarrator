@@ -240,6 +240,7 @@
                     <option value="custom">自定义</option>
                 </select>
                 <div class="hint">选择后自动填入对应 Base URL 与默认模型，可再手动修改</div>
+                <div class="hint">当前支持 OpenAI 兼容接口（DeepSeek、通义千问、智谱 GLM、OpenAI、本地 Ollama 及自定义端点）。Claude（Anthropic）暂未接入。</div>
             </div>
             <div class="form-group">
                 <label>API Key</label>
@@ -326,8 +327,11 @@
                 <div class="form-group">
                     <label>世界类型</label>
                     <select id="worldType" class="lore-inp lore-sel" data-action="onWorldTypeChange" data-event="change">
-                        <option value="ip">基于已有 IP / 小说</option>
                         <option value="original">原创世界观</option>
+                        <option value="fan">同人 · 基于具体作品二创</option>
+                        <option value="ip">改编 IP · 商业版权作品</option>
+                        <option value="shared">共享宇宙 · 社群共创设定</option>
+                        <option value="public_domain">公共领域 · 版权已过期</option>
                     </select>
                 </div>
                 <div class="conditional-field show" id="ipNameField">
@@ -567,6 +571,40 @@
     </div>
 </div>
 
+<!-- ================= 编辑世界类型弹窗 ================= -->
+<div class="modal-overlay" id="worldTypeEditModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="worldTypeEditTitle">
+        <div class="modal-header">
+            <h2 id="worldTypeEditTitle">编辑世界类型</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="worldTypeEditModal">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>世界类型</label>
+                <select id="editWorldTypeSelect" class="lore-inp lore-sel" data-action="onEditWorldTypeChange" data-event="change">
+                    <option value="original">原创世界观</option>
+                    <option value="fan">同人 · 基于具体作品二创</option>
+                    <option value="ip">改编 IP · 商业版权作品</option>
+                    <option value="shared">共享宇宙 · 社群共创设定</option>
+                    <option value="public_domain">公共领域 · 版权已过期</option>
+                </select>
+                <p class="muted" id="editWorldTypeHint" style="margin-top:6px;font-size:12px;"></p>
+            </div>
+            <div class="conditional-field" id="editIpNameField">
+                <div class="form-group">
+                    <label>作品名称 <span id="editIpNameReqTag" class="req-tag">必填</span></label>
+                    <input type="text" id="editIpName" class="lore-inp" placeholder="例如：哈利波特、三体、红楼梦...">
+                    <div class="hint" id="editIpNameHint">AI 将根据作品名称从训练数据中检索相关设定、人物、力量体系。</div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="worldTypeEditModal">取消</button>
+            <button class="btn primary" data-action="saveWorldTypeEdit" data-id="" id="saveWorldTypeEditBtn">保存</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= 存档详情弹窗（二级界面，镜像世界详情） ================= -->
 <div class="modal-overlay" id="saveDetailModal">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detailSaveTitle">
@@ -758,6 +796,21 @@
         <div class="modal-footer">
             <button class="btn secondary" data-action="closeModal" data-modal="itemEditorModal">取消</button>
             <button class="btn primary" data-action="saveItemReview">保存物品</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 世界时限 / 截止事件编辑器（UI-5） ================= -->
+<div class="modal-overlay" id="deadlineEditorModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="deadlineEditorTitle">
+        <div class="modal-header">
+            <h2 id="deadlineEditorTitle">世界时限 / 截止事件</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="deadlineEditorModal">×</button>
+        </div>
+        <div class="modal-body" id="deadlineEditorBody"></div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="deadlineEditorModal">取消</button>
+            <button class="btn primary" data-action="saveDeadlineReview">保存时限</button>
         </div>
     </div>
 </div>

@@ -5,7 +5,7 @@ import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts, ensureWorldCanon, resolveCanonContext, applyConsistencyPack, computeVariableUpdates, computeBondUpdates } from "./store.js";
 import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape, logError } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
-import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartDate } from "./calendar.js";
+import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartDate, applySyncRules, calendarDayIndex } from "./calendar.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
@@ -17,8 +17,25 @@ import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { runWorldCritic } from "./critic.js"; // ★ Phase 3：审稿人
-import { advanceWorldTime, collectDueDeadlines } from "./time-engine.js";
-import { activeTimelineKey, getTimelineTriggered, recordTrigger, resetTriggers, createBranch } from "./triggers.js";
+import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
+import { activeTimelineKey, getTimelineTriggered, recordTrigger, resetTriggers, createBranch, resolveTimeTravelStrategy } from "./triggers.js";
+
+// UI-4：判定时间是否倒流（逆跳）。dated 模式用原生日期比较；day/none/period 用绝对分钟比较。
+function isBackwardJump(oldDate, newDate, tcWrap) {
+    const cfg = (tcWrap && tcWrap.timeConfig) || {};
+    let mode = cfg.calendar_mode || "day";
+    // 多时间线模式下，用「当前活动线」的真实历法模式判定（顶层 mode 恒为 multiverse，不能直接比）
+    if (mode === "multiverse" && cfg.timelines && cfg.active_timeline && cfg.timelines[cfg.active_timeline]) {
+        mode = cfg.timelines[cfg.active_timeline].calendar_mode || "day";
+    }
+    if (mode === "gregorian" || mode === "lunar" || mode === "custom_calendar") {
+        return compareCalendar(newDate, oldDate, mode, cfg.custom_calendar) < 0;
+    }
+    const periods = (tcWrap && tcWrap.periods && tcWrap.periods.length) ? tcWrap.periods : undefined;
+    const oldAbs = hydrateWorldTime(oldDate || {}, periods).absolute_minutes;
+    const newAbs = hydrateWorldTime(newDate || {}, periods).absolute_minutes;
+    return newAbs < oldAbs;
+}
 import { applySimulationChanges, createRestEvent, normalizeSimulationState } from "./simulation.js";
 import { abortCurrentRequest, acquireTurn, isSessionContextCurrent, releaseTurn } from "./turn-lifecycle.js";
 
@@ -91,7 +108,7 @@ export async function generateWorld() {
     const type = document.getElementById("worldType").value;
     const desc = document.getElementById("worldDesc").value.trim();
     const hero = document.getElementById("heroDesc").value.trim();
-    const ipName = type === "ip" ? document.getElementById("ipName").value.trim() : "";
+    const ipName = (type === "ip" || type === "fan") ? document.getElementById("ipName").value.trim() : "";
     const styleRef = getSelectedStyleRef();
     const customStyle = styleRef === "custom" ? document.getElementById("customStyle").value.trim() : "";
     const plotFreedom = parseInt(document.getElementById("plotFreedom").value);
@@ -106,8 +123,8 @@ export async function generateWorld() {
         return;
     }
     // ★ 上传了小说源文件后，作品名称改为可选填写
-    if (type === "ip" && !ipName && !isSourceFileUploaded()) {
-        showToast("基于已有 IP 时请填写作品名称，或上传小说源文件后留空", "error");
+    if ((type === "ip" || type === "fan") && !ipName && !isSourceFileUploaded()) {
+        showToast("基于已有 IP / 同人 时请填写作品名称，或上传小说源文件后留空", "error");
         return;
     }
 
@@ -610,6 +627,7 @@ export function applyStateChanges(changes) {
         : changes.period
             ? { period: changes.period }
             : null;
+    const prevActiveDate = s.current_date ? deepClone(s.current_date) : null; // UI-3/UI-4：推进前快照，算跨线同步增量与逆跳判定
     if (timeChange) {
         const result = advanceWorldTime(s.current_date, timeChange, timeCtx);
         s.current_date = result.currentDate;
@@ -628,11 +646,36 @@ export function applyStateChanges(changes) {
         }
     }
 
+    // UI-3：跨线流速同步（sync_rules）。本线推进后，按各规则推进引用线（异界1天=现实N天等）。
+    if (s.active_timeline && s.timelines && s.timelines[s.active_timeline] && timeChange && prevActiveDate) {
+        const srcLine = s.timelines[s.active_timeline];
+        if (Array.isArray(srcLine.sync_rules) && srcLine.sync_rules.length) {
+            const mode = srcLine.calendar_mode || "day";
+            let delta = 0;
+            if (mode === "day" || mode === "none") {
+                delta = (s.current_date.step || 0) - (prevActiveDate.step || 0);
+            } else {
+                delta = calendarDayIndex(s.current_date, mode, srcLine.custom_calendar)
+                    - calendarDayIndex(prevActiveDate, mode, srcLine.custom_calendar);
+            }
+            if (delta) applySyncRules(s.timelines, s.active_timeline, delta);
+        }
+    }
+
     // Phase 2 多世界：切换时间线（事件/选项可带 switch_timeline）
     if (changes.switch_timeline && tc.timeConfig.mode === "multiverse" && s.timelines && s.timelines[changes.switch_timeline]) {
         s.active_timeline = changes.switch_timeline;
         s.current_date = deepClone(s.timelines[changes.switch_timeline].current_date);
         invalidateSystemPromptCache();
+    }
+
+    // UI-4：默认时间穿越策略（仅逆跳时套用）。指令层已显式指定 reset/branch 则尊重；否则回退线级/世界级默认。
+    if (timeChange && !timeChange.reset_triggers && !timeChange.branch && prevActiveDate) {
+        const strat = resolveTimeTravelStrategy(timeChange, tc.timeConfig, s.active_timeline);
+        if ((strat === "reset" || strat === "branch") && isBackwardJump(prevActiveDate, s.current_date, tc)) {
+            if (strat === "reset") timeChange.reset_triggers = "all";
+            else { timeChange.branch = true; if (!timeChange.branch_label) timeChange.branch_label = "时间分支"; }
+        }
     }
 
     // Phase 3 · S3-2：时间穿越 reset_triggers（S3 重置回放）—— 回滚当前线触发记录

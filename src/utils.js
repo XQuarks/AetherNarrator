@@ -459,7 +459,7 @@ export function analyzeWorldTags(name, desc, hero, type, ipName) {
     const clues = [name || "", desc || "", hero || "", ipName || ""].join(" ");
     const tags = [];
 
-    // 题材分类（仅题材标签；来源「原创/已有 IP」由渲染层的 type 徽章统一展示，不再重复写入）
+    // 题材分类（仅题材标签；世界来源类型由渲染层的 type 徽章统一展示：原创 / 同人 / 改编IP / 共享宇宙 / 公共领域，不再重复写入）
     const genreRules = [
         { pattern: /修仙|修真|仙|道|玄|渡劫|飞升|筑基|金丹|元婴/, tag: "修仙" },
         { pattern: /武侠|江湖|武林|门派|剑|侠|轻功|内功/, tag: "武侠" },

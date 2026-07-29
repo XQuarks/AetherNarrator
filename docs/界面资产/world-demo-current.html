@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>世界界面 — 现版预览</title>
+<style>
+/* 引入项目主题变量，不改原代码 */
+@import url('../styles.css');
+/* 只在本 demo 增加世界卡布局 */
+.world-demo { max-width: 980px; margin: 0 auto; padding: 28px; }
+.world-card { background: var(--bg-panel); border: 1px solid var(--panel-border); border-radius: 14px; padding: 26px 28px; box-shadow: var(--shadow-card); }
+.world-card h2 { margin: 0 0 6px; font-family: var(--serif); color: var(--primary); letter-spacing: .06em; }
+.world-card .sub { color: var(--text-secondary); font-size: 13px; margin-bottom: 14px; }
+.tags { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.tag { padding: 3px 10px; border-radius: 20px; border: 1px solid var(--panel-border); background: rgba(217,207,192,0.06); color: var(--text-secondary); font-size: 12px; }
+.section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--separator); }
+.section-title { font-weight: 700; font-size: 14px; color: var(--primary-light); margin-bottom: 8px; letter-spacing: .04em; }
+.section p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 16px; border-radius: 8px; border: 1px solid var(--panel-border); background: var(--card); color: var(--text); font-size: 13px; text-decoration: none; cursor: pointer; transition: .15s; }
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn-primary { background: var(--primary); color: var(--btn-primary-text); border-color: var(--primary); }
+.btn-primary:hover { background: var(--primary-strong); border-color: var(--primary-strong); }
+.note { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="world-demo">
+  <h1 style="font-family:var(--serif);color:var(--primary);letter-spacing:.08em;">世界详情 — 现版预览</h1>
+  <p class="note">基于项目当前样式（暗色主题），展示世界卡片布局与内容区域结构。不修改原代码。</p>
+
+  <div class="world-card" style="margin-top:18px;">
+    <h2>🌐 星河书院 · 三国演义世界</h2>
+    <div class="sub">世界 ID: sg-shuyuan-01 · 模式: 单线 · 纪元: 建安二年</div>
+    <div class="tags">
+      <span class="tag">历法: 阴历</span>
+      <span class="tag">时钟: 时段标签</span>
+      <span class="tag">天气: 温润</span>
+      <span class="tag">显示: 开启</span>
+    </div>
+
+    <div class="section">
+      <div class="section-title">📖 世界概览</div>
+      <p>东汉末年，星河书院坐落于洛水之畔。书院藏书万卷，门下弟子皆习六艺。近日有异星坠落，书院长老闭门不出，坊间已有异闻流传……</p>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🌐 时间体系</div>
+      <p>纪元：建安二年 · 历法：阴历（月/日） · 时钟：时段标签（早晨/午后/夜晚） · 天气：温润 · 界面显示：开启</p>
+      <p class="note">时间体系由 AI 在创建世界时自动判定，游戏中已锁定。</p>
+    </div>
+
+    <div class="section">
+      <div class="section-title">📚 知识库条目</div>
+      <p>已录入 12 条：书院规矩 · 六艺课程 · 星象异变 · 洛水传说 · 长老密谈 · 门下弟子档案 ……（仅预览，完整内容在编辑面板）</p>
+    </div>
+
+    <div class="row" style="margin-top:16px;">
+      <a href="#" class="btn btn-primary">✏ 进入编辑</a>
+      <a href="#" class="btn">📤 导出世界</a>
+      <a href="#" class="btn">� 重新开始</a>
+      <a href="#" class="btn">� 删除世界</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>

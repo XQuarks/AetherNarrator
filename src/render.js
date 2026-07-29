@@ -10,6 +10,73 @@ import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, format
 import { abortCurrentRequest } from "./turn-lifecycle.js";
 import { styleToTemperature, formatStateChanges } from "./prompt.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
+import { saveWorlds } from "./storage.js";
+
+// ★ 世界来源类型元数据：角标/详情文案/校验统一从这里取，新增类型只改这里
+const WORLD_TYPE_META = {
+    original:      { label: "原创",       cls: "wc-badge-original", detail: "原创世界观" },
+    fan:           { label: "同人",       cls: "wc-badge-fan",      detail: "同人 · 基于具体作品二创" },
+    ip:            { label: "改编IP",     cls: "wc-badge-ip",       detail: "改编 IP · 商业版权作品" },
+    shared:        { label: "共享宇宙",   cls: "wc-badge-shared",   detail: "共享宇宙 · 社群共创设定" },
+    public_domain: { label: "公共领域",   cls: "wc-badge-public",   detail: "公共领域 · 版权已过期" },
+};
+const WORLD_TYPE_DEFAULT = "original"; // 兜底（兼容旧档未知 type）
+function worldTypeLabel(type)      { return (WORLD_TYPE_META[type] || WORLD_TYPE_META[WORLD_TYPE_DEFAULT]).label; }
+function worldTypeBadgeClass(type) { return (WORLD_TYPE_META[type] || WORLD_TYPE_META[WORLD_TYPE_DEFAULT]).cls; }
+function worldTypeDetail(type)     { return (WORLD_TYPE_META[type] || WORLD_TYPE_META[WORLD_TYPE_DEFAULT]).detail; }
+function needsSourceWork(type)     { return type === "ip" || type === "fan"; } // 改编IP/同人需填作品名
+
+// ★ 详情页编辑世界类型：弹窗内可改类型 + 作品名，立即持久化
+export function editWorldType(worldId) {
+    const w = S.worlds.find(x => x.id === worldId);
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    const sel = document.getElementById("editWorldTypeSelect");
+    const ipInput = document.getElementById("editIpName");
+    const saveBtn = document.getElementById("saveWorldTypeEditBtn");
+    if (sel) {
+        sel.value = WORLD_TYPE_META[w.type] ? w.type : WORLD_TYPE_DEFAULT;
+        onEditWorldTypeChange(sel.value); // 同步「作品名称」的显隐与提示
+    }
+    if (ipInput) ipInput.value = w.ip_name || "";
+    if (saveBtn) saveBtn.dataset.id = w.id;
+    showModal("worldTypeEditModal");
+}
+
+// 编辑弹窗内切换类型：同步「作品名称」字段显隐 + 说明文案
+export function onEditWorldTypeChange(value) {
+    const field = document.getElementById("editIpNameField");
+    const reqTag = document.getElementById("editIpNameReqTag");
+    const hint = document.getElementById("editIpNameHint");
+    const typeHint = document.getElementById("editWorldTypeHint");
+    const show = needsSourceWork(value);
+    if (field) field.classList.toggle("show", show);
+    if (reqTag) reqTag.style.display = show ? "" : "none";
+    if (hint) hint.style.display = show ? "" : "none";
+    if (typeHint) typeHint.textContent = show
+        ? "同人 / 改编 IP 需填写作品名称，AI 将据此贴合原作设定。"
+        : "原创 / 共享宇宙 / 公共领域无需填写作品名称。";
+}
+
+// 保存编辑后的世界类型与作品名
+export function saveWorldTypeEdit(el) {
+    const worldId = el && el.dataset && el.dataset.id;
+    const w = S.worlds.find(x => x.id === worldId);
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    const type = document.getElementById("editWorldTypeSelect").value;
+    const ipName = (document.getElementById("editIpName").value || "").trim();
+    if (needsSourceWork(type) && !ipName) {
+        showToast("同人 / 改编 IP 需填写作品名称", "error");
+        return;
+    }
+    w.type = type;
+    w.ip_name = needsSourceWork(type) ? ipName : ""; // 非 IP/同人类型清理残留作品名
+    if (w.canon) w.canon.ip_name = w.ip_name || null; // 同步 canon 展示用名（mode 开局时由 store 重新派生）
+    saveWorlds();
+    closeModal("worldTypeEditModal");
+    showWorldDetail(w.id); // 刷新详情（角标/文案）
+    renderWorldList();     // 刷新世界列表卡片角标
+    showToast("世界类型已更新", "success");
+}
 
 export function showScreen(id) {
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -100,8 +167,8 @@ function resetCreateWorldForm() {
     const clearIds = ["worldName", "ipName", "worldDesc", "heroDesc", "customStyle", "customPrefix", "worldPrefix"];
     clearIds.forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
     const wt = document.getElementById("worldType");
-    if (wt) wt.value = "ip";
-    onWorldTypeChange("ip"); // 默认 IP 类型，会自动给世界观描述预填「原作世界观」
+    if (wt) wt.value = "original";
+    onWorldTypeChange("original"); // 默认原创类型
     // 文风参考默认：参考原版
     document.querySelectorAll("#styleRefGroup .radio-option").forEach((o, i) => o.classList.toggle("selected", i === 0));
     document.querySelectorAll("#styleRefGroup input[type=radio]").forEach((r, i) => r.checked = i === 0);
@@ -147,9 +214,9 @@ export function cwNext() {
     } else if (cwStep === 2) {
         const typeVal = document.getElementById("worldType").value;
         const ipNameVal = document.getElementById("ipName").value.trim();
-        // ★ 上传了小说源文件后，作品名称改为可选填写
-        if (typeVal === "ip" && !ipNameVal && !isSourceFileUploaded()) {
-            showToast("基于已有 IP 时请填写作品名称，或上传小说源文件后留空", "error"); return;
+        // ★ 同人 / 改编IP 需填作品名（上传源文件后可留空）
+        if (needsSourceWork(typeVal) && !ipNameVal && !isSourceFileUploaded()) {
+            showToast("基于已有 IP / 同人 时请填写作品名称，或上传小说源文件后留空", "error"); return;
         }
     } else if (cwStep === 3) {
         if (!document.getElementById("worldDesc").value.trim()) { showToast("请填写世界观描述", "error"); return; }
@@ -188,7 +255,7 @@ export function onWorldTypeChange(value) {
     const ipUploadField = document.getElementById("ipUploadField");
     const worldDescHint = document.getElementById("worldDescHint");
     const worldDescTextarea = document.getElementById("worldDesc");
-    if (value === "ip") {
+    if (needsSourceWork(value)) {
         ipNameField.classList.add("show");
         ipUploadField.classList.add("show");
         worldDescHint.innerHTML = "你可以直接使用原作的世界观描述，也可以在此基础上进行修改和扩展——例如调整力量体系、加入新势力、改变时间线等。描述越详细，AI 生成的剧情越贴合你的构想。";
@@ -200,7 +267,7 @@ export function onWorldTypeChange(value) {
     } else {
         ipNameField.classList.remove("show");
         ipUploadField.classList.remove("show");
-        // 切到原创时清掉可能已上传的 IP 源文件，避免被错误带入生成
+        // 切到非来源类时清掉可能已上传的源文件，避免被错误带入生成
         S.sourceFileContent = "";
         const area = document.getElementById("fileUploadArea");
         const text = document.getElementById("fileUploadText");
@@ -224,7 +291,8 @@ export function isSourceFileUploaded() {
 export function refreshIpNameRequirement() {
     const field = document.getElementById("ipNameField");
     if (!field) return;
-    const optional = document.getElementById("worldType").value === "ip" && isSourceFileUploaded();
+    const typeVal = document.getElementById("worldType").value;
+    const optional = needsSourceWork(typeVal) && isSourceFileUploaded();
     const tag = document.getElementById("ipNameReqTag");
     if (tag) {
         tag.textContent = optional ? "选填" : "必填";
@@ -402,7 +470,7 @@ export function renderWorldList() {
         <article class="world-card${isNew ? " new-world" : ""}" data-action="showWorldDetail" data-id="${w.id}" tabindex="0" style="animation: fadeSlideIn 0.4s ease-out ${delay}s both;">
             <div class="wc-cover">
                 <span class="wc-glyph">${escapeHtml(firstChar)}</span>
-                <span class="wc-badge${w.type === "ip" ? "" : " wc-badge-original"}">${w.type === "ip" ? "已有 IP" : "原创"}</span>
+                <span class="wc-badge ${worldTypeBadgeClass(w.type)}">${worldTypeLabel(w.type)}</span>
             </div>
             <div class="wc-body">
                 <div class="wc-title">${escapeHtml(w.name)}${isNew ? '<span class="new-badge">新</span>' : ""}</div>
@@ -562,7 +630,7 @@ export function showWorldDetail(worldId) {
         </div>
         <div class="detail-tab-content active" data-detail-tab-content="overview">
             ${completionCard}
-            <div class="form-group"><label>世界类型</label><p style="margin:0;font-size:15px;">${w.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p></div>
+            <div class="form-group"><label>世界类型</label><div style="display:flex;align-items:center;gap:10px;"><p style="margin:0;font-size:15px;">${worldTypeDetail(w.type)}</p><button type="button" style="background:none;border:none;color:var(--primary);cursor:pointer;font-size:13px;padding:2px 0;" data-action="editWorldType" data-id="${id}">编辑</button></div></div>
             ${w.ip_name ? `<div class="form-group"><label>作品名称</label><p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(w.ip_name)}</p></div>` : ""}
             <div class="form-group"><label>世界观描述</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.desc)}</p></div>
             ${w.hero ? `<div class="form-group"><label>主角设定</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.hero)}</p></div>` : ""}
@@ -680,7 +748,7 @@ export function renderSaveDetail(saveId) {
         </div>
         <div class="detail-tab-content active" data-detail-tab-content="overview">
             <div class="form-group"><label>所属世界</label><p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(save.worldName)}</p></div>
-            ${world ? `<div class="form-group"><label>世界类型</label><p style="margin:0;font-size:15px;">${world.type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}</p></div>` : ""}
+            ${world ? `<div class="form-group"><label>世界类型</label><p style="margin:0;font-size:15px;">${worldTypeDetail(world.type)}</p></div>` : ""}
             <div class="form-group"><label>进度</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(save.progress || "—")}</p></div>
             <div class="form-group"><label>最后游玩</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${escapeHtml(save.updatedAt || "—")}</p></div>
             <div class="form-group"><label>状态</label><p style="margin:0;font-size:14px;color:${isDead ? "var(--danger)" : "var(--text-secondary)"};">${isDead ? "☠ 已死亡（可查看，继续将进入死亡结局）" : "进行中"}</p></div>

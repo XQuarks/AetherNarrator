@@ -10,12 +10,12 @@ import { applyFontSize, applyTheme, changeFontSize, toggleTheme } from "./theme.
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
-import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev, showToast } from "./render.js";
+import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev, showToast, editWorldType, onEditWorldTypeChange, saveWorldTypeEdit } from "./render.js";
 import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline } from "./game.js";
 import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./save.js";
 import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
-import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
-import { openRuleEditor, addRule, deleteRule, ruleTypeChange, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview } from "./lore-editors.js";
+import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, refreshMultiverseEditor, timeStructChanged, mvAddLine, mvDelLine, mvSetActive, mvRenameId, mvRenName, mvCalChanged, mvRenEra, mvRenDate, mvRenWeather, mvMoveLine, mvTpl, defaultStrategyChanged, mvLineStrategy, mvAddSync, mvDelSync, mvSyncRef, mvSyncRatio, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
+import { openRuleEditor, addRule, deleteRule, ruleTypeChange, selectRuleType, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview, openDeadlineEditor, addDeadline, deleteDeadline, dlPolicyChanged, saveDeadlineReview } from "./lore-editors.js";
 import { clearLoreAnnCache } from "./ann-index.js";
 
 // 小工具（docs/34 #7 消重）：fetch 数据文件，失败时告警并返回兜底值，各文件独立降级互不影响
@@ -149,6 +149,26 @@ const ACTIONS = {
     cwNext: () => cwNext(),
     // 下拉菜单开关（⋯ 更多）
     toggleDropdown: (el) => { const dd = el.closest(".dropdown"); if (dd) dd.classList.toggle("open"); },
+    // 类 select 风格的下拉：点 item 后关菜单 + 同步 trigger 文本 + 切 sub
+    selectRule: (el) => {
+        const dd = el.closest(".dropdown-select");
+        if (!dd) return;
+        // 1) 同步 trigger label
+        const label = dd.querySelector(".dropdown-label");
+        if (label) label.textContent = el.textContent.trim();
+        // 2) 标记 selected
+        dd.querySelectorAll(".dropdown-item").forEach(it => it.classList.toggle("selected", it === el));
+        // 3) 关闭菜单
+        dd.classList.remove("open");
+        // 4) 切 sub（直接调 lore-editors 的快路径，避免伪造 el.closest）
+        const row = dd.closest(".rule-row");
+        const idx = parseInt(el.dataset.idx);
+        const kind = el.dataset.kind;
+        const value = el.dataset.value;
+        if (typeof selectRuleType === "function") {
+            selectRuleType(row, kind, idx, value);
+        }
+    },
     cwPrev: () => cwPrev(),
     backToHomeAfterGameOver: () => backToHomeAfterGameOver(),
     reviewDeathScene: () => reviewDeathScene(),
@@ -174,6 +194,9 @@ const ACTIONS = {
     startGame: (el) => startGame(el.dataset.opts ? JSON.parse(el.dataset.opts) : undefined),
     // 世界详情/存档（动态生成）
     showWorldDetail: (el) => showWorldDetail(el.dataset.id),
+    editWorldType: (el) => editWorldType(el.dataset.id),
+    onEditWorldTypeChange: (el) => onEditWorldTypeChange(el.value),
+    saveWorldTypeEdit: (el) => saveWorldTypeEdit(el),
     continueLatestSave: (el) => continueLatestSave(el.dataset.id),
     confirmRestart: (el) => confirmRestart(el.dataset.id),
     doRestartConfirmed: () => doRestartConfirmed(),
@@ -243,16 +266,42 @@ const ACTIONS = {
     saveItemReview: () => saveItemReview(),
     // ★ S5-4：编辑卡时间体系字段改动 → 写回 schema 并实时刷新冲突徽章
     timeConfigChanged: () => { syncTimeConfigFromDOM(); updateTimeConflictBadge(); refreshCustomCalendarEditor(); },
-    // ★ UI-1：自定义历法可视化编辑器（docs/35 方案 C）
-    ccAddMonth: () => ccAddMonth(),
-    ccDelMonth: (el) => ccDelMonth(Number(el.dataset.idx)),
-    ccMoveMonth: (el) => ccMoveMonth(Number(el.dataset.from), Number(el.dataset.to)),
-    ccRenMonthName: (el) => ccRenMonthName(Number(el.dataset.idx), el.value),
-    ccRenMonthDays: (el) => ccRenMonthDays(Number(el.dataset.idx), el.value),
-    ccRenLabel: (el) => ccRenLabel(el.value),
-    ccLeapMonth: (el) => ccLeapMonth(Number(el.dataset.after)),
-    ccPreset: (el) => ccPreset(el.dataset.preset),
-    ccClearMonths: () => ccClearMonths(),
+    // ★ UI-2 多时间线可视化配置器（docs/43 方案 C）
+    timeStructChanged: () => timeStructChanged(),
+    mvAddLine: () => mvAddLine(),
+    mvDelLine: (el) => mvDelLine(el),
+    mvSetActive: (el) => mvSetActive(el),
+    mvRenameId: (el) => mvRenameId(el),
+    mvRenName: (el) => mvRenName(el),
+    mvCalChanged: (el) => mvCalChanged(el),
+    mvRenEra: (el) => mvRenEra(el),
+    mvRenDate: (el) => mvRenDate(el),
+    mvRenWeather: (el) => mvRenWeather(el),
+    mvTpl: (el) => mvTpl(el),
+    // ★ UI-1：自定义历法可视化编辑器（docs/35 方案 C，支持顶层 / 某条时间线）
+    ccAddMonth: (el) => ccAddMonth(el.dataset.ccLine || null),
+    ccDelMonth: (el) => ccDelMonth(el.dataset.ccLine || null, Number(el.dataset.idx)),
+    ccMoveMonth: (el) => ccMoveMonth(el.dataset.ccLine || null, Number(el.dataset.from), Number(el.dataset.to)),
+    ccRenMonthName: (el) => ccRenMonthName(el.dataset.ccLine || null, Number(el.dataset.idx), el.value),
+    ccRenMonthDays: (el) => ccRenMonthDays(el.dataset.ccLine || null, Number(el.dataset.idx), el.value),
+    ccRenLabel: (el) => ccRenLabel(el.dataset.ccLine || null, el.value),
+    ccLeapMonth: (el) => ccLeapMonth(el.dataset.ccLine || null, Number(el.dataset.after)),
+    ccPreset: (el) => ccPreset(el.dataset.ccLine || null, el.dataset.preset),
+    ccClearMonths: (el) => ccClearMonths(el.dataset.ccLine || null),
+    // ★ UI-4：世界级默认时间穿越策略 + 每线覆盖
+    defaultStrategyChanged: (el) => defaultStrategyChanged(el),
+    mvLineStrategy: (el) => mvLineStrategy(el),
+    // ★ UI-3：流速同步规则
+    mvAddSync: (el) => mvAddSync(el),
+    mvDelSync: (el) => mvDelSync(el),
+    mvSyncRef: (el) => mvSyncRef(el),
+    mvSyncRatio: (el) => mvSyncRatio(el),
+    // ★ UI-5：世界时限 / 截止事件编辑器
+    openDeadlineEditor: (el) => openDeadlineEditor(el.dataset.id),
+    addDeadline: () => addDeadline(),
+    deleteDeadline: (el) => deleteDeadline(el.dataset.idx),
+    dlPolicyChanged: (el) => dlPolicyChanged(el),
+    saveDeadlineReview: () => saveDeadlineReview(),
     // ★ S5-4' + S5-7：开场白时间冲突一键修复
     regenerateOpening: () => regenerateOpening("regenerate"),
     convertOpeningToPlaceholders: () => regenerateOpening("toPlaceholders"),

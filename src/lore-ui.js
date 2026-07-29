@@ -5,7 +5,7 @@
 // 不反向依赖 game.js，避免循环引用。
 // ============================================================
 import { S, LINK_RELATION_LABELS, normalizeTimeConfig } from "./store.js";
-import { validateStartDate, CUSTOM_CALENDAR_PRESETS, clampCustomCalendarMonths, summarizeCustomCalendar, reorderMonths, insertLeapMonth } from "./calendar.js";
+import { validateStartDate, CUSTOM_CALENDAR_PRESETS, clampCustomCalendarMonths, summarizeCustomCalendar, reorderMonths, insertLeapMonth, seedDefaultTimelines, addTimeline, deleteTimeline, renameTimelineKey, setActiveTimeline, applyMultiverseTemplate, MULTIVERSE_TEMPLATES, clampSyncRules } from "./calendar.js";
 import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets, detectTimeConflict, formatConflictMessage, logError } from "./utils.js";
 import { showModal, closeModal, showToast, getSelectedStyleRef } from "./render.js";
 import { ensureLoreEmbeddings } from "./rag.js";
@@ -86,6 +86,9 @@ const CLOCK_LABELS = { period: "时段标签", none: "不显示时刻" }; // 已
 
 function summarizeTimeConfig(cfg) {
     const c = normalizeTimeConfig(cfg);
+    if (c.mode === "multiverse" && c.timelines && Object.keys(c.timelines).length) {
+        return summarizeMultiverse(c);
+    }
     const parts = [];
     if (c.era_label) parts.push(`纪元：${c.era_label}`);
     parts.push(`历法：${CALENDAR_LABELS[c.calendar_mode] || c.calendar_mode}`);
@@ -104,6 +107,7 @@ function renderTimeConfigSection(mode) {
             <p class="time-cfg-hint">时间体系由 AI 在创建世界时自动判定，仅创建当次可调，游戏中不可实时修改。</p>
         </div>`;
     }
+    const isMV = cfg.mode === "multiverse";
     const calOpts = Object.entries(CALENDAR_LABELS)
         .map(([v, t]) => `<option value="${v}"${cfg.calendar_mode === v ? " selected" : ""}>${t}</option>`).join("");
     const clkOpts = Object.entries(CLOCK_LABELS)
@@ -124,16 +128,45 @@ function renderTimeConfigSection(mode) {
                 <span class="time-cfg-start-hint">仅 dated 历法生效；年归「纪元」字段，此处只填月日，各字段可空（缺失部分不显示、按纪元推算年份）</span>
                 <div id="startDateWarn" class="time-cfg-warn" style="display:none;"></div>
             </div>` : "";
-    // S5-1：multiverse 各时间线起始日期走代码配置（见 docs/21），本基础档不提供 UI
-    const multiverseHint = cfg.mode === "multiverse" ? `
-            <div class="form-group time-cfg-multiverse"><span class="time-cfg-start-hint">🌐 本世界为双界穿梭（multiverse）。各时间线独立起始日期请在代码中配置（见 <code>docs/21</code> 进阶待办），本基础档暂不提供 UI。</span></div>` : "";
-    return `<div class="time-cfg-card">
-        <div class="time-cfg-head">🌐 世界时间体系 <span class="time-cfg-ai">⚙️ AI 已按世界观自动设定，可在此微调</span></div>
+    // ★ UI-2：世界时间结构切换（单线 ↔ 多线）
+    const structOpts = [
+        ["single", "单一时间线"],
+        ["multiverse", "多时间线（双界穿梭）"]
+    ].map(([v, t]) => `<option value="${v}"${isMV ? (v === "multiverse" ? " selected" : "") : (v === "single" ? " selected" : "")}>${t}</option>`).join("");
+    // ★ UI-4：世界级默认时间穿越策略（逆跳默认行为 S1/S3/S4）
+    const stratDef = cfg.default_timetravel_strategy || "keep";
+    const stratOpts = [
+        ["keep", "保留记录 (S1)", "逆跳时保留已触发记录，不重放"],
+        ["reset", "重置回放 (S3)", "逆跳时清空触发记录，回起点可重玩"],
+        ["branch", "分支隔离 (S4)", "逆跳时自动新建分支，原未来保留"]
+    ];
+    const strategyBlock = `<div class="form-group time-cfg-strategy"><label>默认时间穿越策略（逆跳默认行为）</label>
+        <div class="radio-row">${stratOpts.map(([v, t, d]) => `<label class="radio-option${stratDef === v ? " selected" : ""}"><input type="radio" name="tc_strategy" value="${v}" ${stratDef === v ? "checked" : ""} data-action="defaultStrategyChanged" data-event="change"><span class="radio-title">${t}</span><small>${d}</small></label>`).join("")}</div>
+    </div>`;
+    // 单线专属块（纪元/历法/天气/起始日期 + 顶层自定义历法编辑器）
+    const singleBlock = `
         <div class="time-cfg-grid">
             <div class="form-group"><label>纪元 / 年份</label><input id="tc_era" maxlength="40" value="${escapeHtml(cfg.era_label || "")}" placeholder="例如：大清乾隆年间" data-action="timeConfigChanged" data-event="input"></div>
             <div class="form-group"><label>历法</label><select id="tc_calendar" data-action="timeConfigChanged" data-event="change">${calOpts}</select></div>
-            <div class="form-group"><label>时钟</label><select id="tc_clock">${clkOpts}</select></div>
             <div class="form-group"><label>当前天气</label><input id="tc_weather" maxlength="20" value="${escapeHtml(cfg.weather || "")}" placeholder="例如：细雨"></div>
+            ${startRow}
+        </div>
+        ${cfg.calendar_mode === "custom_calendar"
+            ? `<div class="time-cfg-cc" id="ccEditorWrap">
+            <label class="time-cfg-cc-label">🗓 自定义历法编辑器</label>
+            <div id="ccEditor">${renderCustomCalendarEditorInner()}</div>
+        </div>`
+            : `<div class="time-cfg-cc" id="ccEditorWrap" style="display:none;"></div>`}`;
+    // 多线块（UI-2 多时间线可视化配置器）
+    const mvBlock = isMV
+        ? `<div class="time-cfg-mv" id="mvEditorWrap"><div id="mvEditor">${renderMultiverseEditorInner()}</div></div>`
+        : "";
+    return `<div class="time-cfg-card">
+        <div class="time-cfg-head">🌐 世界时间体系 <span class="time-cfg-ai">⚙️ AI 已按世界观自动设定，可在此微调</span></div>
+        <div class="form-group time-cfg-struct"><label>世界时间结构</label><select id="tc_struct" data-action="timeStructChanged" data-event="change">${structOpts}</select></div>
+        ${strategyBlock}
+        <div class="time-cfg-grid">
+            <div class="form-group"><label>时钟</label><select id="tc_clock">${clkOpts}</select></div>
             <div class="form-group time-cfg-show"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="tc_show" style="width:auto;" ${cfg.show !== false ? "checked" : ""}><span>在界面显示世界时间</span></label></div>
             <div class="form-group"><label>AI 创造性（温度）</label>
                 <div class="range-slider-wrapper">
@@ -143,15 +176,10 @@ function renderTimeConfigSection(mode) {
                 </div>
                 <div class="hint">控制剧情生成的随机度。越低越稳定连贯，越高越自由发散。</div>
             </div>
-            ${startRow}
-            ${multiverseHint}
         </div>
-        ${cfg.calendar_mode === "custom_calendar"
-            ? `<div class="time-cfg-cc" id="ccEditorWrap">
-            <label class="time-cfg-cc-label">🗓 自定义历法编辑器</label>
-            <div id="ccEditor">${renderCustomCalendarEditorInner()}</div>
-        </div>`
-            : `<div class="time-cfg-cc" id="ccEditorWrap" style="display:none;"></div>`}
+        ${!isMV ? singleBlock : ""}
+        ${mvBlock}
+        <div class="time-cfg-deadlines-bar"><button class="btn-secondary-sm" data-action="openDeadlineEditor">⏳ 编辑世界时限 / 截止事件</button><span class="time-cfg-hint-inline">配置带「重触发策略」的截止事件（S1/S2）</span></div>
         <p class="time-cfg-hint">此设定仅在创建本世界时可调整；进入游戏后将锁定，不可实时修改。</p>
         <div id="timeConflictBadge" class="time-conflict-badge" style="display:none;"></div>
         ${renderOpeningFixActions()}
@@ -269,9 +297,18 @@ function readCalendarStartFromDOM(tc) {
 // 切视图前把时间表单值写回 schema，避免 InnerHTML 重渲染丢失编辑
 export function syncTimeConfigFromDOM() {
     if (!S._loreEditingWorldDefault) return;
+    const tc = (S.currentWorld && S.currentWorld.schema && S.currentWorld.schema.time_config) || {};
+    // 多线模式：时间线数据已由 mv* 实时处理器写回 live，此处仅同步共享的时钟/显示设置
+    if (tc.mode === "multiverse") {
+        tc.clock_mode = document.getElementById("tc_clock")?.value || "period";
+        delete tc.season;
+        tc.show = !!document.getElementById("tc_show")?.checked;
+        if (!S.currentWorld.schema) S.currentWorld.schema = {};
+        S.currentWorld.schema.time_config = tc;
+        return;
+    }
     const era = document.getElementById("tc_era");
     if (!era) return;
-    const tc = (S.currentWorld && S.currentWorld.schema && S.currentWorld.schema.time_config) || {};
     tc.era_label = era.value.trim().slice(0, 40);
     tc.calendar_mode = document.getElementById("tc_calendar")?.value || "day";
     readCalendarStartFromDOM(tc);
@@ -341,13 +378,18 @@ function getEditingTimeConfig() {
     return S.currentWorld.schema.time_config;
 }
 
-function ccEnsure() {
+// 自定义历法编辑器的「作用域」：lineId 为 null = 顶层；否则某条时间线（UI-2 多线内嵌）
+function getCcOwner(lineId) {
     const tc = getEditingTimeConfig();
     if (!tc) return null;
-    if (!tc.custom_calendar || !Array.isArray(tc.custom_calendar.months)) {
-        tc.custom_calendar = { label: "", months: [] };
+    if (lineId == null) {
+        if (!tc.custom_calendar || !Array.isArray(tc.custom_calendar.months)) tc.custom_calendar = { label: "", months: [] };
+        return tc.custom_calendar;
     }
-    return tc.custom_calendar;
+    const line = tc.timelines && tc.timelines[lineId];
+    if (!line) return null;
+    if (!line.custom_calendar || !Array.isArray(line.custom_calendar.months)) line.custom_calendar = { label: "", months: [] };
+    return line.custom_calendar;
 }
 
 function ccStatsHtml(cc) {
@@ -355,122 +397,131 @@ function ccStatsHtml(cc) {
     return `共 <b>${sum.monthCount}</b> 个月 · 全年 <b>${sum.yearDays}</b> 天 · 示例：<code>${escapeHtml(sum.sample)}</code>`;
 }
 
-function renderCustomCalendarEditorInner() {
-    const cc = ccEnsure();
+function renderCustomCalendarEditorInner(lineId = null) {
+    const cc = getCcOwner(lineId);
     if (!cc) return "";
+    const lid = lineId || "";
     const months = cc.months;
     const presetBtns = Object.keys(CUSTOM_CALENDAR_PRESETS)
-        .map(k => `<button class="btn-secondary-sm" data-action="ccPreset" data-preset="${k}">${k === "lunar" ? "📅 农历模板" : "🚀 科幻10周期"}</button>`)
+        .map(k => `<button class="btn-secondary-sm" data-action="ccPreset" data-preset="${k}" data-cc-line="${lid}">${k === "lunar" ? "📅 农历模板" : "🚀 科幻10周期"}</button>`)
         .join("");
     const rows = months.map((m, i) => `
-        <div class="cc-month-row" data-idx="${i}">
+        <div class="cc-month-row" data-idx="${i}" data-cc-line="${lid}">
             <span class="cc-drag" draggable="true" title="拖拽排序">⠿</span>
             <span class="cc-idx">${i + 1}</span>
-            <input class="cc-name" type="text" maxlength="10" value="${escapeHtml(m.name)}" data-action="ccRenMonthName" data-idx="${i}" data-event="input" placeholder="月名">
+            <input class="cc-name" type="text" maxlength="10" value="${escapeHtml(m.name)}" data-action="ccRenMonthName" data-idx="${i}" data-cc-line="${lid}" data-event="input" placeholder="月名">
             <span class="cc-unit">月</span>
-            <input class="cc-days" type="number" min="1" max="400" value="${m.days}" data-action="ccRenMonthDays" data-idx="${i}" data-event="input">
+            <input class="cc-days" type="number" min="1" max="400" value="${m.days}" data-action="ccRenMonthDays" data-idx="${i}" data-cc-line="${lid}" data-event="input">
             <span class="cc-unit">天</span>
-            <button class="cc-move" data-action="ccMoveMonth" data-from="${i}" data-to="${Math.max(0, i - 1)}" ${i === 0 ? "disabled" : ""} title="上移">↑</button>
-            <button class="cc-move" data-action="ccMoveMonth" data-from="${i}" data-to="${Math.min(months.length - 1, i + 1)}" ${i === months.length - 1 ? "disabled" : ""} title="下移">↓</button>
-            <button class="cc-leap" data-action="ccLeapMonth" data-after="${i}" title="在此月后插入闰月">＋闰</button>
-            <button class="cc-del" data-action="ccDelMonth" data-idx="${i}" title="删除该月">✕</button>
+            <button class="cc-move" data-action="ccMoveMonth" data-from="${i}" data-to="${Math.max(0, i - 1)}" data-cc-line="${lid}" ${i === 0 ? "disabled" : ""} title="上移">↑</button>
+            <button class="cc-move" data-action="ccMoveMonth" data-from="${i}" data-to="${Math.min(months.length - 1, i + 1)}" data-cc-line="${lid}" ${i === months.length - 1 ? "disabled" : ""} title="下移">↓</button>
+            <button class="cc-leap" data-action="ccLeapMonth" data-after="${i}" data-cc-line="${lid}" title="在此月后插入闰月">＋闰</button>
+            <button class="cc-del" data-action="ccDelMonth" data-idx="${i}" data-cc-line="${lid}" title="删除该月">✕</button>
         </div>`).join("");
     return `
         <div class="cc-editor">
-            <div class="cc-field"><label>历法名（展示用，如：星历）</label><input id="cc_label" type="text" maxlength="20" value="${escapeHtml(cc.label || "")}" data-action="ccRenLabel" data-event="input"></div>
-            <div class="cc-stats" id="ccStats">${ccStatsHtml(cc)}</div>
+            <div class="cc-field"><label>历法名（展示用，如：星历）</label><input id="${lid ? "cc_label_" + lid : "cc_label"}" type="text" maxlength="20" value="${escapeHtml(cc.label || "")}" data-action="ccRenLabel" data-cc-line="${lid}" data-event="input"></div>
+            <div class="cc-stats" id="${lid ? "ccStats_" + lid : "ccStats"}">${ccStatsHtml(cc)}</div>
             <div class="cc-rows">${rows || '<div class="cc-empty">尚未添加月份，点击下方「＋ 添加月份」或选择模板。</div>'}</div>
             <div class="cc-actions">
-                <button class="btn-secondary-sm btn-accent-sm" data-action="ccAddMonth">＋ 添加月份</button>
+                <button class="btn-secondary-sm btn-accent-sm" data-action="ccAddMonth" data-cc-line="${lid}">＋ 添加月份</button>
                 ${presetBtns}
-                <button class="btn-secondary-sm" data-action="ccClearMonths">清空</button>
+                <button class="btn-secondary-sm" data-action="ccClearMonths" data-cc-line="${lid}">清空</button>
             </div>
             <div class="cc-hint">拖拽 ⠿ 可调整月份顺序；「＋闰」在选中月之后插入闰月；月份天数 1–400，最多 24 个月。改动实时写入世界定义，保存即生效。</div>
         </div>`;
 }
 
 // 局部重渲染编辑器内部（结构性操作后调用）；同时按当前历法模式刷新外层显隐
-export function refreshCustomCalendarEditor() {
-    const wrap = document.getElementById("ccEditorWrap");
-    if (!wrap) return;
-    const tc = getEditingTimeConfig();
-    const isCustom = !!(tc && tc.calendar_mode === "custom_calendar");
-    wrap.style.display = isCustom ? "" : "none";
-    const inner = document.getElementById("ccEditor");
-    if (inner) inner.innerHTML = renderCustomCalendarEditorInner();
+// lineId 为 null 针对顶层 #ccEditor；否则针对某条时间线的 #ccEditor_<lineId>
+export function refreshCustomCalendarEditor(lineId = null) {
+    if (lineId == null) {
+        const wrap = document.getElementById("ccEditorWrap");
+        if (!wrap) return;
+        const tc = getEditingTimeConfig();
+        const isCustom = !!(tc && tc.calendar_mode === "custom_calendar");
+        wrap.style.display = isCustom ? "" : "none";
+        const inner = document.getElementById("ccEditor");
+        if (inner) inner.innerHTML = renderCustomCalendarEditorInner(null);
+    } else {
+        const inner = document.getElementById("ccEditor_" + lineId);
+        if (inner) inner.innerHTML = renderCustomCalendarEditorInner(lineId);
+    }
 }
 
-function updateCcStats() {
-    const el = document.getElementById("ccStats");
+function updateCcStats(lineId = null) {
+    const el = document.getElementById(lineId ? "ccStats_" + lineId : "ccStats");
     if (!el) return;
-    const cc = ccEnsure();
+    const cc = getCcOwner(lineId);
     if (cc) el.innerHTML = ccStatsHtml(cc);
 }
 
-// ---- 数据操作（均直接改 live 对象）----
+// ---- 数据操作（均直接改 live 对象；lineId=null 顶层，否则某条时间线）----
 function ccClampMonths(arr) { return clampCustomCalendarMonths(arr); }
 
-export function ccAddMonth() {
-    const cc = ccEnsure(); if (!cc) return;
+export function ccAddMonth(lineId = null) {
+    const cc = getCcOwner(lineId); if (!cc) return;
     if (cc.months.length >= 24) { showToast("自定义历法最多 24 个月", "warn"); return; }
     cc.months = ccClampMonths([...cc.months, { name: `月${cc.months.length + 1}`, days: 30 }]);
-    refreshCustomCalendarEditor();
+    refreshCustomCalendarEditor(lineId);
 }
-export function ccDelMonth(idx) {
-    const cc = ccEnsure(); if (!cc) return;
+export function ccDelMonth(lineId = null, idx) {
+    const cc = getCcOwner(lineId); if (!cc) return;
     if (idx < 0 || idx >= cc.months.length) return;
     cc.months = cc.months.slice(0, idx).concat(cc.months.slice(idx + 1));
-    refreshCustomCalendarEditor();
+    refreshCustomCalendarEditor(lineId);
 }
-export function ccMoveMonth(from, to) {
-    const cc = ccEnsure(); if (!cc) return;
+export function ccMoveMonth(lineId = null, from, to) {
+    const cc = getCcOwner(lineId); if (!cc) return;
     cc.months = reorderMonths(cc.months, from, to);
-    refreshCustomCalendarEditor();
+    refreshCustomCalendarEditor(lineId);
 }
-export function ccRenMonthName(idx, value) {
-    const cc = ccEnsure(); if (!cc || !cc.months[idx]) return;
+export function ccRenMonthName(lineId = null, idx, value) {
+    const cc = getCcOwner(lineId); if (!cc || !cc.months[idx]) return;
     cc.months[idx].name = (value || "").toString().trim().slice(0, 10) || `月${idx + 1}`;
-    updateCcStats();
+    updateCcStats(lineId);
 }
-export function ccRenMonthDays(idx, value) {
-    const cc = ccEnsure(); if (!cc || !cc.months[idx]) return;
+export function ccRenMonthDays(lineId = null, idx, value) {
+    const cc = getCcOwner(lineId); if (!cc || !cc.months[idx]) return;
     const n = parseInt(value, 10);
     cc.months[idx].days = Math.min(400, Math.max(1, Number.isFinite(n) ? (n | 0) : 30));
-    updateCcStats();
+    updateCcStats(lineId);
 }
-export function ccRenLabel(value) {
-    const cc = ccEnsure(); if (!cc) return;
+export function ccRenLabel(lineId = null, value) {
+    const cc = getCcOwner(lineId); if (!cc) return;
     cc.label = (value || "").toString().slice(0, 20);
-    updateCcStats();
+    updateCcStats(lineId);
 }
-export function ccLeapMonth(after) {
-    const cc = ccEnsure(); if (!cc) return;
+export function ccLeapMonth(lineId = null, after) {
+    const cc = getCcOwner(lineId); if (!cc) return;
     if (cc.months.length >= 24) { showToast("自定义历法最多 24 个月", "warn"); return; }
     cc.months = insertLeapMonth(cc.months, after, "闰月", 30);
-    refreshCustomCalendarEditor();
+    refreshCustomCalendarEditor(lineId);
 }
-export function ccPreset(key) {
-    const cc = ccEnsure(); if (!cc) return;
+export function ccPreset(lineId = null, key) {
+    const cc = getCcOwner(lineId); if (!cc) return;
     const src = CUSTOM_CALENDAR_PRESETS[key];
     if (!src) return;
     cc.months = ccClampMonths(deepClone(src));
     if (key === "lunar") cc.label = cc.label || "农历";
     if (key === "scifi") cc.label = cc.label || "星历";
-    refreshCustomCalendarEditor();
+    refreshCustomCalendarEditor(lineId);
 }
-export function ccClearMonths() {
-    const cc = ccEnsure(); if (!cc) return;
+export function ccClearMonths(lineId = null) {
+    const cc = getCcOwner(lineId); if (!cc) return;
     cc.months = [];
-    refreshCustomCalendarEditor();
+    refreshCustomCalendarEditor(lineId);
 }
 
 // 拖拽排序（事件委托，模块加载时绑定一次；编辑器重渲染后仍有效）
 let ccDragFrom = null;
+let ccDragLine = null;
 if (typeof document !== "undefined") {
     document.addEventListener("dragstart", (e) => {
         const row = e.target.closest && e.target.closest(".cc-month-row");
         if (!row) return;
         ccDragFrom = parseInt(row.dataset.idx, 10);
+        ccDragLine = row.dataset.ccLine || null;
         if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(ccDragFrom)); } catch (e) { logError("dragDataSet", e); } }
         row.classList.add("cc-dragging");
     });
@@ -490,14 +541,331 @@ if (typeof document !== "undefined") {
         if (!row || ccDragFrom == null) return;
         e.preventDefault();
         const to = parseInt(row.dataset.idx, 10);
-        if (Number.isFinite(to) && to !== ccDragFrom) ccMoveMonth(ccDragFrom, to);
-        ccDragFrom = null;
+        if (Number.isFinite(to) && to !== ccDragFrom) ccMoveMonth(ccDragLine, ccDragFrom, to);
+        ccDragFrom = null; ccDragLine = null;
     });
     document.addEventListener("dragend", (e) => {
         const row = e.target.closest && e.target.closest(".cc-month-row");
         if (row) row.classList.remove("cc-dragging", "cc-drop");
-        ccDragFrom = null;
+        ccDragFrom = null; ccDragLine = null;
     });
+    // 时间线卡片拖拽排序（UI-2 多线；月份拖拽不触发线拖拽）
+    let mvDragFrom = null;
+    document.addEventListener("dragstart", (e) => {
+        if (e.target.closest && e.target.closest(".cc-month-row")) return;
+        const row = e.target.closest && e.target.closest(".mv-line");
+        if (!row) return;
+        mvDragFrom = parseInt(row.dataset.mvDrag, 10);
+        if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(mvDragFrom)); } catch (e) { logError("dragDataSet", e); } }
+        row.classList.add("mv-dragging");
+    });
+    document.addEventListener("dragover", (e) => {
+        if (mvDragFrom == null) return;
+        const row = e.target.closest && e.target.closest(".mv-line");
+        if (!row) return;
+        e.preventDefault();
+        row.classList.add("mv-drop");
+    });
+    document.addEventListener("dragleave", (e) => {
+        const row = e.target.closest && e.target.closest(".mv-line");
+        if (row) row.classList.remove("mv-drop");
+    });
+    document.addEventListener("drop", (e) => {
+        if (mvDragFrom == null) return;
+        const row = e.target.closest && e.target.closest(".mv-line");
+        if (!row) return;
+        e.preventDefault();
+        const to = parseInt(row.dataset.mvDrag, 10);
+        if (Number.isFinite(to) && to !== mvDragFrom) mvMoveLine(mvDragFrom, to);
+        mvDragFrom = null;
+    });
+    document.addEventListener("dragend", (e) => {
+        const row = e.target.closest && e.target.closest(".mv-line");
+        if (row) row.classList.remove("mv-dragging", "mv-drop");
+        mvDragFrom = null;
+    });
+}
+
+// ================= UI-2 多时间线可视化配置器（docs/43 方案 C）=================
+// 与引擎彻底解耦：仅读写 S.currentWorld.schema.time_config.timelines 与 active_timeline，不改推进逻辑。
+// 文本类输入实时写回 live 数据（保存时直接信任，不重读 DOM，规避隐藏备份副本陈旧问题）；
+// 结构性操作（增/删/改名/排序/模板/切结构）才整块局部重渲染或整面板重画。
+
+const TL_DATED_MODES = ["gregorian", "lunar", "custom_calendar"];
+
+function renderMultiverseEditorInner() {
+    const tc = getEditingTimeConfig();
+    if (!tc) return "";
+    if (!tc.timelines || !Object.keys(tc.timelines).length) {
+        tc.timelines = seedDefaultTimelines(tc);
+        tc.mode = "multiverse";
+        if (!tc.active_timeline || !tc.timelines[tc.active_timeline]) tc.active_timeline = Object.keys(tc.timelines)[0];
+    }
+    const ids = Object.keys(tc.timelines);
+    const calOpts = (sel) => Object.entries(CALENDAR_LABELS).map(([v, t]) => `<option value="${v}"${v === sel ? " selected" : ""}>${t}</option>`).join("");
+    const lineCards = ids.map((id, i) => {
+        const line = tc.timelines[id];
+        const isActive = tc.active_timeline === id;
+        const showDate = TL_DATED_MODES.includes(line.calendar_mode);
+        const cd = line.current_date || {};
+        const ccHost = line.calendar_mode === "custom_calendar"
+            ? `<div class="cc-editor-host" id="ccEditor_${escapeHtml(id)}">${renderCustomCalendarEditorInner(id)}</div>`
+            : `<div class="cc-editor-host" id="ccEditor_${escapeHtml(id)}" style="display:none;"></div>`;
+        // ★ UI-4：每线穿越策略覆盖（null=继承世界级默认）
+        const stratSel = `<div class="form-group mv-strat-wrap"><label>本线穿越策略（覆盖世界级）</label>
+            <select class="mv-strat" data-action="mvLineStrategy" data-id="${escapeHtml(id)}" data-event="change">
+                <option value="" ${!line.timetravel_strategy ? "selected" : ""}>继承世界默认</option>
+                <option value="keep" ${line.timetravel_strategy === "keep" ? "selected" : ""}>保留 (S1)</option>
+                <option value="reset" ${line.timetravel_strategy === "reset" ? "selected" : ""}>重置 (S3)</option>
+                <option value="branch" ${line.timetravel_strategy === "branch" ? "selected" : ""}>分支 (S4)</option>
+            </select></div>`;
+        // ★ UI-3：流速同步规则（本线推进 N 日 ⇒ 参照线 N×ratio 日）
+        const syncRules = Array.isArray(line.sync_rules) ? line.sync_rules : [];
+        const otherIds = ids.filter(x => x !== id);
+        const syncRows = syncRules.map((r, idx) => {
+            const refOpts = otherIds.map(o => `<option value="${escapeHtml(o)}" ${r.ref === o ? "selected" : ""}>${escapeHtml((tc.timelines[o] && tc.timelines[o].name) || o)}</option>`).join("");
+            return `<div class="mv-sync-row">
+                <span class="mv-sync-text">本线 1 日 ⇒</span>
+                <select class="mv-sync-ref" data-action="mvSyncRef" data-id="${escapeHtml(id)}" data-idx="${idx}" data-event="change">${refOpts}</select>
+                <span class="mv-sync-text">线</span>
+                <input class="mv-sync-ratio tc-num" type="number" step="0.0001" min="0" value="${typeof r.ratio === "number" ? r.ratio : 1}" data-action="mvSyncRatio" data-id="${escapeHtml(id)}" data-idx="${idx}" data-event="input" title="流速比（本线 1 日 = 参照线 N 日）">
+                <span class="mv-sync-text">日</span>
+                <button class="btn-secondary-sm danger" data-action="mvDelSync" data-id="${escapeHtml(id)}" data-idx="${idx}">✕</button>
+            </div>`;
+        }).join("");
+        const syncBlock = `<div class="mv-sync">
+            <div class="mv-sync-title">⏱ 流速同步（本线推进 N 日 ⇒ 参照线 N×ratio 日）</div>
+            ${syncRows || '<div class="mv-sync-empty">暂无同步规则</div>'}
+            ${otherIds.length ? `<button class="btn-secondary-sm" data-action="mvAddSync" data-id="${escapeHtml(id)}">＋ 添加同步</button>` : '<span class="mv-sync-empty">需至少两条时间线才能设同步</span>'}
+        </div>`;
+        return `<div class="mv-line" data-mv-id="${escapeHtml(id)}" data-mv-drag="${i}">
+            <div class="mv-line-head">
+                <span class="cc-drag mv-drag" draggable="true" title="拖拽排序时间线">⠿</span>
+                <input class="mv-id" type="text" maxlength="30" value="${escapeHtml(id)}" data-action="mvRenameId" data-old="${escapeHtml(id)}" data-event="change" placeholder="线ID">
+                <input class="mv-name" type="text" maxlength="30" value="${escapeHtml(line.name || "")}" data-action="mvRenName" data-id="${escapeHtml(id)}" data-event="input" placeholder="显示名">
+                <label class="mv-active"><input type="radio" name="mv-active" value="${escapeHtml(id)}" ${isActive ? "checked" : ""} data-action="mvSetActive" data-id="${escapeHtml(id)}> 活动线</label>
+                <button class="cc-del" data-action="mvDelLine" data-id="${escapeHtml(id)}" ${ids.length <= 1 ? "disabled" : ""} title="删除该时间线">✕</button>
+            </div>
+            <div class="mv-line-body">
+                <div class="form-group"><label>历法</label><select class="mv-cal" data-action="mvCalChanged" data-id="${escapeHtml(id)}" data-event="change">${calOpts(line.calendar_mode)}</select></div>
+                <div class="form-group"><label>纪元 / 年份文字</label><input class="mv-era" type="text" maxlength="40" value="${escapeHtml(line.era_label || "")}" data-action="mvRenEra" data-id="${escapeHtml(id)}" data-event="input" placeholder="例如：公元2003年"></div>
+                ${showDate ? `<div class="form-group"><label>初始日期（年/月/日）</label>
+                    <div class="time-cfg-start-row">
+                        <input class="tc-num mv-year" type="number" min="0" max="9999" value="${cd.year != null ? cd.year : ""}" data-action="mvRenDate" data-id="${escapeHtml(id)}" data-field="year" data-event="input" placeholder="年">
+                        <input class="tc-num" type="number" min="1" max="12" value="${cd.month != null ? cd.month : ""}" data-action="mvRenDate" data-id="${escapeHtml(id)}" data-field="month" data-event="input" placeholder="月">
+                        <input class="tc-num" type="number" min="1" max="31" value="${cd.date != null ? cd.date : ""}" data-action="mvRenDate" data-id="${escapeHtml(id)}" data-field="date" data-event="input" placeholder="日">
+                    </div></div>` : ""}
+                <div class="form-group"><label>天气</label><input class="mv-weather" type="text" maxlength="20" value="${escapeHtml(line.weather || "")}" data-action="mvRenWeather" data-id="${escapeHtml(id)}" data-event="input" placeholder="例如：细雨"></div>
+                ${stratSel}
+            </div>
+            ${ccHost}
+            ${syncBlock}
+        </div>`;
+    }).join("");
+    const tplBtns = Object.keys(MULTIVERSE_TEMPLATES).map(k => `<button class="btn-secondary-sm" data-action="mvTpl" data-tpl="${escapeHtml(k)}">🌀 ${escapeHtml(k)}模板</button>`).join("");
+    return `<div class="mv-toolbar"><span class="mv-tip">每条时间线独立流逝（如现实 / 异界）。勾选「活动线」即游戏开局所在线。</span>${tplBtns}</div>
+        <div class="mv-lines">${lineCards || '<div class="cc-empty">尚未添加时间线，点击下方「＋ 添加时间线」。</div>'}</div>
+        <button class="btn-secondary-sm btn-accent-sm" data-action="mvAddLine">＋ 添加时间线</button>
+        <div id="mvConflictBadge" class="time-conflict-badge" style="display:none;"></div>`;
+}
+
+export function refreshMultiverseEditor() {
+    const el = document.getElementById("mvEditor");
+    if (el) el.innerHTML = renderMultiverseEditorInner();
+}
+
+// 整面板重画（结构切换时调用）。关键：直接基于当前视图重渲染，保留用户所在的页签
+// （如「时间体系」），不要调用 openLoreReview——后者会把 S._loreView 强制重置为 "kb"，
+// 导致切换时间结构后整面板被重画回知识库页签（用户反馈的「自动跳走」问题）。
+function rerenderTimeConfigCard() {
+    if (typeof renderLoreReviewBody === "function") renderLoreReviewBody();
+}
+
+// ---- 多时间线数据操作（实时写回 live，结构性操作触发局部/整面板刷新）----
+export function mvAddLine() {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    tc.mode = "multiverse";
+    const id = addTimeline(tc, { name: "新时间线", calendar_mode: "day" });
+    if (!tc.active_timeline || !tc.timelines[tc.active_timeline]) tc.active_timeline = id;
+    refreshMultiverseEditor();
+}
+
+export function mvDelLine(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const id = el.dataset.id;
+    if (!deleteTimeline(tc, id)) { showToast("至少保留一条时间线", "warn"); return; }
+    refreshMultiverseEditor();
+}
+
+export function mvSetActive(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    setActiveTimeline(tc, el.dataset.id);
+}
+
+export function mvRenameId(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const oldId = el.dataset.old;
+    const newId = (el.value || "").trim();
+    if (!renameTimelineKey(tc, oldId, newId)) {
+        showToast("线ID不可为空或与现有重复", "warn");
+    }
+    refreshMultiverseEditor();
+}
+
+export function mvRenName(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (line) line.name = (el.value || "").toString().trim().slice(0, 30);
+}
+
+export function mvCalChanged(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (!line) return;
+    line.calendar_mode = el.value;
+    refreshMultiverseEditor(); // 切换历法改变日期输入与内嵌自定义历法编辑器显隐
+}
+
+export function mvRenEra(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (line) line.era_label = (el.value || "").toString().trim().slice(0, 40);
+}
+
+export function mvRenDate(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (!line) return;
+    const field = el.dataset.field;
+    let v = parseInt(el.value, 10);
+    if (!Number.isFinite(v)) return; // 空输入忽略，保留原值
+    if (field === "year") v = Math.max(0, Math.min(9999, v));
+    else if (field === "month") v = Math.min(12, Math.max(1, v));
+    else if (field === "date") v = Math.max(1, v);
+    if (!line.current_date || typeof line.current_date !== "object") line.current_date = {};
+    line.current_date[field] = v;
+}
+
+export function mvRenWeather(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (line) line.weather = (el.value || "").toString().trim().slice(0, 20);
+}
+
+export function mvMoveLine(from, to) {
+    const tc = getEditingTimeConfig(); if (!tc || !tc.timelines) return;
+    const ids = Object.keys(tc.timelines);
+    if (from < 0 || from >= ids.length) return;
+    const t = Math.min(ids.length - 1, Math.max(0, to));
+    const [moved] = ids.splice(from, 1);
+    ids.splice(t, 0, moved);
+    const reordered = {};
+    for (const id of ids) reordered[id] = tc.timelines[id];
+    tc.timelines = reordered;
+    refreshMultiverseEditor();
+}
+
+export function mvTpl(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    if (!applyMultiverseTemplate(tc, el.dataset.tpl)) return;
+    refreshMultiverseEditor();
+}
+
+// ★ UI-4：世界级默认时间穿越策略（逆跳默认行为 S1/S3/S4）
+export function defaultStrategyChanged(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const v = el && el.value;
+    if (v === "keep" || v === "reset" || v === "branch") tc.default_timetravel_strategy = v;
+}
+
+// ★ UI-4：每线穿越策略覆盖（"" / null = 继承世界级默认）
+export function mvLineStrategy(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (!line) return;
+    const v = el.value;
+    line.timetravel_strategy = (v === "keep" || v === "reset" || v === "branch") ? v : null;
+}
+
+// ★ UI-3：流速同步规则（本线推进 N 日 ⇒ 按 ratio 同步参照线）
+export function mvAddSync(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (!line) return;
+    if (!Array.isArray(line.sync_rules)) line.sync_rules = [];
+    const others = Object.keys(tc.timelines).filter(x => x !== el.dataset.id);
+    if (!others.length) return;
+    line.sync_rules.push({ ref: others[0], ratio: 1 });
+    clampSyncRules(tc);
+    refreshMultiverseEditor();
+}
+
+export function mvDelSync(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (!line || !Array.isArray(line.sync_rules)) return;
+    const idx = parseInt(el.dataset.idx, 10);
+    if (Number.isFinite(idx) && idx >= 0 && idx < line.sync_rules.length) line.sync_rules.splice(idx, 1);
+    clampSyncRules(tc);
+    refreshMultiverseEditor();
+}
+
+export function mvSyncRef(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (!line || !Array.isArray(line.sync_rules)) return;
+    const idx = parseInt(el.dataset.idx, 10);
+    if (Number.isFinite(idx) && idx >= 0 && idx < line.sync_rules.length) line.sync_rules[idx].ref = el.value;
+    clampSyncRules(tc);
+}
+
+export function mvSyncRatio(el) {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const line = tc.timelines && tc.timelines[el.dataset.id];
+    if (!line || !Array.isArray(line.sync_rules)) return;
+    const idx = parseInt(el.dataset.idx, 10);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= line.sync_rules.length) return;
+    const v = parseFloat(el.value);
+    if (Number.isFinite(v) && v > 0) line.sync_rules[idx].ratio = v;
+}
+
+// 世界结构切换（单线 ↔ 多线）；多线时种子默认线，单线时从活动线折叠回单线配置
+export function timeStructChanged() {
+    const tc = getEditingTimeConfig(); if (!tc) return;
+    const sel = document.getElementById("tc_struct");
+    const mode = sel ? sel.value : "single";
+    if (mode === "multiverse") {
+        tc.mode = "multiverse";
+        if (!tc.timelines || !Object.keys(tc.timelines).length) {
+            tc.timelines = seedDefaultTimelines(tc);
+            if (!tc.active_timeline || !tc.timelines[tc.active_timeline]) tc.active_timeline = Object.keys(tc.timelines)[0];
+        }
+    } else {
+        tc.mode = "single";
+        const active = (tc.timelines && tc.active_timeline && tc.timelines[tc.active_timeline]) || null;
+        if (active) {
+            tc.calendar_mode = active.calendar_mode || "day";
+            tc.era_label = active.era_label || "";
+            tc.calendar_start = active.calendar_start ? { ...active.calendar_start } : null;
+            tc.weather = active.weather || "";
+            tc.custom_calendar = active.custom_calendar || null;
+        }
+    }
+    rerenderTimeConfigCard();
+}
+
+// 多时间线只读/概览摘要（save 视图与概览用）
+function summarizeMultiverse(cfg) {
+    const tl = cfg.timelines || {};
+    const ids = Object.keys(tl);
+    if (!ids.length) return "多时间线（未配置）";
+    const active = cfg.active_timeline;
+    return "多时间线：" + ids.map(id => {
+        const l = tl[id];
+        const tag = id === active ? "★" : "";
+        const cal = CALENDAR_LABELS[l.calendar_mode] || l.calendar_mode;
+        return `${tag}${escapeHtml(l.name || id)}(${cal})`;
+    }).join(" / ");
 }
 
 // S5-4'：开场白时间修复按钮组（仅 world 模式卡片；当前世界已有开场白才可点）
@@ -691,9 +1059,11 @@ function renderLoreReviewBody() {
         hiddenTime = `<div id="timeFormBackup" style="display:none">${timeForm}</div>`;
     }
 
-    // 图谱视图时加宽弹窗
-    const modal = document.getElementById("loreReviewModal");
-    if (modal) modal.classList.toggle("modal-graph-wide", S._loreView === "graph");
+    // 图谱视图时加宽弹窗：类只加在内层 .modal（弹窗本身），
+    // 切勿加在外层 .modal-overlay（遮罩层）——否则遮罩被限宽，右侧无遮罩 + 弹窗偏左
+    const modalEl = document.getElementById("loreReviewModal");
+    const modalBox = modalEl && modalEl.querySelector(".modal");
+    if (modalBox) modalBox.classList.toggle("modal-graph-wide", S._loreView === "graph");
 
     body.innerHTML = `
       <div class="lore-review-shell">
