@@ -430,7 +430,7 @@ export function buildTimeModeRules() {
     if (cfg && cfg.era_label) timeExtra += `当前纪元/年份：${cfg.era_label}。`;
     if (cfg && cfg.calendar_mode && cfg.calendar_mode !== "none") timeExtra += `本世界历法为「${cfg.calendar_mode}」，叙事中可用对应的月日表达时间（如阴历「三月初九」）。`;
     if (cfg && cfg.calendar_mode === "gregorian") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（真实公历，含星期）。常规推进只填 period；跨度（闭关/沉睡/远行）填 addMonths/addDays（如闭关三月填 addMonths:3）；跳到具体历史/未来日期填绝对 year/month/date（如昏迷苏醒到 2004-06-16 填 {year:2004,month:6,date:16}）。真实历史世界观不得编造与史实冲突的日期。`;
-    if (cfg && cfg.calendar_mode === "lunar") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（农历）。跨度填 addMonths/addDays；绝对跳填写 year/month/date。`;
+    if (cfg && cfg.calendar_mode === "lunar") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（农历）。跨度填 addMonths/addDays；绝对跳填写 year/month/date。农历每月对应节气（供剧情借节气起承转合，落日以真实年份为准、此处只给月份归属）：正月立春/雨水、二月惊蛰/春分、三月清明/谷雨、四月立夏/小满、五月芒种/夏至、六月小暑/大暑、七月立秋/处暑、八月白露/秋分、九月寒露/霜降、十月立冬/小雪、冬月大雪/冬至、腊月小寒/大寒。`;
     if (cfg && cfg.calendar_mode === "custom_calendar") timeExtra += `当前日期在状态 JSON 中以 year/month/date 给出（本世界自定义历法，月长见 custom_calendar 配置）。跨度与绝对跳转同上，按本世界月长计算。`;
     if (cfg && cfg.weather) timeExtra += `当前天气：${cfg.weather}。天气可随剧情变化。`;
     if (cfg && cfg.clock_mode === "clock") timeExtra += `本世界使用具体时钟制。每次行动可将耗时分钟数填入 state_changes.current_date.elapsed_minutes（如 15=15 分钟），系统自动累加并换算日期、时段与时钟。典型耗时：短应答 5 分钟、勘察/聊天 15 分钟、远行 60 分钟、重大事件 120 分钟。`;

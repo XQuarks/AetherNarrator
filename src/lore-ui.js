@@ -403,7 +403,7 @@ function renderCustomCalendarEditorInner(lineId = null) {
     const lid = lineId || "";
     const months = cc.months;
     const presetBtns = Object.keys(CUSTOM_CALENDAR_PRESETS)
-        .map(k => `<button class="btn-secondary-sm" data-action="ccPreset" data-preset="${k}" data-cc-line="${lid}">${k === "lunar" ? "📅 农历模板" : "🚀 科幻10周期"}</button>`)
+        .map(k => `<button class="btn-secondary-sm" data-action="ccPreset" data-preset="${k}" data-cc-line="${lid}">${k === "lunar" ? "📅 农历模板" : k === "lunarLeap" ? "📅 农历(含闰月)" : "🚀 科幻10周期"}</button>`)
         .join("");
     const rows = months.map((m, i) => `
         <div class="cc-month-row" data-idx="${i}" data-cc-line="${lid}">
@@ -428,7 +428,7 @@ function renderCustomCalendarEditorInner(lineId = null) {
                 ${presetBtns}
                 <button class="btn-secondary-sm" data-action="ccClearMonths" data-cc-line="${lid}">清空</button>
             </div>
-            <div class="cc-hint">拖拽 ⠿ 可调整月份顺序；「＋闰」在选中月之后插入闰月；月份天数 1–400，最多 24 个月。改动实时写入世界定义，保存即生效。</div>
+            <div class="cc-hint">拖拽 ⠿ 可调整月份顺序；「＋闰」在选中月之后插入闰月；月份天数 1–400，最多 24 个月。需要闰月的农历世界，可选「📅 农历(含闰月)」模板一键载入，再用「＋闰」插入其它闰月。改动实时写入世界定义，保存即生效。</div>
         </div>`;
 }
 
@@ -504,6 +504,7 @@ export function ccPreset(lineId = null, key) {
     if (!src) return;
     cc.months = ccClampMonths(deepClone(src));
     if (key === "lunar") cc.label = cc.label || "农历";
+    if (key === "lunarLeap") cc.label = cc.label || "农历";
     if (key === "scifi") cc.label = cc.label || "星历";
     refreshCustomCalendarEditor(lineId);
 }

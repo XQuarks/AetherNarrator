@@ -105,8 +105,25 @@ export const DEFAULT_LUNAR = {
         { name: "正月", days: 30 }, { name: "二月", days: 29 }, { name: "三月", days: 30 },
         { name: "四月", days: 29 }, { name: "五月", days: 30 }, { name: "六月", days: 29 },
         { name: "七月", days: 30 }, { name: "八月", days: 29 }, { name: "九月", days: 30 },
-        { name: "十月", days: 29 }, { name: "冬月", days: 30 }, { name: "腊月", days: 29 }
+        { name: "十月", days: 29 },         { name: "冬月", days: 30 }, { name: "腊月", days: 29 }
     ]
+};
+
+// C-1 节气映射：12 农历月 → [节, 中气]（标准传统对应，无需格里历锚点）。
+// 仅用于「显示标注」与给 AI 的月份→节气提示，不做天文级精确落日计算。
+export const SOLAR_TERMS = {
+    1: ["立春", "雨水"],
+    2: ["惊蛰", "春分"],
+    3: ["清明", "谷雨"],
+    4: ["立夏", "小满"],
+    5: ["芒种", "夏至"],
+    6: ["小暑", "大暑"],
+    7: ["立秋", "处暑"],
+    8: ["白露", "秋分"],
+    9: ["寒露", "霜降"],
+    10: ["立冬", "小雪"],
+    11: ["大雪", "冬至"],
+    12: ["小寒", "大寒"]
 };
 
 function num(x) { return Number.isFinite(x) ? x : 0; }
@@ -215,7 +232,13 @@ export function formatCalendarDate(cd, mode, custom = null, opts = {}) {
             ? ((tbl.months[((cd.month - 1) % tbl.months.length + tbl.months.length) % tbl.months.length] || {}).name || `第${cd.month}月`)
             : "";
         const dPart = (cd.date != null) ? cnDay(cd.date) : "";
-        return [tbl.label || "农历", mName, dPart].filter(Boolean).join("");
+        let s = [tbl.label || "农历", mName, dPart].filter(Boolean).join("");
+        // C-1：显示层可在 opts.showSolarTerms 开启时附加该月节气（默认关，保引擎层向后兼容）
+        if (opts && opts.showSolarTerms && cd.month != null) {
+            const terms = SOLAR_TERMS[((cd.month - 1) % 12 + 12) % 12 + 1];
+            if (terms) s += `（${terms[0]}～${terms[1]}）`;
+        }
+        return s;
     }
     if (mode === "custom_calendar") {
         const tbl = (custom && custom.months) ? custom : DEFAULT_LUNAR;
@@ -327,7 +350,15 @@ export function normalizeCurrentDate(currentDate, timeConfig = {}) {
 // 预设月历表：农历=现成 DEFAULT_LUNAR；科幻历=示例（10 个「周期」各 36 天，360 天年）。
 export const CUSTOM_CALENDAR_PRESETS = {
     lunar: DEFAULT_LUNAR.months.map(m => ({ name: m.name, days: m.days })),
-    scifi: Array.from({ length: 10 }, (_, i) => ({ name: `周期 ${i + 1}`, days: 36 }))
+    scifi: Array.from({ length: 10 }, (_, i) => ({ name: `周期 ${i + 1}`, days: 36 })),
+    // C-1 闰月路径：含「闰二月」的 13 月农历示例表，创作者一键载入「农历(含闰月)」模板。
+    lunarLeap: [
+        { name: "正月", days: 30 }, { name: "二月", days: 29 }, { name: "闰二月", days: 29 },
+        { name: "三月", days: 30 }, { name: "四月", days: 29 }, { name: "五月", days: 30 },
+        { name: "六月", days: 29 }, { name: "七月", days: 30 }, { name: "八月", days: 29 },
+        { name: "九月", days: 30 }, { name: "十月", days: 29 }, { name: "冬月", days: 30 },
+        { name: "腊月", days: 29 }
+    ]
 };
 
 // 夹紧自定义月份数组：≤24 月、天数夹取 1–400、月名空回退「月N」、剥离非法项。
