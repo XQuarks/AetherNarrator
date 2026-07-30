@@ -246,6 +246,41 @@ export function updateFontSizeButtons() {
     });
 }
 
+// ★ P0：叙事节奏 / 中文叙事字数 / 阅读速度 —— 玩家可调设置（仿 changeFontSize）
+export function changeNarrativePacing(mode) {
+    S.narrativePacing = mode;
+    localStorage.setItem("aigame_pacing", mode);
+    updateNarrativePacingButtons();
+}
+export function changeNarrativeLength(mode) {
+    S.narrativeLength = mode;
+    localStorage.setItem("aigame_narrlen", mode);
+    updateNarrativeLengthButtons();
+}
+export function changeReadingSpeed(mode) {
+    S.readingSpeed = mode;
+    localStorage.setItem("aigame_readspeed", mode);
+    updateReadingSpeedButtons();
+}
+export function updateNarrativePacingButtons() {
+    ["compact", "standard", "relaxed"].forEach(m => {
+        const btn = document.getElementById("pace" + m.charAt(0).toUpperCase() + m.slice(1));
+        if (btn) btn.classList.toggle("active", S.narrativePacing === m);
+    });
+}
+export function updateNarrativeLengthButtons() {
+    ["short", "standard", "long"].forEach(m => {
+        const btn = document.getElementById("len" + m.charAt(0).toUpperCase() + m.slice(1));
+        if (btn) btn.classList.toggle("active", S.narrativeLength === m);
+    });
+}
+export function updateReadingSpeedButtons() {
+    ["slow", "standard", "fast", "instant"].forEach(m => {
+        const btn = document.getElementById("rs" + m.charAt(0).toUpperCase() + m.slice(1));
+        if (btn) btn.classList.toggle("active", S.readingSpeed === m);
+    });
+}
+
 export function tempLabelText(v) {
     if (v <= 0.3) return "严谨模式（高度一致）";
     if (v <= 0.5) return "剧情模式（稳定连贯）";

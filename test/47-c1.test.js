@@ -42,8 +42,8 @@ function baseWorld(overModules) {
 }
 
 // ---------- 注册表默认 ----------
-test("MODULE_REGISTRY 含 12 个模块且含核心三件套", () => {
-    assert.strictEqual(MODULE_REGISTRY.length, 12);
+test("MODULE_REGISTRY 含 13 个模块且含核心三件套", () => {
+    assert.strictEqual(MODULE_REGISTRY.length, 13);
     const ids = MODULE_REGISTRY.map(m => m.id);
     for (const must of ["lore", "characters", "memory", "time", "skills", "inventory", "goals",
         "variables", "affinity", "quest", "map", "schedule"]) {
@@ -69,7 +69,7 @@ test("defaultModules：核心恒开；time/inventory/goals 默认开；variables
 test("sanitizeModules：旧世界（无 modules）补全全部默认模块", () => {
     const w = { id: "old", name: "老世界", schema: {} };
     const out = sanitizeModules(w);
-    assert.strictEqual(Object.keys(out).length, 12);
+    assert.strictEqual(Object.keys(out).length, 13);
     assert.strictEqual(out.time.enabled, true);
     assert.strictEqual(out.variables.enabled, false);
     assert.strictEqual(w.modules, out, "应写回 world.modules");

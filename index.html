@@ -94,6 +94,16 @@
             </div>
         </div>
         <div class="settings-card">
+            <label class="settings-label">阅读速度</label>
+            <div class="font-size-controls">
+                <button class="font-size-btn" data-action="changeReadingSpeed" data-mode="slow" id="rsSlow">慢</button>
+                <button class="font-size-btn" data-action="changeReadingSpeed" data-mode="standard" id="rsStandard">标准</button>
+                <button class="font-size-btn" data-action="changeReadingSpeed" data-mode="fast" id="rsFast">快</button>
+                <button class="font-size-btn" data-action="changeReadingSpeed" data-mode="instant" id="rsInstant">瞬显</button>
+            </div>
+            <div class="settings-hint">调节 AI 剧情逐字浮现与流式刷新的节奏；「瞬显」直接显示整段。游玩中也可在「游戏设置」里调叙事节奏与字数。</div>
+        </div>
+        <div class="settings-card">
             <label class="settings-label">
                 <input type="checkbox" id="loreRequireConfirm" data-action="toggleLoreRequireConfirm" data-event="change" style="width:auto;">
                 知识库修订需我手动确认
@@ -887,6 +897,22 @@
             <button class="btn" data-action="showAuthorNoteModal" style="text-align:left;">✍️ 叙事约束（作者注）</button>
             <button class="btn" id="aiEnhancedToggle" data-action="toggleAIEnhanced" style="text-align:left;">🧠 AI 增强检查：已关闭</button>
             <button class="btn" data-action="exportStory" style="text-align:left;">📄 导出剧情文本</button>
+            <div class="settings-card" style="margin-top:4px;">
+                <label class="settings-label">叙事节奏（中途可调）</label>
+                <div class="font-size-controls">
+                    <button class="font-size-btn" data-action="changeNarrativePacing" data-mode="compact" id="paceCompact">紧凑</button>
+                    <button class="font-size-btn" data-action="changeNarrativePacing" data-mode="standard" id="paceStandard">标准</button>
+                    <button class="font-size-btn" data-action="changeNarrativePacing" data-mode="relaxed" id="paceRelaxed">舒缓</button>
+                </div>
+            </div>
+            <div class="settings-card" style="margin-top:4px;">
+                <label class="settings-label">中文叙事字数（中途可调）</label>
+                <div class="font-size-controls">
+                    <button class="font-size-btn" data-action="changeNarrativeLength" data-mode="short" id="lenShort">简略</button>
+                    <button class="font-size-btn" data-action="changeNarrativeLength" data-mode="standard" id="lenStandard">适中</button>
+                    <button class="font-size-btn" data-action="changeNarrativeLength" data-mode="long" id="lenLong">详尽</button>
+                </div>
+            </div>
         </div>
         <div class="modal-footer">
             <button class="btn primary" data-action="closeModal" data-modal="gameSettingsModal">关闭</button>

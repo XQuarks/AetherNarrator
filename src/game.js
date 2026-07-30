@@ -3,7 +3,7 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts, ensureWorldCanon, resolveCanonContext, applyConsistencyPack, computeVariableUpdates, computeBondUpdates } from "./store.js";
-import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape, logError } from "./utils.js";
+import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape, logError, removeSentenceWithTerm } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
 import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartDate, applySyncRules, calendarDayIndex } from "./calendar.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
@@ -887,6 +887,61 @@ export function buildSmartFallbackChoices() {
     return picked;
 }
 
+// ★ IP#6：纯函数计算本回合命中的违禁概念（已剔除用户「忽略」列表），供扫描与单测复用。
+// rules 来自 getBannedConceptRules()；narrative/choicesText 拼接后交给世界观扫描器。
+export function computeIpScanHits(narrative, choicesText, rules, ignored) {
+    const violations = findWorldviewViolations(
+        (narrative || "") + "\n" + (choicesText || ""),
+        rules || [], new Set(getActiveConditionTags())
+    );
+    const ig = new Set((ignored || []).map(s => String(s).toLowerCase()));
+    return violations
+        .map(v => v.matched)
+        .filter(Boolean)
+        .filter(t => !ig.has(String(t).toLowerCase()));
+}
+
+// ★ IP#6：「移除这句」——删掉包含命中词的那个句子，标黄/提示条消失。
+export function removeBannedSentence(idx, term) {
+    const entry = S.conversationHistory[idx];
+    if (!entry) return;
+    entry.narrative = removeSentenceWithTerm(entry.narrative, term);
+    entry.bannedHits = [];
+    entry.scanWarn = false;
+    renderLog(true);
+    saveState();
+}
+
+// ★ IP#6：「忽略」——把命中词加入静默名单，本回合及之后不再提示；标黄/提示条消失。
+export function ignoreBannedTerm(idx, term) {
+    if (!S.gameState.ignoredBanned) S.gameState.ignoredBanned = [];
+    if (term && !S.gameState.ignoredBanned.includes(term)) S.gameState.ignoredBanned.push(term);
+    const entry = S.conversationHistory[idx];
+    if (entry) { entry.bannedHits = []; entry.scanWarn = false; }
+    renderLog(true);
+    saveState();
+}
+
+// ★ IP#6：「AI 重写本回合」——把该回合替换为同输入重新生成的一轮（仅支持最新回合，避免破坏中间历史）。
+// 重跑会再多 push 一轮多轮上下文，截断回重跑前长度，避免 chatHistory 膨胀。
+export async function regenerateTurn(idx) {
+    const entry = S.conversationHistory[idx];
+    if (!entry || !entry.player) { showToast("无法重写该回合", "warn"); return; }
+    if (idx !== S.conversationHistory.length - 1) {
+        showToast("仅支持重写最新一回合", "warn");
+        return;
+    }
+    if (S.isGenerating) { showToast("上一回合仍在生成，请稍候", "warn"); return; }
+    const input = entry.player;
+    const chatBefore = S.chatHistory.length;
+    const summaryBefore = S.chatSummary.length;
+    removeLogEntry(idx);
+    await processTurn(input);
+    if (S.chatHistory.length > chatBefore) S.chatHistory.length = chatBefore;
+    if (S.chatSummary.length > summaryBefore) S.chatSummary.length = summaryBefore;
+    saveState();
+}
+
 export async function submitInput() {
     skipTypewriter();
     if (S.isGenerating) { showToast("上一回合仍在生成，请稍候", "warn"); return; }
@@ -1007,23 +1062,15 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
         }
     }
 
-    // ★ A2 生成后世界观合规守卫（柔和提醒，不阻断回合）
-    // 选项场景一致性修复（docs/18）：把玩家选项文本也并入扫描范围，
-    // 避免选项里出现世界观禁用概念（原实现只扫 narrative）。
-    const choiceText = (resp.choices || []).map(c => (c && c.text) ? c.text : "").join("\n");
-    const localViolations = findWorldviewViolations(
-        resp.narrative + "\n" + choiceText,
-        getBannedConceptRules(), getActiveConditionTags()
-    );
-    if (localViolations.length) {
-        const hit = localViolations[0].matched;
-        if (hit) {
-            // ★ 「3 次后静默」：同一概念累计提示满阈值则不再弹（仍照常检测，不影响剧情）
-            const nag = recordWorldviewNag("a2:" + hit, S.gameState.worldviewNagCounts);
-            if (nag.show) {
-                S.gameState.worldviewNagCounts = nag.counts;
-                showToast("⚠️ 叙事似乎偏离了世界观（出现「" + hit + "」），若非有意为之可重述或忽略。", "warn", 4000);
-            }
+    // ★ A2 / IP#6 生成后世界观合规扫描（受 ip_scan 模块门禁；warn 模式：标黄 + 提示条，不阻断回合）
+    // 选项场景一致性修复（docs/18）：把玩家选项文本也并入扫描范围。
+    // 自由度≥4 时 getBannedConceptRules() 返回空 → 天然免扫（与项目「高自由度放宽」一致）。
+    if (isModuleEnabled(S.currentWorld, "ip_scan")) {
+        const choiceText = (resp.choices || []).map(c => (c && c.text) ? c.text : "").join("\n");
+        const hits = computeIpScanHits(resp.narrative, choiceText, getBannedConceptRules(), S.gameState.ignoredBanned);
+        if (hits.length) {
+            pendingEntry.bannedHits = hits;
+            pendingEntry.scanWarn = true;
         }
     }
 

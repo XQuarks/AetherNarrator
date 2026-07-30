@@ -1224,13 +1224,31 @@ export function highlightItems(text) {
 }
 
 /**
+ * 在「已转义、已含物品高亮」的 HTML 上，把命中的违禁概念标黄（IP#6）。
+ * 注意入参 html 已是转义后的文本，故这里只转义 term 再正则匹配，避免二次转义破坏既有 <span>。
+ */
+export function highlightBanned(html, hits) {
+    if (!html || !Array.isArray(hits) || !hits.length) return html;
+    const terms = [...new Set(hits.filter(Boolean).map(String))];
+    if (!terms.length) return html;
+    let out = html;
+    for (const term of terms) {
+        const escapedTerm = escapeHtml(term);
+        const regex = new RegExp(escapeRegExp(escapedTerm), "g");
+        out = out.replace(regex, `<span class="banned-hit">${escapedTerm}</span>`);
+    }
+    return out;
+}
+
+/**
  * 把剧情文本渲染为带段落结构的 HTML。
  * - 按空行（\n\n）拆分为独立段落 <p>，段间距由 CSS 的 `p + p` 规则控制；
  * - 段落内的单个换行保留为 <br>，避免被浏览器折叠；
  * - 物品高亮（highlightItems）在转义后生效，且高亮不会破坏已插入的 <br>。
+ * - 可选 bannedHits：命中的违禁概念（IP#6），在物品高亮之后叠加黄底标黄。
  * 注意：highlightItems 内部会先 escapeHtml，\n 不会被转义，故可在其后安全替换。
  */
-export function renderNarrative(text, isWarning) {
+export function renderNarrative(text, isWarning, bannedHits) {
     if (isWarning) return escapeHtml(text || "");
     const blocks = (text || "")
         .split(/\n{2,}/)
@@ -1238,8 +1256,28 @@ export function renderNarrative(text, isWarning) {
         .filter(b => b.length);
     if (!blocks.length) return escapeHtml(text || "");
     return blocks
-        .map(b => `<p>${highlightItems(b).replace(/\n/g, "<br>")}</p>`)
+        .map(b => `<p>${highlightBanned(highlightItems(b), bannedHits).replace(/\n/g, "<br>")}</p>`)
         .join("");
+}
+
+/**
+ * ★ IP#6：渲染「疑似偏离世界观」提示条（纯 HTML，无 DOM 依赖，便于单测）。
+ * 含三个动作按钮：移除这句 / AI 重写本回合 / 忽略。data-idx 为条目在 conversationHistory 的下标。
+ */
+export function renderScanWarnBar(entry, index) {
+    const hits = Array.isArray(entry.bannedHits) ? entry.bannedHits : [];
+    const term = hits.length ? hits[0] : "";
+    const more = hits.length > 1 ? `（共 ${hits.length} 处）` : "";
+    const termAttr = escapeHtml(term);
+    return `
+        <div class="scan-warn-bar">
+            <span class="scan-warn-text">⚠️ 疑似偏离世界观（出现「<b>${termAttr}</b>」${more}）</span>
+            <span class="scan-warn-actions">
+                <button class="scan-warn-btn" data-action="removeBannedSentence" data-idx="${index}" data-term="${termAttr}">移除这句</button>
+                <button class="scan-warn-btn" data-action="regenerateTurn" data-idx="${index}">AI 重写本回合</button>
+                <button class="scan-warn-btn ghost" data-action="ignoreBannedTerm" data-idx="${index}" data-term="${termAttr}">忽略</button>
+            </span>
+        </div>`;
 }
 
 export function renderLog(reset) {
@@ -1259,9 +1297,10 @@ export function renderLog(reset) {
                 <span>${metaLabel} · ${escapeHtml(entry.tcd ? formatTimeLabel(entry.tcd, getTimeConfig().timeConfig) : formatTimeShort(entry.day, entry.period, entry.clock))}</span>
             </div>
             ${entry.player ? `<div class="player-text">${escapeHtml(entry.player)}</div>` : ""}
-            <div class="narrative">${renderNarrative(entry.narrative, entry.isWarning)}</div>
+            <div class="narrative">${renderNarrative(entry.narrative, entry.isWarning, entry.bannedHits)}</div>
             ${entry.atmosphere ? `<div class="log-whisper"><span>◈ ${escapeHtml(entry.atmosphere)}</span></div>` : ""}
             ${renderTurnChanges(entry)}
+            ${entry.scanWarn && !entry.isWarning ? renderScanWarnBar(entry, i) : ""}
         </div>
         `;
         log.insertBefore(createElementFromHTML(html), document.getElementById("choicesArea"));
@@ -1279,9 +1318,31 @@ export function renderTurnChanges(entry) {
         `</div>`;
 }
 
+// ★ P0：阅读速度 → 打字机延迟表（instant=null 表示跳过逐字动画直接定稿）
+const TYPING_SPEED_TABLE = {
+    slow:     { base: 28, sentence: 160, comma: 80, newline: 100, quote: 55 },
+    standard: { base: 12, sentence: 70,  comma: 35, newline: 45,  quote: 25 }, // = 原硬编码值
+    fast:     { base: 6,  sentence: 32,  comma: 16, newline: 22,  quote: 12 },
+    instant:  null
+};
+// 纯函数，可单测：返回当前档位的延迟表；未知档回落 standard；instant 显式返回 null。
+export function getTypingDelays(level) {
+    if (Object.prototype.hasOwnProperty.call(TYPING_SPEED_TABLE, level)) return TYPING_SPEED_TABLE[level];
+    return TYPING_SPEED_TABLE.standard;
+}
+// 纯函数，可单测：流式节流毫秒；仅 slow 节流 120ms，其余（含瞬显）立即（= 原行为）。
+export function getStreamThrottleMs(level) {
+    return level === "slow" ? 120 : 0;
+}
+
 // ★ 实时流式：把模型正在生成的叙事（部分文本）直接写进指定日志条目的 .narrative，
 // 让玩家在模型边生成边看到文字（首字延迟从「整段生成完」降到约 1~2 秒）。
-export function updateLiveNarrative(index, text) {
+// 流式节流状态（模块级）：slow 档下累积文本、按 getStreamThrottleMs 节奏 repaint
+let _liveLastPaint = 0;
+let _livePending = null;
+let _liveTimer = null;
+
+function _paintLive(index, text) {
     const log = document.getElementById("gameLog");
     if (!log) return;
     const entries = log.querySelectorAll(".log-entry");
@@ -1291,6 +1352,25 @@ export function updateLiveNarrative(index, text) {
     if (!el) return;
     el.textContent = text || "";
     log.scrollTop = log.scrollHeight;
+}
+
+export function updateLiveNarrative(index, text) {
+    const throttle = getStreamThrottleMs(S.readingSpeed);
+    if (throttle <= 0) { _paintLive(index, text); return; }  // 标准/快/瞬显：即时（= 原行为）
+    _livePending = { index, text };
+    const now = Date.now();
+    if (now - _liveLastPaint >= throttle) {
+        _liveLastPaint = now;
+        _paintLive(index, text);
+        _livePending = null;
+    } else if (!_liveTimer) {
+        // 兜底：在距上次绘制满 throttle 时补一次最终文本的 repaint，避免末段文本残留不显示
+        _liveTimer = setTimeout(() => {
+            _liveTimer = null;
+            _liveLastPaint = Date.now();
+            if (_livePending) { _paintLive(_livePending.index, _livePending.text); _livePending = null; }
+        }, throttle - (now - _liveLastPaint));
+    }
 }
 
 // ★ 实时流式：只移除某条日志的 DOM（不动 conversationHistory 数组），供重渲染复用
@@ -1330,6 +1410,14 @@ export function startTypewriter(index) {
     const fullText = data.narrative || "";
     if (!fullText) return Promise.resolve();
 
+    // ★ P0：阅读速度=瞬显 时直接定稿，不做逐字动画
+    const typingDelays = getTypingDelays(S.readingSpeed);
+    if (!typingDelays) {
+        narrativeEl.innerHTML = renderNarrative(fullText, data.isWarning);
+        entry.querySelector(".log-whisper")?.classList.remove("hidden");
+        return Promise.resolve();
+    }
+
     // 清空容器，进入打字状态（不再因系统"减少动态效果"而跳过逐字动画）
     narrativeEl.innerHTML = "";
     narrativeEl.classList.add("typing");
@@ -1353,12 +1441,12 @@ export function startTypewriter(index) {
             i++;
             log.scrollTop = log.scrollHeight;
 
-            // 标点处停顿，更接近阅读节奏（P0 提速：整体更紧凑，避免整段打完再叠加十几秒）
-            let delay = 12;
-            if ("。！？…".includes(ch)) delay = 70;
-            else if ("，、；：".includes(ch)) delay = 35;
-            else if (ch === "\n") delay = 45;
-            else if (ch === "「" || ch === "」" || ch === '"' ) delay = 25;
+            // ★ P0：标点处停顿，延迟取自阅读速度档位（中途改实时生效）
+            let delay = typingDelays.base;
+            if ("。！？…".includes(ch)) delay = typingDelays.sentence;
+            else if ("，、；：".includes(ch)) delay = typingDelays.comma;
+            else if (ch === "\n") delay = typingDelays.newline;
+            else if (ch === "「" || ch === "」" || ch === '"' ) delay = typingDelays.quote;
             S.typingTimer = setTimeout(typeNext, delay);
         }
         typeNext();

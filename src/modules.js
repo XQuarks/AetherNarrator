@@ -42,8 +42,20 @@ export const MODULE_REGISTRY = [
     // —— 未来占位（本期只登记，不实现业务）——
     { id: "quest", name: "任务系统", desc: "可接取/交付的任务（占位，未实现）", defaultEnabled: false },
     { id: "map", name: "地图系统", desc: "地点与地图探索（占位，未实现）", defaultEnabled: false },
-    { id: "schedule", name: "日程系统", desc: "日程与章节化回溯（占位，未实现）", defaultEnabled: false }
+    { id: "schedule", name: "日程系统", desc: "日程与章节化回溯（占位，未实现）", defaultEnabled: false },
+
+    // —— IP 一致性（IP#6 生成后硬扫描；黎总 2026-07-30 拍板：填了作品名才默认开）——
+    // defaultEnabled 为函数：世界填了 ip_name（作品来源名）→ 默认开；纯原创没填 → 默认关。
+    { id: "ip_scan", name: "IP/世界观合规扫描", desc: "生成后扫描叙事，标黄违禁概念并提示（不阻断）",
+        defaultEnabled: (world) => !!(world && (world.ip_name || (world.canon && world.canon.ip_name))),
+        promptFragment: () => "【IP/世界观合规扫描】本世界启用了生成后合规扫描，请勿在叙事中引入与设定冲突的违禁概念（如世界观禁律所列）。" }
 ];
+
+// defaultEnabled 解析：支持「布尔」或「(world) => boolean」两种形式。
+function resolveDefault(reg, world) {
+    if (typeof reg.defaultEnabled === "function") return reg.defaultEnabled(world);
+    return reg.defaultEnabled !== false;
+}
 
 export function getModuleRegistry() {
     return MODULE_REGISTRY;
@@ -53,10 +65,10 @@ export function getModuleById(id) {
     return MODULE_REGISTRY.find(m => m.id === id) || null;
 }
 
-// 新世界默认开关对象（按注册表 defaultEnabled 生成）
-export function defaultModules() {
+// 新世界默认开关对象（按注册表 defaultEnabled 生成；ip_scan 等支持按 world 动态默认）
+export function defaultModules(world) {
     const o = {};
-    for (const m of MODULE_REGISTRY) o[m.id] = { enabled: m.defaultEnabled !== false };
+    for (const m of MODULE_REGISTRY) o[m.id] = { enabled: resolveDefault(m, world) };
     return o;
 }
 
@@ -65,7 +77,7 @@ export function defaultModules() {
 export function sanitizeModules(world) {
     if (!world || typeof world !== "object") return {};
     const cur = (world.modules && typeof world.modules === "object") ? world.modules : {};
-    const out = defaultModules();
+    const out = defaultModules(world);
     for (const m of MODULE_REGISTRY) {
         if (cur[m.id] && typeof cur[m.id].enabled === "boolean") {
             out[m.id] = { enabled: cur[m.id].enabled };
@@ -76,13 +88,13 @@ export function sanitizeModules(world) {
 }
 
 // 统一的门禁判断：所有业务逻辑只问这一个函数。
-// 核心模块永远返回 true；world.modules 缺失时回退到注册表 defaultEnabled。
+// 核心模块永远返回 true；world.modules 缺失时回退到注册表 defaultEnabled（支持函数型）。
 export function isModuleEnabled(world, id) {
     const reg = MODULE_REGISTRY.find(m => m.id === id);
     if (!reg) return false;
     if (reg.core) return true; // 核心模块不可关
     const m = world && world.modules && world.modules[id];
-    if (!m) return reg.defaultEnabled !== false;
+    if (!m) return resolveDefault(reg, world);
     return m.enabled !== false;
 }
 

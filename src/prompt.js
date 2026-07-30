@@ -1012,6 +1012,23 @@ export function buildAuthoritativeTime(state, tc) {
     return `【当前权威时间】（叙事时间真相源，AI 须以此为准）\n${body}\n${footer}`;
 }
 
+// ★ P0：叙事节奏 / 中文叙事字数 的玩家可控注入（中部每轮重建，不走 system 缓存，中途改下一回合即生效）
+// 纯函数、可单测；standard 档不追加任何指令，保证默认行为与现状一致（零回归）。
+export function buildNarrativeControlNote(pacing = "standard", length = "standard") {
+    const parts = [];
+    if (pacing === "compact") {
+        parts.push("【叙事节奏·紧凑】以推进模式为主，信息密度高，减少环境铺陈，聚焦剧情与行动。");
+    } else if (pacing === "relaxed") {
+        parts.push("【叙事节奏·舒缓】可适当增加环境与心理描写，节奏舒缓，允许细腻铺陈。");
+    }
+    if (length === "short") {
+        parts.push("【叙事字数·简略】每轮中文叙事控制在约150字以内，精炼扼要。");
+    } else if (length === "long") {
+        parts.push("【叙事字数·详尽】每轮中文叙事可展开至约500字，充分描写。");
+    }
+    return parts.join("\n");
+}
+
 // ★ B2：中部注入位 author_note —— 作为独立消息插在「最近对话」与「本轮玩家输入」之间。
 // 内容 = 事件引擎动态推进提示（基于当前状态判定，非写死脚本）+ 玩家手动设定的持续约束 + ★S5-6 权威当前时间。
 // 放在这个位置的目的：给一个"中部纠偏位"，让导演级提示不被埋没在 user 消息末尾。
@@ -1040,6 +1057,9 @@ export function buildAuthorNote() {
     if (styleLabel) {
         parts.push("【文风保持】本轮及后续所有输出，必须维持本世界强制文风（见系统提示“本世界强制文风”节）。如检测到语气/用词偏离，立即回调，不要等玩家纠正。");
     }
+    // ★ P0：合并玩家可控的叙事节奏 / 字数指令（中部每轮生效，中途改即下一回合生效）
+    const ctrlNote = buildNarrativeControlNote(S.narrativePacing, S.narrativeLength);
+    if (ctrlNote) parts.push(ctrlNote);
     return parts.join("\n\n");
 }
 

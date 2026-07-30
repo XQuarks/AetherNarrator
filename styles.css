@@ -2870,3 +2870,53 @@ html[data-theme="light"] .char-card select {
 .custom-tag-row { display: flex; align-items: center; gap: 8px; }
 .custom-tag-row input { flex: 1; max-width: 220px; }
 .char-count { font-size: 12px; color: #9a8f7e; }
+
+/* ===== IP#6 生成后硬扫描：违禁概念标黄 + 提示条 ===== */
+.banned-hit {
+    background: rgba(255, 196, 0, 0.28);
+    border-bottom: 1px dashed rgba(255, 150, 0, 0.9);
+    border-radius: 3px;
+    padding: 0 2px;
+    color: inherit;
+}
+[data-theme="light"] .banned-hit {
+    background: rgba(255, 170, 0, 0.22);
+    border-bottom-color: rgba(214, 130, 0, 0.9);
+}
+.scan-warn-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-top: 10px;
+    padding: 9px 12px;
+    border: 1px solid rgba(255, 170, 0, 0.5);
+    background: rgba(255, 196, 0, 0.1);
+    border-radius: var(--radius-m);
+    font-size: 13px;
+    color: var(--text);
+}
+[data-theme="light"] .scan-warn-bar {
+    background: rgba(255, 170, 0, 0.1);
+    border-color: rgba(214, 130, 0, 0.45);
+}
+.scan-warn-text { flex: 1 1 auto; min-width: 160px; }
+.scan-warn-text b { color: #c8881a; }
+.scan-warn-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.scan-warn-btn {
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 170, 0, 0.6);
+    background: rgba(255, 196, 0, 0.18);
+    color: #6a4e10;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s ease;
+}
+.scan-warn-btn:hover { background: rgba(255, 196, 0, 0.32); }
+.scan-warn-btn.ghost {
+    background: transparent;
+    border-color: var(--card-border);
+    color: var(--text-secondary);
+}
+[data-theme="light"] .scan-warn-btn { color: #7a5a12; }

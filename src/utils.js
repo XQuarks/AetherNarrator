@@ -277,6 +277,16 @@ export function escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// ★ IP#6：从一段文本里移除「包含 term 的那个句子」（按中英文句末标点 / 换行切分）。
+// 纯函数，可在 Node 下单测；game.js 的「移除这句」按钮复用它。
+export function removeSentenceWithTerm(text, term) {
+    if (!text || !term) return text || "";
+    const parts = String(text).split(/(?<=[。！？!?；;\n])/);
+    const kept = parts.filter(p => !p.includes(term));
+    const joined = kept.join("").replace(/\n{3,}/g, "\n\n").trim();
+    return joined || String(text); // 若整段都被移除则保留原样，避免清空叙事
+}
+
 // ============================================================
 // S5-3 · 开场白占位符解析（纯函数，可在 Node 下单测）
 // 把 {era_label}/{calendar_date}/{calendar_year}/{calendar_month} 展开为当前时间。

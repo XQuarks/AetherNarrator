@@ -47,6 +47,10 @@ export const S = {
   themeClickTimer: null,
   lastFocusedBeforeModal: null,
   fontSizeSetting: _lsGet("aigame_fontsize", "normal"),
+  // ★ P0：叙事节奏 / 中文叙事字数 / 阅读速度（全局 UI 偏好，localStorage 持久化，不改存档结构）
+  narrativePacing: _lsGet("aigame_pacing", "standard"),   // compact / standard / relaxed
+  narrativeLength: _lsGet("aigame_narrlen", "standard"),  // short / standard / long
+  readingSpeed: _lsGet("aigame_readspeed", "standard"),  // slow / standard / fast / instant
   renderedEntryCount: 0,
   typingTimer: null,
   typingIndex: -1,

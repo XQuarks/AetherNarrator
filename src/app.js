@@ -6,12 +6,12 @@ import { STORAGE_KEYS } from "./store.js";
 import { warmupEmbeddingWorker } from "./rag.js";
 import { deepClone, logError } from "./utils.js";
 import { installGlobalErrorGuard } from "./error-guard.js";
-import { applyFontSize, applyTheme, changeFontSize, toggleTheme } from "./theme.js";
+import { applyFontSize, applyTheme, changeFontSize, toggleTheme, changeNarrativePacing, changeNarrativeLength, changeReadingSpeed, updateNarrativePacingButtons, updateNarrativeLengthButtons, updateReadingSpeedButtons } from "./theme.js";
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev, showToast, editWorldType, onEditWorldTypeChange, saveWorldTypeEdit } from "./render.js";
-import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules } from "./game.js";
+import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, removeBannedSentence, ignoreBannedTerm, regenerateTurn } from "./game.js";
 import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./save.js";
 import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
 import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, refreshMultiverseEditor, timeStructChanged, mvAddLine, mvDelLine, mvSetActive, mvRenameId, mvRenName, mvCalChanged, mvRenEra, mvRenDate, mvRenWeather, mvMoveLine, mvTpl, defaultStrategyChanged, mvLineStrategy, mvAddSync, mvDelSync, mvSyncRef, mvSyncRatio, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
@@ -38,6 +38,10 @@ async function init() {
     installGlobalErrorGuard();
     applyTheme();
     applyFontSize();
+    // ★ P0：初始化时同步叙事节奏/字数/阅读速度的按钮高亮态
+    updateNarrativePacingButtons();
+    updateNarrativeLengthButtons();
+    updateReadingSpeedButtons();
     await loadConfig();
 
     // 逐个加载数据文件，各自独立降级，一个失败不影响其他
@@ -181,6 +185,9 @@ const ACTIONS = {
     predictBranches: () => handlePredictBranches(),
     // 字体
     changeFontSize: (el) => changeFontSize(el.dataset.size),
+    changeNarrativePacing: (el) => changeNarrativePacing(el.dataset.mode),
+    changeNarrativeLength: (el) => changeNarrativeLength(el.dataset.mode),
+    changeReadingSpeed: (el) => changeReadingSpeed(el.dataset.mode),
     // 滑块/下拉
     updatePlotFreedomLabel: (el) => updatePlotFreedomLabel(el.value),
     updateWorldTempLabel: () => updateWorldTempLabel(),
@@ -234,6 +241,10 @@ const ACTIONS = {
     saveAuthorNote: () => saveAuthorNote(),
     // ★ C1：保存模块开关设置
     saveWorldModules: (el) => saveWorldModules(el.dataset.id),
+    // ★ IP#6：生成后硬扫描提示条的三个动作
+    removeBannedSentence: (el) => removeBannedSentence(Number(el.dataset.idx), el.dataset.term),
+    ignoreBannedTerm: (el) => ignoreBannedTerm(Number(el.dataset.idx), el.dataset.term),
+    regenerateTurn: (el) => regenerateTurn(Number(el.dataset.idx)),
     // ★ B3：知识库编辑面板
     editWorldLore: (el) => editWorldLore(el.dataset.id),
     openLoreReview: () => openLoreReview(),
