@@ -37,6 +37,8 @@ const { buildBondHint, formatStateChanges } = await import("../src/prompt.js");
 
 function setupWorld() {
     S.currentWorld = { id: "w_b4", rules: [], lore_kb: { snippets: [] } };
+    // ★ C1：好感度/变量现在受模块开关控制；本测试专测 bonds，显式开启对应模块
+    S.currentWorld.modules = { affinity: { enabled: true }, variables: { enabled: true } };
     S.activeLoreKB = { snippets: [] };
     S.gameState = defaultInitialState();
     S.activeBehaviorRecords = [];

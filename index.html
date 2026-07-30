@@ -194,6 +194,10 @@
     </div>
     <div class="game-body">
         <div class="game-log" id="gameLog"><div class="choices-row in-log" id="choicesArea"></div></div>
+        <div class="player-tools" id="playerTools">
+            <button class="btn-secondary-sm" data-action="showPlayerNoteModal">📝 我的笔记</button>
+            <button class="btn-secondary-sm" data-action="showPreviewModal">🔮 前瞻</button>
+        </div>
         <div class="game-input-area">
             <div class="loading-indicator" id="loadingIndicator">
                 <span class="loading-dot"></span>
@@ -642,6 +646,51 @@
         <div class="modal-footer">
             <button class="btn secondary" data-action="closeModal" data-modal="authorNoteModal">取消</button>
             <button class="btn primary" data-action="saveAuthorNote">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= C4：我的笔记弹窗（玩家私人备忘，存档级） ================= -->
+<div class="modal-overlay" id="playerNoteModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="playerNoteModalTitle">
+        <div class="modal-header">
+            <h2 id="playerNoteModalTitle">📝 我的笔记</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="playerNoteModal">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="playerNoteInput">私人备忘（仅本存档可见）</label>
+                <p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:var(--text-secondary);">
+                    这里写的话会作为你的私人备忘，每一轮都提醒 AI，影响后续剧情走向。<br>
+                    例如：我想之后去找到张三 / 这个角色不能信 / 我希望剧情推进更谨慎。<br>
+                    <strong>仅当前存档可见，不会串到其它存档或世界。</strong>
+                </p>
+                <textarea id="playerNoteInput" placeholder="输入你的备忘..." style="min-height:140px;"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="playerNoteModal">取消</button>
+            <button class="btn primary" data-action="savePlayerNote">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= C4：走向前瞻弹窗（理解 A·后果预览，纯展示） ================= -->
+<div class="modal-overlay" id="branchPreviewModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="branchPreviewModalTitle">
+        <div class="modal-header">
+            <h2 id="branchPreviewModalTitle">🔮 走向前瞻</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="branchPreviewModal">×</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin:0 0 10px;font-size:13px;line-height:1.6;color:var(--text-secondary);">
+                以下几条是 AI 基于当前剧情推断的「可能走向」，<strong>只给方向、不剧透结局</strong>，仅供你做决定参考。
+            </p>
+            <div id="previewResult" class="branch-list"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" data-action="closeModal" data-modal="branchPreviewModal">关闭</button>
+            <button class="btn primary" data-action="predictBranches">推断走向</button>
         </div>
     </div>
 </div>

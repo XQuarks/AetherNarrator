@@ -1384,6 +1384,23 @@
             flex-wrap: wrap;
             overflow: visible; /* 关键：in-log 模式需要换行显示全部选项，不能被 overflow-x:auto 截成单行滚动盒 */
         }
+        /* ★ C4：游戏界面底部「我的笔记 / 前瞻」工具条 */
+        .player-tools {
+            display: flex; gap: 8px; margin: 2px 0 8px; padding: 0 2px;
+        }
+        .player-tools .btn-secondary-sm { font-size: 12px; padding: 6px 12px; }
+        /* ★ C4：走向前瞻卡片（纯展示） */
+        .branch-list { display: flex; flex-direction: column; gap: 10px; }
+        .branch-card {
+            border: 1px solid var(--card-border);
+            border-left: 3px solid var(--primary);
+            border-radius: var(--radius-m);
+            padding: 10px 12px;
+            background: var(--card);
+        }
+        .branch-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+        .branch-likely { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+        .branch-risk { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
         .input-row {
             display: flex;
             gap: 6px;
@@ -2098,6 +2115,14 @@ html[data-theme="light"] .char-card select {
 .completion-item.done { color: var(--text); }
 .completion-item.todo { color: var(--text-secondary); opacity: .85; }
 .completion-note { font-size: 12px; color: var(--text-secondary); margin: 10px 0 0; line-height: 1.6; }
+
+/* ★ C1：模块开关勾选列表（世界详情「模块开关」页签） */
+.mod-switches { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 16px; }
+.mod-switch { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.5; cursor: pointer; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: var(--radius-m); background: var(--card); }
+.mod-switch input[type="checkbox"] { margin-top: 3px; width: 16px; height: 16px; flex: none; }
+.mod-switch b { color: var(--text); }
+.mod-switch .muted { color: var(--text-secondary); }
+.mod-switch input[type="checkbox"]:disabled + b { color: var(--text-secondary); }
 
 .cat-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; margin: 8px 0; }
 .cat-seg { height: 100%; }

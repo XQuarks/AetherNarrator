@@ -10,7 +10,7 @@ import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory, styleToTemperature } from "./prompt.js";
-import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative, generateConsistencyPack } from "./llm.js";
+import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative, generateConsistencyPack, predictBranches } from "./llm.js";
 import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry, collectStylePrefs } from "./render.js";
 import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules, recordWorldviewNag } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
@@ -18,6 +18,7 @@ import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { runWorldCritic } from "./critic.js"; // ★ Phase 3：审稿人
 import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
+import { sanitizeModules, isModuleEnabled } from "./modules.js"; // ★ C1：保存模块设置时归一 + 逻辑门禁
 import { activeTimelineKey, getTimelineTriggered, recordTrigger, resetTriggers, createBranch, resolveTimeTravelStrategy } from "./triggers.js";
 
 // UI-4：判定时间是否倒流（逆跳）。dated 模式用原生日期比较；day/none/period 用绝对分钟比较。
@@ -322,6 +323,75 @@ export function saveAuthorNote() {
     showToast(val ? "持续约束已保存，之后每轮生效" : "已清空持续约束", "success");
 }
 
+// ★ C1：保存"模块开关"设置（从世界详情的模块页签勾选框读回 world.modules）
+export function saveWorldModules(worldId) {
+    const w = S.worlds.find(x => x.id === worldId);
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    const mods = (w.modules && typeof w.modules === "object") ? { ...w.modules } : {};
+    const toggles = document.querySelectorAll("#detailWorldBody .mod-toggle");
+    toggles.forEach(el => {
+        const id = el && el.dataset ? el.dataset.mod : null;
+        if (!id) return;
+        // 核心模块恒开，忽略创作者取消勾选
+        mods[id] = { enabled: el.checked === true };
+    });
+    w.modules = mods;
+    sanitizeModules(w); // 归一（核心模块强制 true）
+    saveWorlds();
+    invalidateSystemPromptCache(); // 模块变化影响系统提示，失效缓存以便重建
+    showToast("模块设置已保存", "success");
+}
+
+// ★ C4：打开「我的笔记」弹窗，载入当前存档已保存的玩家备忘
+export function showPlayerNoteModal() {
+    if (!S.currentWorld) { showToast("请先进入一个世界", "warn"); return; }
+    const ta = document.getElementById("playerNoteInput");
+    if (ta) ta.value = (typeof S.playerNotes === "string") ? S.playerNotes : "";
+    showModal("playerNoteModal");
+}
+
+// ★ C4：保存玩家备忘（存档级，写入当前存档并持久化，不进 world）
+export function savePlayerNote() {
+    const ta = document.getElementById("playerNoteInput");
+    const val = ta ? ta.value.trim().slice(0, 2000) : "";
+    S.playerNotes = val;
+    createOrUpdateSave(); // 写回 save.player_notes
+    closeModal("playerNoteModal");
+    showToast(val ? "笔记已保存，之后每轮生效" : "已清空笔记", "success");
+}
+
+// ★ C4：打开「走向前瞻」弹窗（默认提示态）
+export function showPreviewModal() {
+    if (!S.currentWorld) { showToast("请先进入一个世界", "warn"); return; }
+    const box = document.getElementById("previewResult");
+    if (box) box.innerHTML = '<p class="muted">点击下方「推断走向」获取 AI 的方向性预测（只给方向、不剧透结局）。</p>';
+    showModal("branchPreviewModal");
+}
+
+// ★ C4：触发一次走向前瞻（理解 A·后果预览）；纯展示、不污染叙事
+export async function handlePredictBranches() {
+    const box = document.getElementById("previewResult");
+    if (box) box.innerHTML = '<p class="muted">推断中…</p>';
+    try {
+        const branches = await predictBranches();
+        if (box) {
+            if (!branches.length) {
+                box.innerHTML = '<p class="muted">暂时无法推断走向，请稍后再试。</p>';
+            } else {
+                box.innerHTML = branches.map(b => `
+                    <div class="branch-card">
+                        <div class="branch-title">${escapeHtml(b.branch)}</div>
+                        ${b.likely ? `<div class="branch-likely">${escapeHtml(b.likely)}</div>` : ""}
+                        ${b.risk ? `<div class="branch-risk">⚠ ${escapeHtml(b.risk)}</div>` : ""}
+                    </div>`).join("");
+            }
+        }
+    } catch (e) {
+        logError("predictBranches", e);
+        if (box) box.innerHTML = '<p class="muted">推断失败，请检查 API 配置后重试。</p>';
+    }
+}
+
 
 export function confirmRestart(worldId) {
     // ★ 修复：原生 confirm() 在预览/webview 沙箱常被静默拦截，导致点击无反应；改用项目统一弹窗
@@ -499,7 +569,8 @@ export function applyStateChanges(changes) {
 
     // ★ B4：羁绊 / 好感度更新（叠加在文字关系层之上，不动 relationships 文字）
     // AI 在 state_changes.bonds 返回 { [npcName]: { delta, tags, desc } }，纯函数累加。
-    if (changes.bonds && S.currentWorld) {
+    // ★ C1：affinity 模块关闭时不应用好感度变化（核心模块恒开，此门禁对默认世界无影响）
+    if (changes.bonds && S.currentWorld && isModuleEnabled(S.currentWorld, "affinity")) {
         const pre = (s.bonds && typeof s.bonds === "object") ? { ...s.bonds } : {};
         const upd = computeBondUpdates(changes.bonds, s.bonds);
         s.bonds = upd.next;
@@ -529,7 +600,8 @@ export function applyStateChanges(changes) {
             })));
         }
     }
-    if (changes.skills) {
+    // ★ C1：skills 模块关闭时不应用技能变化
+    if (changes.skills && isModuleEnabled(S.currentWorld, "skills")) {
         for (const [k, v] of Object.entries(changes.skills)) {
             if (typeof v === "string" && v.trim() !== "") {
                 s.skills[k] = v;
@@ -545,7 +617,8 @@ export function applyStateChanges(changes) {
     // ★ B2：玩家变量更新（复用现有 state_changes 通道）
     // AI 在 state_changes.variables 返回变化后的值；computeVariableUpdates 按 schema
     // 校验类型、夹取 [min,max]、忽略未知/未启用变量，返回 { next, applied }。
-    if (changes.variables && S.currentWorld) {
+    // ★ C1：variables 模块关闭时不应用玩家变量变化
+    if (changes.variables && S.currentWorld && isModuleEnabled(S.currentWorld, "variables")) {
         const upd = computeVariableUpdates(changes.variables, S.currentWorld, s.variables);
         s.variables = upd.next;
         // 变量变化影响「本回合变化」展示与状态面板；若变量定义变化需重建缓存则已在编辑器保存处处理，
@@ -554,7 +627,8 @@ export function applyStateChanges(changes) {
 
     if (changes.progression) s.progression = { ...s.progression, ...changes.progression };
 
-    if (changes.inventory) {
+    // ★ C1：inventory 模块关闭时不应用背包变化
+    if (changes.inventory && isModuleEnabled(S.currentWorld, "inventory")) {
         const newlyKeyItems = [];
         for (const op of changes.inventory) {
             const itemTags = (op.tags && Array.isArray(op.tags)) ? op.tags : null;
@@ -588,7 +662,8 @@ export function applyStateChanges(changes) {
         }
     }
 
-    if (changes.goal_updates) {
+    // ★ C1：goals 模块关闭时不应用目标变化
+    if (changes.goal_updates && isModuleEnabled(S.currentWorld, "goals")) {
         for (const u of changes.goal_updates) {
             const g = s.goals.find(x => x.goal_id === u.goal_id);
             if (g) {
@@ -628,7 +703,8 @@ export function applyStateChanges(changes) {
             ? { period: changes.period }
             : null;
     const prevActiveDate = s.current_date ? deepClone(s.current_date) : null; // UI-3/UI-4：推进前快照，算跨线同步增量与逆跳判定
-    if (timeChange) {
+    // ★ C1：time 模块关闭时不推进时间（核心模块恒开；创作者关闭后时间静止）
+    if (timeChange && isModuleEnabled(S.currentWorld, "time")) {
         const result = advanceWorldTime(s.current_date, timeChange, timeCtx);
         s.current_date = result.currentDate;
         if (result.rejected) logError("timeRollbackIgnored", new Error("AI 试图回退时间，已忽略 " + JSON.stringify(timeChange)));

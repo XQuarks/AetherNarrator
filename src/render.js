@@ -5,6 +5,7 @@ import { S, calendarLabel, MEMORY_TYPE_LABELS, getEnabledVariables } from "./sto
 
 import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema, computeWorldCompletion, logError } from "./utils.js";
 import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, formatTimeLabel, formatDeadlineLabel, stepOf, updateFontSizeButtons, getAllTimelineViews, formatDateOnly, tempLabelText } from "./theme.js";
+import { isModuleEnabled, MODULE_REGISTRY } from "./modules.js"; // ★ C1：状态 Tab 按模块开关显隐 + 模块开关 UI
 // 注：页面按钮的 chooseOption / startGame / loadSave 等动作均通过 data-action 属性由 app.js 事件接线分发，
 // 本模块不直接引用这些函数，不反向依赖 game.js / save.js，避免循环引用（docs/34 #1）。
 import { abortCurrentRequest } from "./turn-lifecycle.js";
@@ -627,6 +628,7 @@ export function showWorldDetail(worldId) {
             <button class="detail-tab" data-detail-tab="characters">角色</button>
             <button class="detail-tab" data-detail-tab="variables">变量</button>
             <button class="detail-tab" data-detail-tab="items">物品</button>
+            <button class="detail-tab" data-detail-tab="modules">模块开关</button>
         </div>
         <div class="detail-tab-content active" data-detail-tab-content="overview">
             ${completionCard}
@@ -667,6 +669,10 @@ export function showWorldDetail(worldId) {
         <div class="detail-tab-content" data-detail-tab-content="items">
             <div class="char-list">${itemCards}</div>
             <button class="btn secondary" data-action="openItemEditor" data-id="${id}">编辑物品</button>
+        </div>
+        <div class="detail-tab-content" data-detail-tab-content="modules">
+            ${renderModuleSwitches(w)}
+            <button class="btn primary" data-action="saveWorldModules" data-id="${id}">保存模块设置</button>
         </div>
     `;
 
@@ -795,23 +801,39 @@ export function closeStatusPanel() {
 
 export function renderStatusTabs() {
     const schema = getWorldSchema(S.currentWorld);
+    const world = S.currentWorld;
     const tabs = [
         { key: "profile", label: "属性" },
         { key: "background", label: "背景" },
-        { key: "state", label: "状态" },
-        { key: "relations", label: "关系" },
-        { key: "items", label: "物品" }
+        { key: "state", label: "状态" }
     ];
-    if (schema.has_skills) {
+    // ★ C1：关系页签——羁绊好感度模块开启时显示；若世界已有文字关系层也保留（兼容老档）
+    const hasRelations = !!(S.gameState && S.gameState.relationships && Object.keys(S.gameState.relationships).length);
+    if (isModuleEnabled(world, "affinity") || hasRelations) {
+        tabs.push({ key: "relations", label: "关系" });
+    }
+    // ★ C1：背包物品页签按 inventory 模块开关
+    if (isModuleEnabled(world, "inventory")) {
+        tabs.push({ key: "items", label: "物品" });
+    }
+    // ★ C1：技能页签按 skills 模块开关（替代原 schema.has_skills 散装判断）
+    if (isModuleEnabled(world, "skills")) {
         tabs.push({ key: "skills", label: schema.skill_label || "技能" });
     }
-    // ★ B2：仅当世界定义了玩家变量时才显示「变量」页签（默认空世界不出现数字压力）
-    if (getEnabledVariables(S.currentWorld).length) {
+    // ★ B2：仅当世界定义了玩家变量且 variables 模块开启时才显示「变量」页签
+    if (isModuleEnabled(world, "variables") && getEnabledVariables(world).length) {
         tabs.push({ key: "variables", label: "变量" });
     }
-    tabs.push({ key: "goals", label: "目标" });
+    // ★ C1：目标页签按 goals 模块开关
+    if (isModuleEnabled(world, "goals")) {
+        tabs.push({ key: "goals", label: "目标" });
+    }
+    // ★ C1：记忆页签 = memory 核心模块（永远显示）
     tabs.push({ key: "memory", label: "记忆" });
-    tabs.push({ key: "timeline", label: "时间线" });
+    // ★ C1：时间线页签按 time 模块开关
+    if (isModuleEnabled(world, "time")) {
+        tabs.push({ key: "timeline", label: "时间线" });
+    }
 
     document.getElementById("statusTabs").innerHTML = tabs.map(t => `
         <button class="status-tab ${S.currentStatusTab === t.key ? "active" : ""}" data-action="switchStatusTab" data-key="${t.key}">${t.label}</button>
@@ -822,6 +844,18 @@ export function switchStatusTab(tab) {
     S.currentStatusTab = tab;
     renderStatusTabs();
     renderStatusPanel(tab);
+}
+
+// ★ C1：按注册表自动渲染"模块开关"勾选框（核心模块不可关，置灰）。
+// 新增模块只需在 src/modules.js 的 MODULE_REGISTRY 加一条描述，此处自动出现对应勾选框。
+export function renderModuleSwitches(world) {
+    const items = MODULE_REGISTRY.map(m => {
+        const on = isModuleEnabled(world, m.id);
+        const disabled = m.core ? "disabled" : "";
+        const note = m.core ? "（核心模块，不可关闭）" : "";
+        return `<label class="mod-switch"><input type="checkbox" class="mod-toggle" data-mod="${m.id}" ${on ? "checked" : ""} ${disabled}> <b>${escapeHtml(m.name)}</b> <span class="muted">${escapeHtml(m.desc)}${note}</span></label>`;
+    }).join("");
+    return `<p class="muted">开启 / 关闭本世界启用的系统。关闭后对应界面与机制将停用，AI 也不会自行引入相关机制。</p><div class="mod-switches">${items}</div>`;
 }
 
 export function renderTextAttribute(label, value) {

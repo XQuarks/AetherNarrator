@@ -11,7 +11,7 @@ import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset }
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev, showToast, editWorldType, onEditWorldTypeChange, saveWorldTypeEdit } from "./render.js";
-import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline } from "./game.js";
+import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules } from "./game.js";
 import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./save.js";
 import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
 import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, refreshMultiverseEditor, timeStructChanged, mvAddLine, mvDelLine, mvSetActive, mvRenameId, mvRenName, mvCalChanged, mvRenEra, mvRenDate, mvRenWeather, mvMoveLine, mvTpl, defaultStrategyChanged, mvLineStrategy, mvAddSync, mvDelSync, mvSyncRef, mvSyncRatio, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
@@ -174,6 +174,11 @@ const ACTIONS = {
     reviewDeathScene: () => reviewDeathScene(),
     // 模态关闭
     closeModal: (el) => closeModal(el.dataset.modal),
+    // ★ C4：玩家备注 + 分支前瞻
+    showPlayerNoteModal: () => showPlayerNoteModal(),
+    savePlayerNote: () => savePlayerNote(),
+    showPreviewModal: () => showPreviewModal(),
+    predictBranches: () => handlePredictBranches(),
     // 字体
     changeFontSize: (el) => changeFontSize(el.dataset.size),
     // 滑块/下拉
@@ -227,6 +232,8 @@ const ACTIONS = {
     // ★ B2：导演提示 / 持续约束
     showAuthorNoteModal: () => showAuthorNoteModal(),
     saveAuthorNote: () => saveAuthorNote(),
+    // ★ C1：保存模块开关设置
+    saveWorldModules: (el) => saveWorldModules(el.dataset.id),
     // ★ B3：知识库编辑面板
     editWorldLore: (el) => editWorldLore(el.dataset.id),
     openLoreReview: () => openLoreReview(),

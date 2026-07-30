@@ -12,6 +12,7 @@ export const S = {
   loreEmbeddings: null,
   activeLoreKB: null,   // ★ B7：当前存档的独立知识库副本（开局时从 world.lore_kb 深拷贝，编辑仅改此副本）
   activeBehaviorRecords: [], // 当前存档的独立行为记忆；世界对象只作旧数据迁移来源
+  playerNotes: "", // ★ C4：玩家私人备忘（存档级，不进 world）；每轮注入中部槽位，让 AI 记得玩家意图
   aiEnhanced: false,    // 当前存档的额外 AI 检查总开关
   conversationHistory: [],
   chatHistory: [],

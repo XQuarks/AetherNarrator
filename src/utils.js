@@ -124,7 +124,7 @@ export function sanitizeWorldConfig(raw) {
     if (!raw || typeof raw !== "object") return {};
     const out = {};
     // 允许的顶层键（其余一律丢弃）
-    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags"];
+    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags", "modules"];
     for (const k of ALLOWED) {
         if (k in raw && raw[k] !== undefined) out[k] = raw[k];
     }

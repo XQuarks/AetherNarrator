@@ -7,6 +7,7 @@ import { dedupeStrings, getWorldSchema, resolveOpeningTokens } from "./utils.js"
 import { getTimeConfig, formatWorldTime, getPeriodLabel, stepOf } from "./theme.js";
 import { formatCalendarDate } from "./calendar.js";
 import { getProvider } from "./providers.js";
+import { buildModulePromptContext } from "./modules.js"; // ★ C1：世界模块开关——启用指令 + 未启用约束
 
 // 模块级缓存标志：核心知识库是否已固定注入 system（buildSystemPrompt 写、getPositionedLore 读）
 let isCoreLoreCached = false;
@@ -313,6 +314,9 @@ export function buildSystemPrompt() {
         // 当前进度值改由 buildCompactGameState() 注入每轮 user 消息（动态段），system 完全静态 → 前缀缓存稳定命中 95%+，超大 system 永远按 1 折计费。
         systemPrompt += "\n\n# 时间线进度（单向，重要）\n\n本世界部分知识条目带有「时间线」（timeline），按剧情时间先后用 order 编号（order=1 为最早）。当前故事进度指针 story_progress 的具体数值见每轮「当前游戏状态」JSON 中的 story_progress 字段。\n- **单向不剧透**：order 大于当前 story_progress 的时间线阶段属于「尚未发生的未来」，你与角色都不得知晓、不得提及或暗示，直到剧情真正推进到那里（例如角色第一章在甲地、最后才首次去乙地，则玩家处于早期时角色不应知道乙地发生的事）。\n- **按需推进**：当剧情自然发展到时间线的下一阶段（如角色首次抵达某地、某关键事件发生）时，在 state_changes 中返回 story_progress 为新的整数（**只增不减**），使其等于当前应解锁到的最大 order。\n- 时间线是叙事内部顺序，请勿在叙事中出现「第X章」「第几回」等字样，只按自然时间推进。";
     }
+
+    // ★ C1：模块化世界开关——启用模块注入行为指令；未启用模块约束 AI 不自行引入相关机制
+    systemPrompt += buildModulePromptContext(S.currentWorld);
 
     // P0: 硬化缓存（none 策略不缓存，避免大字符串驻留本地模型场景）
     if (strategy !== "none") {
@@ -1037,6 +1041,18 @@ export function buildAuthorNote() {
         parts.push("【文风保持】本轮及后续所有输出，必须维持本世界强制文风（见系统提示“本世界强制文风”节）。如检测到语气/用词偏离，立即回调，不要等玩家纠正。");
     }
     return parts.join("\n\n");
+}
+
+// ★ C4：玩家私人备注（存档级）——每轮注入中部槽位，让 AI 后续剧情记得玩家意图。
+// 与 author_note（世界级·作者视角约束）互补：这里是"玩家自己想记住 / 想达成的东西"，不进 world、不串档。
+// 纯函数、无 DOM 依赖，可在 Node 下单测。
+export function buildPlayerNote() {
+    const note = (typeof S.playerNotes === "string") ? S.playerNotes.trim() : "";
+    if (!note) return "";
+    // 长度上限裁剪（参照 B4 预算思路，避免污染中部注入位）
+    const MAX = 600;
+    const clipped = note.length > MAX ? note.slice(0, MAX) + "…(已截断)" : note;
+    return "【玩家笔记（你自己的备忘，请酌情纳入叙事）】\n" + clipped;
 }
 
 export function getRecentKeyFacts(count) {

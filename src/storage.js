@@ -10,6 +10,7 @@ import { idbGet, idbSet, idbDel, idbSetMulti } from "./idb.js";
 import { PROVIDERS, detectProvider } from "./providers.js";
 import { EMBED_MODEL, EMBED_DIM } from "./rag.js";
 import { mergeWorldPack } from "./world-transfer.js";
+import { sanitizeModules } from "./modules.js"; // ★ C1：旧世界迁移 / 读档兜底，确保 world.modules 含全部注册表模块
 import { createCthulhuWorld, createUrbanLegendWorld, createDualWorld } from "./new-worlds.js";
 
 export async function loadConfig() {
@@ -46,6 +47,7 @@ export async function loadWorlds() {
         if (!Array.isArray(out.behavior_records)) out.behavior_records = [];
         ensureWorldCanon(out); // ★ A2：确保 canon 模型始终存在（给 #2 协调器/一致性包注入兜底）
         ensureWorldCharacters(out); // ★ B1：确保人物卡数组始终存在
+        sanitizeModules(out); // ★ C1：确保 world.modules 含全部注册表模块（旧世界缺则补默认）
         // ★ A2 #5：预设世界种子包（canon.consistency_pack）→ 转成玩家可编辑的 rules「禁项」规则
         const seed = out.canon && out.canon.consistency_pack;
         if (seed && Array.isArray(seed.banned) && seed.banned.length) {

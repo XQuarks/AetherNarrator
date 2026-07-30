@@ -7,7 +7,7 @@ import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, 
 import { getNextPeriod, getTemperature, getTimeConfig } from "./theme.js";
 import { advanceCalendarTime, formatCalendarDate } from "./calendar.js";
 import { summarizeFactsFromChanges } from "./rag.js";
-import { buildSystemPrompt, buildLoreHardBreakpoint, buildCharactersBreakpoint, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, getPositionedLore } from "./prompt.js";
+import { buildSystemPrompt, buildLoreHardBreakpoint, buildCharactersBreakpoint, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, buildPlayerNote, getPositionedLore } from "./prompt.js";
 import { getProvider, readApiInputs, getChunkConcurrency } from "./providers.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
 import { buildLoreRevisionDiff } from "./lore-revision.js";
@@ -449,6 +449,16 @@ export const TOOLS = {
         name: "lore_revision",
         description: "返回知识库修订 diff（与知识库同结构的 snippets 列表）",
         parameters: { type: "object", additionalProperties: true, properties: { snippets: { type: "array" } } }
+    },
+    // ★ C4：走向前瞻（理解 A·后果预览）——只给方向不剧透结局
+    predict_branches: {
+        name: "predict_branches",
+        description: "返回玩家当前可能走向的 2-4 个方向性预测，每条含 branch/likely/risk，只描述方向不剧透具体结局",
+        parameters: { type: "object", additionalProperties: true, properties: {
+            branches: { type: "array", items: { type: "object", additionalProperties: true, properties: {
+                branch: { type: "string" }, likely: { type: "string" }, risk: { type: "string" }
+            } } }
+        } }
     }
 };
 
@@ -471,6 +481,81 @@ export function extractStructuredFromArgs(fullArgs, label) {
         try { return parseResponse(fullArgs); } catch (_) { /* 继续 */ }
     }
     throw new Error("AI 返回的 JSON 解析失败：" + (label || "") + " " + (fullArgs || "").slice(0, 200));
+}
+
+// ★ C4：走向前瞻（理解 A·后果预览）——纯展示、不污染涌现叙事。
+// 把模型返回的各类形状归一成 [{branch, likely, risk}]，取前 4 条；缺字段过滤掉空项。
+export function normalizeBranches(raw) {
+    let arr = null;
+    if (Array.isArray(raw)) arr = raw;
+    else if (raw && Array.isArray(raw.branches)) arr = raw.branches;
+    else if (raw && typeof raw === "object" && raw.branch) arr = [raw]; // 单条也接受
+    if (!Array.isArray(arr)) return [];
+    const out = arr.map(b => {
+        const o = b && typeof b === "object" ? b : {};
+        return {
+            branch: typeof o.branch === "string" ? o.branch.trim() : (typeof o.text === "string" ? o.text.trim() : ""),
+            likely: typeof o.likely === "string" ? o.likely.trim() : "",
+            risk: typeof o.risk === "string" ? o.risk.trim() : ""
+        };
+    }).filter(b => b.branch);
+    return out.slice(0, 4);
+}
+
+// 构建前瞻 prompt（纯函数读 S；不触 DOM，可在 node 测试直接验证）
+export function buildBranchPreviewPrompt() {
+    const w = S.currentWorld;
+    const worldName = w ? w.name : "（未知世界）";
+    const worldDesc = (w && typeof w.desc === "string") ? w.desc.slice(0, 200) : "";
+    const gs = S.gameState || {};
+    const location = (typeof gs.location === "string" && gs.location) ? gs.location
+        : (gs.current_location ? gs.current_location : "未知地点");
+    // 关键变量（依据世界 schema 取当前值）
+    let vars = "";
+    const vSchema = (w && w.schema && Array.isArray(w.schema.variables)) ? w.schema.variables : [];
+    if (vSchema.length && gs.variables && typeof gs.variables === "object") {
+        vars = vSchema.map(v => `${v.name}=${gs.variables[v.name] ?? "-"}`).join("，");
+    }
+    // 近期对话（取最后 4 条，玩家输入 + 叙事）
+    const recent = (S.conversationHistory || []).slice(-4).map(e => {
+        if (!e || typeof e !== "object") return "";
+        const u = (typeof e.player === "string" && e.player) ? e.player : "";
+        const narr = (typeof e.narrative === "string" && e.narrative) ? e.narrative.slice(0, 120) : "";
+        return (u ? `（玩家：${u}）` : "") + narr;
+    }).filter(Boolean).join("\n\n");
+    const note = (typeof S.playerNotes === "string" && S.playerNotes.trim()) ? S.playerNotes.trim() : "";
+    const sys = `你是一个文字冒险游戏的"走向顾问"。基于当前剧情状态，给玩家 2-4 条接下来"可能的发展走向"。
+规则：
+1. 只描述方向性的可能，绝不写死具体结局、具体数字、胜负结果（防剧透）。
+2. 每条包含：branch（走向标题，简短）、likely（大概会怎样，1-2 句）、risk（主要风险/代价，1 句）。
+3. 语言贴合世界观，避免说教。
+4. 必须调用 predict_branches 工具返回，不要输出额外文本。`;
+    const user = `【世界】${worldName}${worldDesc ? "：" + worldDesc : ""}
+【当前地点】${location}
+${vars ? "【关键变量】" + vars + "\n" : ""}${note ? "【玩家笔记】" + note + "\n" : ""}【最近剧情】
+${recent || "（暂无）"}
+
+请推断玩家接下来可能走向的 2-4 个方向。`;
+    return [
+        { role: "system", content: sys },
+        { role: "user", content: user }
+    ];
+}
+
+// 触发一次走向前瞻（按需、非每轮）。纯展示：不写 history / 不改 gameState / 不落库。
+export async function predictBranches() {
+    const messages = buildBranchPreviewPrompt();
+    const raw = await callStructured(messages, "predict_branches", {
+        stream: false,
+        temperature: 0.3,
+        maxTokens: 400,
+        mockFn: () => ([
+            { branch: "坦白一切", likely: "信任暂时受损，但关系走向真实", risk: "可能失去某些既得利益" },
+            { branch: "继续隐瞒", likely: "维持表面平静", risk: "秘密有暴露风险，后期代价更高" },
+            { branch: "转移话题", likely: "避开当前冲突", risk: "问题未解决，可能持续积累" }
+        ])
+    });
+    return normalizeBranches(raw);
 }
 
 function recordCacheStats(usage, provider) {
@@ -534,7 +619,8 @@ export async function callLLM(input, retrieved, opts = {}) {
     // P0-2：insert_at=author_note 的检索片段一并并入作者注。
     const authorNote = [
         buildAuthorNote(),
-        positioned.author_note ? "【相关世界知识（检索命中，供导演参考）】\n" + positioned.author_note : ""
+        positioned.author_note ? "【相关世界知识（检索命中，供导演参考）】\n" + positioned.author_note : "",
+        buildPlayerNote() // ★ C4：玩家私人备忘并入中部槽位（存档级，每轮生效）
     ].filter(Boolean).join("\n\n");
 
     const messages = [

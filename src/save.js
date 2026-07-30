@@ -18,6 +18,7 @@ import { formatWorldTime, stepOf, ensureTimelineState, getTimeConfig } from "./t
 import { normalizeCurrentDate } from "./calendar.js";
 import { LATEST_SAVE_SCHEMA_VERSION } from "./migrations.js";
 import { invalidateAllLoreAnn } from "./ann-index.js";
+import { sanitizeModules } from "./modules.js"; // ★ C1：读档/切换世界时确保 world.modules 完整
 import { abortCurrentRequest } from "./turn-lifecycle.js";
 
 export async function startGame(opts = {}) {
@@ -109,6 +110,7 @@ export function prepareSessionFromSave(save) {
     stopTypewriter();
     S.currentWorld = S.worlds.find(w => w.id === save.worldId);
     S.currentSession.worldId = save.worldId;
+    sanitizeModules(S.currentWorld); // ★ C1：确保当前世界 modules 完整（核心模块恒开）
     invalidateSystemPromptCache();
     if (save.state) S.gameState = normalizeSimulationState(deepClone(save.state));
     if (S.gameState) S.gameState.current_date = normalizeCurrentDate(S.gameState.current_date, getTimeConfig().timeConfig);
@@ -125,6 +127,8 @@ export function prepareSessionFromSave(save) {
     S.aiEnhanced = save.ai_enhanced === true;
     S.lastLoreReviewMsgCount = save.last_lore_review_msg_count || 0;
     S._loreRevisionBuffer = deepClone(save.pending_lore_revision || null);
+    // ★ C4：读档时恢复玩家私人备忘（无则空串兼容老存档）
+    S.playerNotes = (typeof save.player_notes === "string") ? save.player_notes : "";
     if (save.history) S.conversationHistory = deepClone(save.history);
     S.chatHistory = save.chatHistory ? deepClone(save.chatHistory) : rebuildChatFromHistory(save.history);
     S.chatSummary = (save.chatSummary && save.chatSummary.length) ? deepClone(save.chatSummary) : rebuildSummaryFromHistory(save.history);
@@ -215,6 +219,7 @@ export function createOrUpdateSave() {
         existing.ai_enhanced = S.aiEnhanced === true;
         existing.last_lore_review_msg_count = S.lastLoreReviewMsgCount;
         existing.pending_lore_revision = deepClone(S._loreRevisionBuffer);
+        existing.player_notes = (typeof S.playerNotes === "string") ? S.playerNotes : ""; // ★ C4：写回玩家备忘
     } else {
         S.saves.unshift({
             id: "s" + Date.now(), worldId: S.currentWorld.id, worldName: S.currentWorld.name,
@@ -226,7 +231,8 @@ export function createOrUpdateSave() {
             behavior_records: deepClone(S.activeBehaviorRecords),
             ai_enhanced: S.aiEnhanced === true,
             last_lore_review_msg_count: S.lastLoreReviewMsgCount,
-            pending_lore_revision: deepClone(S._loreRevisionBuffer)
+            pending_lore_revision: deepClone(S._loreRevisionBuffer),
+            player_notes: (typeof S.playerNotes === "string") ? S.playerNotes : "" // ★ C4：写回玩家备忘
         });
     }
     saveSaves();
