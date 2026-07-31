@@ -644,6 +644,17 @@
         .dead-badge { font-size: 12px; color: #E24B4A; font-weight: 500; }
         .deleted-badge { font-size: 12px; color: #E24B4A; font-weight: 500; background: rgba(226,75,74,0.12); padding: 1px 6px; border-radius: 6px; }
         .save-item.missing-world { opacity: 0.72; }
+        /* ★ 多存档槽位：存档列表的槽位名副标题 + 保存菜单/通用块按钮 */
+        .list-item .item-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+        .btn.block { display: block; width: 100%; }
+        .text-input {
+            box-sizing: border-box; padding: 9px 12px; border-radius: var(--radius-m);
+            border: 1px solid var(--card-border); background: var(--input-bg);
+            color: var(--text); font-size: 14px; font-family: var(--sans);
+        }
+        .text-input:focus { outline: none; border-color: var(--primary); }
+        .save-menu .text-input { width: 100%; margin-top: 6px; }
+        .world-save-chooser .modal-body { max-height: 60vh; overflow-y: auto; }
         .world-list-item { position: relative; }
         .delete-world-btn {
             position: absolute;
@@ -2920,3 +2931,139 @@ html[data-theme="light"] .char-card select {
     color: var(--text-secondary);
 }
 [data-theme="light"] .scan-warn-btn { color: #7a5a12; }
+
+/* ================= 支线事件面板（事件卡 + 体力） ================= */
+.event-panel { max-width: min(560px, 94vw); }
+.event-panel-list { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.event-card {
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-m, 10px);
+    background: var(--bg-panel);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.event-card.disabled { opacity: 0.62; }
+.event-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.event-card-title { font-weight: 600; color: var(--text); font-size: 15px; }
+.event-card-badge {
+    flex: 0 0 auto;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: rgba(127, 127, 127, 0.12);
+    border-radius: 999px;
+    padding: 2px 10px;
+    white-space: nowrap;
+}
+.event-card-desc { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.event-card .event-enter { align-self: flex-end; }
+
+/* ===== W2-Style · 创建向导编辑器（编辑器式长页） ===== */
+.cw-editor-modal { max-width: 940px; width: 94vw; }
+.cw-editor { display: flex; gap: 0; max-height: 72vh; min-height: 420px; }
+.cw-nav { flex: 0 0 150px; border-right: 1px solid var(--border, #e3e3e8); padding: 12px 8px; overflow-y: auto; background: var(--bg-secondary, #f7f7f9); border-radius: 12px 0 0 12px; }
+.cw-nav-item { display: block; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 4px; border: none; background: transparent; color: var(--text-secondary, #555); border-radius: 8px; cursor: pointer; font-size: 14px; transition: background .15s, color .15s; }
+.cw-nav-item:hover { background: rgba(120,120,140,.08); }
+.cw-nav-item.active { background: var(--primary, #6b5cff); color: #fff; font-weight: 600; }
+.cw-content { flex: 1 1 auto; padding: 18px 22px; overflow-y: auto; }
+.cw-module { display: none; }
+.cw-module.active { display: block; }
+.cw-step-title { font-size: 17px; font-weight: 700; margin: 0 0 4px; color: var(--text, #222); }
+.cw-step-hint { font-size: 13px; color: var(--text-secondary, #777); margin: 0 0 16px; line-height: 1.5; }
+
+/* 风格模板库 */
+.style-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 6px; }
+.style-card { text-align: left; padding: 10px 12px; border: 1px solid var(--border, #e3e3e8); border-radius: 10px; background: var(--bg, #fff); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .1s; }
+.style-card:hover { border-color: var(--primary, #6b5cff); transform: translateY(-1px); }
+.style-card.selected { border-color: var(--primary, #6b5cff); box-shadow: 0 0 0 2px rgba(107,92,255,.25); background: rgba(107,92,255,.06); }
+.style-card-name { font-weight: 700; font-size: 14px; color: var(--text, #222); }
+.style-card-tag { font-size: 12px; color: var(--text-secondary, #777); margin-top: 2px; }
+.style-card-temp { font-size: 12px; color: var(--primary, #6b5cff); margin-top: 6px; }
+.style-card-custom .style-card-name { color: var(--text-secondary, #777); }
+.style-current-tag { font-weight: 700; color: var(--primary, #6b5cff); }
+
+/* 世界书入口 */
+.worldbook-box { border: 1px dashed var(--border, #e3e3e8); border-radius: 10px; padding: 12px 14px; background: var(--bg-secondary, #f7f7f9); }
+.worldbook-text { font-size: 13px; color: var(--text-secondary, #666); line-height: 1.6; margin-bottom: 10px; }
+
+/* 玩法模块开关 */
+.module-toggles { display: flex; flex-direction: column; gap: 8px; }
+.module-toggle { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border, #e3e3e8); border-radius: 8px; font-size: 14px; cursor: pointer; }
+.module-toggle .module-cb { width: 16px; height: 16px; }
+.module-name { font-weight: 600; color: var(--text, #222); min-width: 120px; }
+.module-desc { font-size: 12px; color: var(--text-secondary, #777); }
+
+/* 编辑器弹窗在小屏下改为上下布局 */
+@media (max-width: 640px) {
+    .cw-editor { flex-direction: column; max-height: 80vh; }
+    .cw-nav { flex: none; display: flex; flex-wrap: wrap; gap: 4px; border-right: none; border-bottom: 1px solid var(--border, #e3e3e8); border-radius: 12px 12px 0 0; }
+    .cw-nav-item { width: auto; flex: 1 1 auto; text-align: center; }
+}
+
+/* ★ docs/53：私聊 / 世界日报 UI */
+.private-chat-banner {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; margin-bottom: 6px;
+    background: var(--bg-secondary, #f3f3f7);
+    border: 1px solid var(--border, #e3e3e8); border-radius: 8px;
+    font-size: 13px; color: var(--text, #222);
+}
+.bond-chat-btn {
+    margin-top: 8px; padding: 4px 10px;
+    background: var(--primary, #6b9bd1); color: #fff; border: none; border-radius: 6px;
+    font-size: 12px; cursor: pointer;
+}
+.bond-chat-btn:hover { opacity: 0.9; }
+.contact-channel-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.contact-channel-row input { flex: 1; padding: 5px 8px; border: 1px solid var(--border, #e3e3e8); border-radius: 6px; font-size: 13px; }
+.contact-channel-row select { padding: 5px; border: 1px solid var(--border, #e3e3e8); border-radius: 6px; font-size: 13px; }
+.contact-channel-row button { background: none; border: none; color: var(--danger, #c0392b); cursor: pointer; font-size: 14px; }
+.radio-inline { margin-right: 14px; font-size: 13px; }
+
+/* ===== docs/54：规则可视化与结局系统 ===== */
+/* 规则分类标签栏 */
+.rule-filter-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.rule-filter-tab { padding: 4px 12px; border: 1px solid var(--card-border); border-radius: 999px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 13px; cursor: pointer; }
+.rule-filter-tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+/* 规则类型色点 */
+.rule-type-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; display: inline-block; }
+.rule-type-ending { background: #e0a93b; }   /* 金=结局 */
+.rule-type-ban { background: #c0392b; }      /* 红=禁项 */
+.rule-type-tag { background: #3b7dd8; }       /* 蓝=标签 */
+.rule-card.hidden { display: none; }
+
+/* 结局分类徽标（好/坏/真/隐藏/普通） */
+.ending-kind-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.6; color: #fff; background: #6b7785; }
+.ending-kind-badge.kind-good { background: #2e9e5b; }
+.ending-kind-badge.kind-bad { background: #c0392b; }
+.ending-kind-badge.kind-true { background: #7b54c9; }
+.ending-kind-badge.kind-secret { background: #555; }
+.ending-kind-badge.kind-normal { background: #6b7785; }
+
+/* 结局追踪器卡片 */
+.tracker-card { border: 1px solid var(--card-border); border-left: 4px solid var(--primary); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--bg-panel); }
+.tracker-card.kind-good { border-left-color: #2e9e5b; }
+.tracker-card.kind-bad { border-left-color: #c0392b; }
+.tracker-card.kind-true { border-left-color: #7b54c9; }
+.tracker-card.kind-secret { border-left-color: #555; }
+.tracker-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.tracker-title { font-weight: 600; font-size: 14px; color: var(--text); }
+.tracker-cond { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.tracker-status { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.tracker-status.met { background: rgba(46,158,91,.15); color: #2e9e5b; }
+.tracker-status.progress { background: rgba(224,169,59,.18); color: #b9831f; }
+.tracker-status.unmet { background: rgba(120,120,120,.15); color: var(--text-secondary); }
+.tracker-progress { height: 6px; border-radius: 999px; background: var(--bg-secondary); overflow: hidden; margin-top: 6px; }
+.tracker-progress-bar { height: 100%; background: var(--primary); transition: width .3s; }
+
+/* 游戏结束弹窗：kind 徽标 + 标题 */
+.game-over-kind { margin-bottom: 6px; }
+.game-over-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+
+/* 结局图鉴 */
+.ending-codex { margin-top: 12px; border-top: 1px dashed var(--card-border); padding-top: 10px; }
+.ending-codex .codex-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.codex-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--card-border); }
+.codex-item:last-child { border-bottom: none; }
+.codex-item-title { font-size: 13px; color: var(--text); }

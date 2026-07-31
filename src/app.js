@@ -10,13 +10,15 @@ import { applyFontSize, applyTheme, changeFontSize, toggleTheme, changeNarrative
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
-import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, selectStyleRef, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, syncWorldTempToStyle, selectTagPref, onCustomTagInput, collectStylePrefs, cwNext, cwPrev, showToast, editWorldType, onEditWorldTypeChange, saveWorldTypeEdit } from "./render.js";
-import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, removeBannedSentence, ignoreBannedTerm, regenerateTurn } from "./game.js";
-import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame } from "./save.js";
+import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, selectTagPref, onCustomTagInput, collectStylePrefs, showToast, editWorldType, onEditWorldTypeChange, saveWorldTypeEdit, renderEventPanel, showModal, openSaveMenu, openWorldSaveChooser, showEndingTracker } from "./render.js";
+import { selectCwModule, selectStyleTemplate, openWorldBookFromWizard, updateNarrativeStyleCount } from "./wizard-editor.js";
+import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, removeBannedSentence, ignoreBannedTerm, regenerateTurn, startPrivateChat, endPrivateChat, requestDaily, commitChannelAction, addContactChannelRow, removeContactChannelRow } from "./game.js";
+import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame, createOrUpdateSave, saveAsNewSave } from "./save.js";
 import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
 import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, refreshMultiverseEditor, timeStructChanged, mvAddLine, mvDelLine, mvSetActive, mvRenameId, mvRenName, mvCalChanged, mvRenEra, mvRenDate, mvRenWeather, mvMoveLine, mvTpl, defaultStrategyChanged, mvLineStrategy, mvAddSync, mvDelSync, mvSyncRef, mvSyncRatio, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
-import { openRuleEditor, addRule, deleteRule, ruleTypeChange, selectRuleType, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview, openDeadlineEditor, addDeadline, deleteDeadline, dlPolicyChanged, saveDeadlineReview } from "./lore-editors.js";
+import { openRuleEditor, addRule, deleteRule, ruleTypeChange, selectRuleType, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview, openDeadlineEditor, addDeadline, deleteDeadline, dlPolicyChanged, saveDeadlineReview, setRuleFilter } from "./lore-editors.js";
 import { clearLoreAnnCache } from "./ann-index.js";
+import { isModuleEnabled } from "./modules.js"; // ★ 事件系统：支线事件门禁判断
 
 // 小工具（docs/34 #7 消重）：fetch 数据文件，失败时告警并返回兜底值，各文件独立降级互不影响
 async function fetchDataSafe(url, fallback, asText = false) {
@@ -141,6 +143,8 @@ const ACTIONS = {
     showSettingsScreen: () => showSettingsScreen(),
     showCreateWorldModal: () => showCreateWorldModal(),
     showStatusPanel: () => showStatusPanel(),
+    showEndingTracker: () => showEndingTracker(),
+    setRuleFilter: (el) => setRuleFilter(el),
     exportStory: () => exportStory(),
     exportDebugLog: () => exportDebugLog(),
     // 设置界面：清除向量索引缓存（两次点击确认，禁用原生 confirm）
@@ -150,7 +154,6 @@ const ACTIONS = {
     hideStatusPanel: () => hideStatusPanel(),
     saveApiConfig: () => saveApiConfig(),
     generateWorld: () => generateWorld(),
-    cwNext: () => cwNext(),
     // 下拉菜单开关（⋯ 更多）
     toggleDropdown: (el) => { const dd = el.closest(".dropdown"); if (dd) dd.classList.toggle("open"); },
     // 类 select 风格的下拉：点 item 后关菜单 + 同步 trigger 文本 + 切 sub
@@ -173,7 +176,6 @@ const ACTIONS = {
             selectRuleType(row, kind, idx, value);
         }
     },
-    cwPrev: () => cwPrev(),
     backToHomeAfterGameOver: () => backToHomeAfterGameOver(),
     reviewDeathScene: () => reviewDeathScene(),
     // 模态关闭
@@ -191,13 +193,15 @@ const ACTIONS = {
     // 滑块/下拉
     updatePlotFreedomLabel: (el) => updatePlotFreedomLabel(el.value),
     updateWorldTempLabel: () => updateWorldTempLabel(),
-    onCustomStyleInput: () => syncWorldTempToStyle(),
     worldTempChanged: () => updateTcTempLabel(),
     onWorldTypeChange: (el) => onWorldTypeChange(el.value),
     onProviderChange: (el) => applyProviderPreset(el.value),
     handleFileSelect: (el, e) => handleFileSelect(e),
-    // radio 组
-    selectStyleRef: (el) => selectStyleRef(el.value, el.closest(".radio-option")),
+    // ★ W2-Style：创建向导编辑器
+    selectCwModule: (el) => selectCwModule(el.dataset.module),
+    selectStyleTemplate: (el) => selectStyleTemplate(el.dataset.preset),
+    openWorldBookFromWizard: () => openWorldBookFromWizard(),
+    onNarrativeStyleInput: () => updateNarrativeStyleCount(),
     selectTagPref: (el) => selectTagPref(el),
     onCustomTagInput: (el) => onCustomTagInput(el),
     toggleWorldPrefix: (el) => toggleWorldPrefix(el.value === "on", el.closest(".radio-option")),
@@ -219,6 +223,11 @@ const ACTIONS = {
     returnFromSaveDetail: () => returnFromSaveDetail(),
     editSaveLore: (el) => editSaveLore(el.dataset.id),
     deleteSave: (el) => deleteSave(el.dataset.id),
+    openSaveMenu: () => openSaveMenu(),
+    openWorldSaveChooser: (el) => openWorldSaveChooser(el.dataset.id),
+    startNewSave: (el) => { const w = S.worlds.find(x => x.id === el.dataset.id); if (w) { S.currentWorld = w; startGame(); } },
+    saveCurrentSlot: () => saveCurrentSlot(),
+    saveAsNewSlot: () => { const name = (document.getElementById("saveAsNewName") || {}).value || ""; saveAsNewSave(name); closeModal("saveMenuModal"); },
     deleteWorld: (el) => deleteWorld(el.dataset.id),
     showExportWorldChoice: (el) => showExportWorldChoice(el.dataset.id),
     exportWorldChoiceLite: () => exportWorldChoice(true),
@@ -236,11 +245,21 @@ const ACTIONS = {
     clearSourceFile: () => clearSourceFile(),
     // 选择按钮（修复：此前 choice-chip 仅渲染无监听，点击无效）
     chooseOption: (el) => chooseOption(Number(el.dataset.index)),
+    // ★ 事件系统：支线事件面板
+    showEventPanel: () => showEventPanel(),
+    enterSideEvent: (el) => enterSideEvent(el),
     // ★ B2：导演提示 / 持续约束
     showAuthorNoteModal: () => showAuthorNoteModal(),
     saveAuthorNote: () => saveAuthorNote(),
     // ★ C1：保存模块开关设置
     saveWorldModules: (el) => saveWorldModules(el.dataset.id),
+    // ★ docs/53：NPC 私聊 / 世界日报
+    privateChat: (el) => startPrivateChat(el.dataset.npc),
+    endPrivateChat: () => endPrivateChat(),
+    requestDaily: () => requestDaily(),
+    commitChannel: (el) => commitChannelAction(el.dataset.name, el.dataset.kind),
+    addContactChannel: () => addContactChannelRow(),
+    removeContactChannel: (el) => removeContactChannelRow(el),
     // ★ IP#6：生成后硬扫描提示条的三个动作
     removeBannedSentence: (el) => removeBannedSentence(Number(el.dataset.idx), el.dataset.term),
     ignoreBannedTerm: (el) => ignoreBannedTerm(Number(el.dataset.idx), el.dataset.term),
@@ -407,6 +426,31 @@ async function handleClearAnnCache(el) {
         el.textContent = "清除索引缓存";
         el.disabled = false;
     }
+}
+
+// ★ 事件系统：打开支线事件面板（门禁：events 模块未启用则提示并返回）
+function showEventPanel() {
+    if (!S.currentWorld || !isModuleEnabled(S.currentWorld, "events")) { showToast("本世界未启用支线事件", "warn"); return; }
+    renderEventPanel(S.pendingSideEvents || []);
+    showModal("eventPanelOverlay");
+}
+
+// ★ 事件系统：进入指定支线事件（校验体力 → 标记消耗 → 填输入框 → 自动提交普通回合）
+function enterSideEvent(el) {
+    const idx = parseInt(el && el.dataset ? el.dataset.idx : "-1", 10);
+    const evs = S.pendingSideEvents || [];
+    const ev = evs[idx];
+    if (!ev) return;
+    if (!S.currentWorld || !isModuleEnabled(S.currentWorld, "events")) { showToast("本世界未启用支线事件", "warn"); return; }
+    const cur = (S.gameState && S.gameState.variables && typeof S.gameState.variables.stamina === "number") ? S.gameState.variables.stamina : null;
+    const cost = Number(ev.cost_stamina) || 0;
+    if (cur !== null && cost > cur) { showToast("体力不足，无法进入该支线", "warn"); return; }
+    // 标记本次进入的支线消耗，applyNormalTurn 套用时扣减（computeVariableUpdates 绝对值语义）
+    S.enteringSideEvent = { cost_stamina: cost, cost_time: ev.cost_time || "", title: ev.title };
+    const input = document.getElementById("playerInput");
+    if (input) input.value = `（主动触发支线：${ev.title}）`;
+    closeModal("eventPanelOverlay");
+    submitInput();
 }
 
 init();

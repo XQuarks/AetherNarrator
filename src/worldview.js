@@ -100,6 +100,9 @@ export function isEnhancementContextCurrent(expected, current) {
 // 详情见 docs/Phase2改造方案.md。
 // evaluateRules 为纯函数，不依赖 S / DOM，便于 node 测试。
 
+// 结局分类枚举（与编辑器下拉、弹窗徽标共用）
+export const ENDING_KINDS = ["normal", "good", "bad", "true", "secret"];
+
 // 从 gameState 派生「活跃条件标签」集合（与 store.getActiveConditionTags 同口径）
 function getTagsFromState(gs) {
     const tags = new Set();
@@ -116,7 +119,7 @@ function getTagsFromState(gs) {
     return tags;
 }
 
-function compareState(field, op, target, gs) {
+export function compareState(field, op, target, gs) {
     if (!gs || !gs.state || typeof gs.state !== "object") return false;
     const val = gs.state[field];
     if (val === undefined || val === null) return false;
@@ -132,7 +135,7 @@ function compareState(field, op, target, gs) {
     }
 }
 
-function evalWhen(when, ctx) {
+export function evalWhen(when, ctx) {
     if (!when || typeof when !== "object") return true; // 无 when = 常驻规则
     switch (when.type) {
         case "always":
@@ -198,7 +201,9 @@ export function evaluateRules(world, gs, text) {
             } else if (then.type === "ending") {
                 result.endings.push({
                     reason: String(then.reason || "规则触发：世界结束"),
-                    ruleId: rule.id || null
+                    ruleId: rule.id || null,
+                    title: String(then.title || rule.name || "结局").slice(0, 100),
+                    kind: ENDING_KINDS.includes(then.kind) ? then.kind : "normal"
                 });
             }
         }
@@ -211,4 +216,70 @@ export function evaluateRules(world, gs, text) {
         if (b) result.bannedConcepts.push(b);
     }
     return result;
+}
+
+// 游玩时「结局追踪器」数据来源：返回该世界所有 ending 规则的实时状态。
+// 纯函数（不依赖 S / DOM），可在 Node 下单测；game.js 每回合调用并交给 render.js 渲染。
+// - met：该 ending 的 when 条件当前是否满足（复用 evalWhen）
+// - progress：仅 when.type==="state" 且为数值比较时有意义，返回 0~1 的「接近触发」程度；其余为 null
+export function evaluateEndingStatus(world, gs, text) {
+    if (!world || typeof world !== "object") return [];
+    const rules = Array.isArray(world.rules) ? world.rules : [];
+    const endings = rules.filter(r => r && r.enabled !== false && r.then && r.then.type === "ending");
+    if (!endings.length) return [];
+    const activeTags = getTagsFromState(gs);
+    const ctx = { text: text != null ? String(text) : null, gameState: gs, activeTags };
+    return endings.map(r => {
+        const when = r.when || {};
+        const then = r.then || {};
+        const met = evalWhen(when, ctx);
+        let progress = null;
+        if (when.type === "state" && gs && gs.state && typeof gs.state === "object") {
+            const cur = Number(gs.state[when.field]);
+            const target = Number(when.value);
+            if (!Number.isNaN(cur) && !Number.isNaN(target)) {
+                progress = computeEndingProgress(when.op || "==", cur, target);
+            }
+        }
+        return {
+            ruleId: r.id || null,
+            name: r.name || "",
+            title: String(then.title || r.name || "结局").slice(0, 100),
+            kind: ENDING_KINDS.includes(then.kind) ? then.kind : "normal",
+            when,
+            met,
+            progress
+        };
+    });
+}
+
+// 计算「状态数值条件」距离触发的接近程度（0~1）。met 时恒为 1；无连续意义时返回 null。
+function computeEndingProgress(op, cur, target) {
+    const clamp = x => Math.max(0, Math.min(1, x));
+    if (op === "<" || op === "<=") {
+        if (cur <= target) return 1;
+        if (target === 0) return 0;
+        return clamp((target - cur) / Math.abs(target));
+    }
+    if (op === ">" || op === ">=") {
+        if (cur >= target) return 1;
+        if (target === 0) return 0;
+        return clamp(cur / Math.abs(target));
+    }
+    return null; // == / != 无连续进度
+}
+
+// 纯函数：把结局追加到图鉴列表（按 ruleId 去重），返回新列表（不修改原数组）。
+// game.js 的 recordUnlockedEnding 调用它来更新本档 unlockedEndings。
+export function appendUniqueEnding(list, entry) {
+    const arr = Array.isArray(list) ? list : [];
+    const ruleId = (entry && entry.ruleId) || "__death__";
+    if (arr.some(x => x.ruleId === ruleId)) return arr;
+    return [...arr, {
+        ruleId,
+        title: (entry && entry.title) || "结局",
+        kind: (entry && entry.kind) || "normal",
+        reason: (entry && entry.reason) || "",
+        at: (entry && entry.at) || new Date().toISOString()
+    }];
 }

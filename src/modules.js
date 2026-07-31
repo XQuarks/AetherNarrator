@@ -31,6 +31,18 @@ export const MODULE_REGISTRY = [
     { id: "goals", name: "目标系统", desc: "玩家目标的追踪、推进与揭示", defaultEnabled: true, statusTab: "goals",
         promptFragment: () => "【目标系统】本世界存在玩家目标（goal），可推进、达成与揭示隐藏目标。" },
 
+    // —— 支线事件系统（默认开启：对标 UU Game 的"主线面板 + 支线事件卡 + 体力"）——
+    { id: "events", name: "支线事件", desc: "支线事件卡 + 体力消耗与跨天回复（进入支线消耗体力）", defaultEnabled: true,
+        promptFragment: () => "【支线事件】本世界存在可主动触发的支线事件。玩家可消耗体力进入支线，支线推进后体力随时间/天数回复。" },
+
+    // —— NPC 私聊（默认开启；纯净模式可关）——
+    { id: "npc_chat", name: "NPC 私聊", desc: "与目标 NPC 一对一私下对话（结果影响好感与记忆）", defaultEnabled: true, statusTab: "relations",
+        promptFragment: () => "【NPC 私聊】玩家可在世界允许时与已共享联系方式的 NPC 发起私下对话；私聊中的承诺与情报应写入关键事实与好感度。" },
+
+    // —— 世界日报（默认开启；纯净模式可关）——
+    { id: "world_daily", name: "世界日报", desc: "每日世界动态汇总，可牵引支线", defaultEnabled: true, statusTab: "timeline",
+        promptFragment: () => "【世界日报】本世界允许玩家主动获取一份世界动态（头条与小道消息），内容须贴合设定、不剧透未触发主线。" },
+
     // —— 默认关闭的系统（开箱无数字压力，创作者按需开启）——
     { id: "variables", name: "玩家变量", desc: "数值/文本/开关型变量（如理智/声望）", defaultEnabled: false, statusTab: "variables",
         promptFragment: () => "【玩家变量】本世界追踪玩家变量（数值/文本/开关），剧情推进应体现变量变化。" },
@@ -106,6 +118,32 @@ export function enabledModuleList(world) {
 // 未启用模块显示名（用于提示词约束，告诉 AI 不要自行引入这些机制）
 export function disabledModuleNames(world) {
     return MODULE_REGISTRY.filter(m => !isModuleEnabled(world, m.id)).map(m => m.name);
+}
+
+// ★ 事件系统：开启 events 模块时，确保体力机制就位
+// - 体力是 B2 玩家变量，依赖变量系统展示与应用，故连带强制启用 variables 模块（创作者关 events 则其自动停用，不强制）
+// - 若世界尚无 stamina 变量定义，自动注入默认（min0/max100/default100）
+// 调用时机：世界加载/读档时，须在 sanitizeModules 之后、syncVariablesToSchema 之前，
+//   以便开局时 gameState.variables.stamina 按 default 自动初始化。
+export function ensureEventsWorldReady(world) {
+    if (!world || typeof world !== "object") return;
+    if (!isModuleEnabled(world, "events")) return;
+    // 确保 modules 结构完整（缺失时用默认兜底），再连带强制启用 variables 模块
+    if (!world.modules || typeof world.modules !== "object") world.modules = defaultModules(world);
+    // 连带确保 variables 模块开启（体力需经变量系统展示于状态面板、并允许 AI 变量变化应用）
+    if (!world.modules.variables) world.modules.variables = {};
+    world.modules.variables.enabled = true;
+    // 注入默认 stamina 变量（若不存在），供 syncVariablesToSchema 补默认运行时值。
+    // ★ 变量定义统一存于 world.variable_schema（getVariableSchema 只读此键，world.variables 非 schema 位置）。
+    const vars = Array.isArray(world.variable_schema) ? world.variable_schema : [];
+    if (!vars.find(v => v && v.id === "stamina")) {
+        vars.push({
+            id: "stamina", name: "体力", type: "number",
+            min: 0, max: 100, default: 100, enabled: true,
+            desc: "行动力：进入支线事件消耗，随时间/天数回复（每自然日 +30，上限 100）"
+        });
+        world.variable_schema = vars;
+    }
 }
 
 // 纯函数：生成"世界模块开关"系统提示段（启用指令 + 未启用约束）。

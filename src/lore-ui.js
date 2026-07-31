@@ -7,7 +7,7 @@
 import { S, LINK_RELATION_LABELS, normalizeTimeConfig } from "./store.js";
 import { validateStartDate, CUSTOM_CALENDAR_PRESETS, clampCustomCalendarMonths, summarizeCustomCalendar, reorderMonths, insertLeapMonth, seedDefaultTimelines, addTimeline, deleteTimeline, renameTimelineKey, setActiveTimeline, applyMultiverseTemplate, MULTIVERSE_TEMPLATES, clampSyncRules } from "./calendar.js";
 import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets, detectTimeConflict, formatConflictMessage, logError } from "./utils.js";
-import { showModal, closeModal, showToast, getSelectedStyleRef } from "./render.js";
+import { showModal, closeModal, showToast } from "./render.js";
 import { ensureLoreEmbeddings } from "./rag.js";
 import { createOrUpdateSave, prepareSessionFromSave } from "./save.js";
 import { saveWorlds } from "./storage.js";
@@ -1407,11 +1407,13 @@ export async function extractAndMergeSourceLore(worldId) {
     const btn = document.getElementById("extractSourceBtn");
     if (btn) { btn.disabled = true; btn.textContent = "补抽中..."; }
     try {
-        const extracted = await extractLoreFromSource(src, world.name, world.ip_name, getSelectedStyleRef(), world.custom_style, {
+        // ★ W2-Style：补抽时把世界已锁定的 style_preset 一并传入（无则回退 original 文风）。
+        const stylePreset = (world.style_preset && typeof world.style_preset === "object") ? world.style_preset : null;
+        const extracted = await extractLoreFromSource(src, world.name, world.ip_name, "original", world.custom_style || "", {
             onProgress: (done, total) => { if (btn) btn.textContent = `补抽中 (${done}/${total})...`; },
             onRetry: (idx, total, kind, n) => showToast(`第 ${idx}/${total} 段${kind === "生成结果损坏" ? "生成结果损坏" : "被限流"}，自动重试(${n})...`, "warn"),
             onChunkError: (idx, err) => showToast(`第 ${idx} 段补抽失败，已跳过：${err.message}`, "error")
-        });
+        }, stylePreset);
         const currentKB = (world.lore_kb && Array.isArray(world.lore_kb.snippets)) ? world.lore_kb : { ip: world.name, snippets: [] };
         const merged = mergeLoreSnippets(currentKB.snippets, extracted.snippets);
         const newKB = { ip: world.name, snippets: merged };

@@ -255,7 +255,8 @@ export function defaultInitialState() {
         present_npcs: [],    // ★ A6 在场角色：自动激活 char:<姓名> 标签，用于人物型解锁条件
         revealed_locations: [], // ★ L3 认知追踪：角色已发现/已知的可达地点（不含当前所在地），供保底与 AI 生成"前往Y"选项
         is_alive: true,
-        death_reason: null
+        death_reason: null,
+        unlockedEndings: []   // ★ docs/54：结局图鉴，记录本档已触发的结局（按 ruleId 去重）
     };
 }
 

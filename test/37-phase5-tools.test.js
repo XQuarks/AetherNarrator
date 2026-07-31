@@ -41,11 +41,13 @@ function resetState() {
 }
 
 // ---------- 1. 集中 tools 层 schema 校验 ----------
-test("TOOLS 注册表：8 个工具、schema 宽松（additionalProperties=true）", () => {
+test("TOOLS 注册表：10 个工具、schema 宽松（additionalProperties=true）", () => {
     const expected = [
         "apply_turn_state", "generate_world", "extract_lore_chunk",
         "consistency_pack", "character_cards", "worldview_judge", "lore_revision",
-        "predict_branches" // ★ C4：走向前瞻（理解 A·后果预览）
+        "predict_branches", // ★ C4：走向前瞻（理解 A·后果预览）
+        "judge_contact",    // ★ docs/53：世界状态裁判（联络/获报是否允许）
+        "generate_daily"    // ★ docs/53：世界日报生成
     ];
     for (const key of expected) {
         assert.ok(TOOLS[key], `缺少工具 ${key}`);
@@ -56,7 +58,7 @@ test("TOOLS 注册表：8 个工具、schema 宽松（additionalProperties=true�
         assert.strictEqual(t.parameters.additionalProperties, true, `${key} 应允许额外字段，避免模型拒答`);
         assert.strictEqual(typeof t.parameters.properties, "object", `${key}.parameters.properties 应存在`);
     }
-    assert.strictEqual(Object.keys(TOOLS).length, expected.length, "工具数量应为 8");
+    assert.strictEqual(Object.keys(TOOLS).length, expected.length, "工具数量应为 10");
 });
 
 // ---------- 2. 非流式取参：tool_calls → 解析对象 ----------

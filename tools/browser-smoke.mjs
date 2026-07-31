@@ -74,6 +74,13 @@ try {
     if (!(await page.locator("#aiEnhancedToggle").isVisible())) throw new Error("AI 增强开关不可见");
     await page.locator('[data-action="closeModal"][data-modal="gameSettingsModal"]').first().click();
 
+    // 支线事件面板（events 模块默认开启）：按钮可见、点击打开、列表容器渲染、关闭
+    if (!(await page.locator("#eventPanelBtn").isVisible())) throw new Error("支线事件按钮未显示（events 模块应默认开启）");
+    await page.locator("#eventPanelBtn").click();
+    if (!(await page.locator("#eventPanelOverlay").isVisible())) throw new Error("支线事件面板未打开");
+    if (await page.locator("#eventPanelList").count() === 0) throw new Error("支线事件列表容器缺失");
+    await page.locator('[data-action="closeModal"][data-modal="eventPanelOverlay"]').first().click();
+
     await page.setViewportSize({ width: 390, height: 844 });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     if (overflow) throw new Error("移动端存在横向溢出");

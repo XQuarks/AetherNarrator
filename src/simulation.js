@@ -59,6 +59,8 @@ export function normalizeSimulationState(state) {
     out.variables = (out.variables && typeof out.variables === "object" && !Array.isArray(out.variables)) ? out.variables : {};
     // ★ B4：确保 bonds 为对象（兜底 undefined，不回填老档 → 不兼容旧存档）
     out.bonds = (out.bonds && typeof out.bonds === "object" && !Array.isArray(out.bonds)) ? out.bonds : {};
+    // ★ docs/54：结局图鉴（旧存档兜底，不破坏已有字段）
+    out.unlockedEndings = Array.isArray(out.unlockedEndings) ? out.unlockedEndings : [];
     return out;
 }
 

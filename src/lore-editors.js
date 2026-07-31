@@ -71,7 +71,14 @@ function syncRuleEditFromDOM() {
                 r.then = { type: "tag", op: ddValue("ru_tag_op_") || r.then?.op || "add", tag: tg ? tg.value.trim() : "" };
             } else if (type === "ending") {
                 const rs = g("ru_end_reason_");
-                r.then = { type: "ending", reason: rs ? rs.value.trim() : "" };
+                const ti = g("ru_end_title_");
+                const kd = g("ru_end_kind_");
+                r.then = {
+                    type: "ending",
+                    reason: rs ? rs.value.trim() : "",
+                    title: ti ? ti.value.trim() : "",
+                    kind: kd ? kd.value : "normal"
+                };
             }
         }
     });
@@ -120,6 +127,19 @@ function renderRuleEditorBody() {
     const opLabels = { "<": "<", "<=": "≤", "==": "=", ">=": "≥", ">": ">", "!=": "≠" };
     const sevLabels = { soft: "软(提示)", hard: "硬(拦截)" };
     const tagopLabels = { add: "添加", remove: "移除" };
+    const endingKindLabels = { normal: "普通", good: "好/通关", bad: "坏", true: "真结局", secret: "隐藏" };
+    const filter = S._ruleEditFilter || "all";
+    const counts = { ending: 0, ban: 0, tag: 0 };
+    list.forEach(r => { const t = (r.then && r.then.type) || "ban"; if (counts[t] != null) counts[t]++; });
+    const filterTabs = [
+        { k: "all", label: "全部" },
+        { k: "ending", label: `结局(${counts.ending})` },
+        { k: "ban", label: `限制·禁项(${counts.ban})` },
+        { k: "tag", label: `标签(${counts.tag})` }
+    ];
+    const tabBar = `<div class="rule-filter-tabs">` + filterTabs.map(t =>
+        `<button class="rule-filter-tab${filter === t.k ? " active" : ""}" data-action="setRuleFilter" data-filter="${t.k}">${escapeHtml(t.label)}</button>`
+    ).join("") + `</div>`;
     list.forEach((r, i) => {
         const when = r.when || {};
         const then = r.then || {};
@@ -141,8 +161,10 @@ function renderRuleEditorBody() {
                 <div class="dropdown-menu">${items}</div>
             </div>`;
         }
-        html += `<div class="rule-card">
+        const hiddenCls = (filter !== "all" && filter !== thenType) ? " hidden" : "";
+        html += `<div class="rule-card${hiddenCls}" data-rule-type="${thenType}">
             <div class="rule-card-head">
+                <span class="rule-type-dot rule-type-${thenType}" title="${escapeHtml(thenLabels[thenType] || thenType)}"></span>
                 <input id="ru_name_${i}" class="rule-name" placeholder="规则名称（如：破产结局）" value="${escapeHtml(r.name || "")}">
                 <label class="rule-enabled"><input type="checkbox" id="ru_enabled_${i}" ${r.enabled !== false ? "checked" : ""}> 启用</label>
                 <button class="btn-secondary-sm danger" data-action="deleteRule" data-idx="${i}">删除</button>
@@ -176,12 +198,14 @@ function renderRuleEditorBody() {
                     标签<input id="ru_tag_tag_${i}" value="${escapeHtml(then.tag || "")}" size="12">
                 </span>
                 <span class="rule-sub" data-kind="then" data-type="ending" style="display:${thenType === "ending" ? "inline-flex" : "none"}">
+                    结局标题<input id="ru_end_title_${i}" value="${escapeHtml(then.title || "")}" size="14" placeholder="如：破产结局">
                     结局说明<input id="ru_end_reason_${i}" value="${escapeHtml(then.reason || "")}" size="20" placeholder="如：你破产了，故事结束">
+                    分类${ddSelect("ru_end_kind", then.kind || "normal", endingKindLabels, "endkind")}
                 </span>
             </div>
         </div>`;
     });
-    body.innerHTML = `<div class="rule-toolbar"><button class="btn-secondary-sm" data-action="addRule">＋ 添加规则</button></div>` + html;
+    body.innerHTML = tabBar + `<div class="rule-toolbar"><button class="btn-secondary-sm" data-action="addRule">＋ 添加规则</button></div>` + html;
 }
 
 export function openRuleEditor(worldId) {
@@ -199,8 +223,19 @@ export function openRuleEditor(worldId) {
 export function addRule() {
     syncRuleEditFromDOM();
     if (!Array.isArray(S._ruleEdit)) S._ruleEdit = [];
-    S._ruleEdit.push(defaultRule());
+    const f = S._ruleEditFilter;
+    const r = defaultRule();
+    if (f === "ending") r.then = { type: "ending", reason: "", title: "", kind: "normal" };
+    else if (f === "tag") r.then = { type: "tag", op: "add", tag: "" };
+    S._ruleEdit.push(r);
     S._ruleActiveIndex = S._ruleEdit.length - 1;
+    renderRuleEditorBody();
+}
+
+// 切换规则分类标签（全部/结局/限制·禁项/标签），仅过滤视图，不改 S._ruleEdit
+export function setRuleFilter(el) {
+    const f = (el && el.dataset && el.dataset.filter) || "all";
+    S._ruleEditFilter = f;
     renderRuleEditorBody();
 }
 
@@ -233,6 +268,12 @@ export function ruleTypeChange(el) {
  */
 export function selectRuleType(row, kind, idx, value) {
     syncRuleEditFromDOM();
+    // 结局分类（endkind）只是改数据，不需要切 sub 显隐
+    if (kind === "endkind") {
+        const er = S._ruleEdit && S._ruleEdit[idx];
+        if (er && er.then && er.then.type === "ending") er.then.kind = value;
+        return;
+    }
     const r = S._ruleEdit && S._ruleEdit[idx];
     if (!r) return;
     const newType = value;
@@ -338,6 +379,10 @@ export function saveRuleReview() {
             r.then.aliases = (r.then.aliases || []).map(x => x.trim()).filter(Boolean).slice(0, 20);
             r.then.severity = r.then.severity === "hard" ? "hard" : "soft";
             r.then.unlessTags = (r.then.unlessTags || []).map(x => x.trim()).filter(Boolean).slice(0, 20);
+        } else if (r.then && r.then.type === "ending") {
+            r.then.reason = (r.then.reason || "").trim().slice(0, 500);
+            r.then.title = (r.then.title || "").trim().slice(0, 100);
+            if (!["good", "bad", "true", "secret", "normal"].includes(r.then.kind)) r.then.kind = "normal";
         }
     });
     if (!Array.isArray(w.rules)) w.rules = [];

@@ -50,8 +50,8 @@ test("buildStyleProfile：含 style_profile 正确合并（docs/25 接入点）"
 });
 
 // ---------- buildStyleGuide ----------
-test("buildStyleGuide：mode=original/none/custom 三种分支", () => {
-    assert.ok(buildStyleGuide({ style_ref: "original" }).includes("沿用源文件"), "original 应沿用源文件");
+test("buildStyleGuide：style_ref 兜底分支 original/none/custom", () => {
+    assert.ok(buildStyleGuide({ style_ref: "original" }).includes("通用叙事风格"), "original 走通用叙事风格兜底");
     assert.ok(buildStyleGuide({ style_ref: "none" }).includes("不模仿特定文风"), "none 应不模仿特定文风");
     const g = buildStyleGuide({ style_ref: "custom", custom_style: "克苏鲁恐怖" });
     assert.ok(g.includes("严格遵循玩家自定义要求"), "custom 应严格遵循");
@@ -90,10 +90,10 @@ test("buildExpressionGuide：赛博朋克类禁用 emoji 且冷光", () => {
 });
 
 // ---------- buildToneGuide（读 S.currentWorld） ----------
-test("buildToneGuide：custom_style 以自定义为准，不再输出详细基调菜单", () => {
-    setWorld({ style_ref: "custom", custom_style: "硬核史诗", desc: "轻松日常的校园" });
+test("buildToneGuide：style_preset.narrative_style 以玩家选定文风为准，覆盖关键词推断", () => {
+    setWorld({ style_preset: { narrative_style: "硬核史诗，冷峻而克制" }, desc: "轻松日常的校园" });
     const t = buildToneGuide();
-    assert.ok(t.includes("以玩家自定义文风为准"), "应直接以玩家自定义文风为准");
+    assert.ok(t.includes("以玩家选定的叙事风格为准"), "应直接以玩家选定的叙事风格为准");
     assert.ok(t.includes("硬核史诗"), "应含玩家自定义文风原文");
 });
 

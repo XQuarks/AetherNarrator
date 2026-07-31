@@ -18,7 +18,7 @@ import { formatWorldTime, stepOf, ensureTimelineState, getTimeConfig } from "./t
 import { normalizeCurrentDate } from "./calendar.js";
 import { LATEST_SAVE_SCHEMA_VERSION } from "./migrations.js";
 import { invalidateAllLoreAnn } from "./ann-index.js";
-import { sanitizeModules } from "./modules.js"; // ★ C1：读档/切换世界时确保 world.modules 完整
+import { sanitizeModules, ensureEventsWorldReady } from "./modules.js"; // ★ C1：读档/切换世界时确保 world.modules 完整；事件系统确保体力变量就位
 import { abortCurrentRequest } from "./turn-lifecycle.js";
 
 export async function startGame(opts = {}) {
@@ -28,6 +28,8 @@ export async function startGame(opts = {}) {
     if (!S.currentWorld) return;
     stopTypewriter();
     S.currentSession.worldId = S.currentWorld.id;
+    // ★ 多存档槽位：新周目默认开"新槽位"（不覆盖任何已有存档）；opts.keepSlot 时复用当前槽位（重新开始=覆盖重置）
+    if (!opts.keepSlot) S.currentSession.saveId = "s" + Date.now();
 
     // 新周目使用独立运行态；世界模板永不承载游玩过程中产生的记忆。
     S.activeBehaviorRecords = [];
@@ -46,6 +48,8 @@ export async function startGame(opts = {}) {
     S.gameState.current_date = normalizeCurrentDate(S.gameState.current_date, getTimeConfig().timeConfig);
     // Phase 2：多世界时初始化/补齐全线 current_date（非多世界为 no-op）
     ensureTimelineState(S.gameState, getTimeConfig());
+    // ★ 事件系统：开启 events 时确保体力变量定义就位（须在 syncVariablesToSchema 之前，使开局按 default 初始化体力）
+    ensureEventsWorldReady(S.currentWorld);
     // ★ B2：按世界 variable_schema 初始化/同步运行时变量值（开局补默认、清脏 key）
     S.gameState.variables = syncVariablesToSchema(S.currentWorld, S.gameState.variables);
     // ★ B4：新游戏从世界定义初始化好感度 map（characters + initial_state.relationships 二者纳入）
@@ -98,8 +102,10 @@ export async function startGame(opts = {}) {
 }
 
 export function continueLatestSave(worldId) {
-    const save = S.saves.find(s => s.worldId === worldId);
-    if (save) loadSave(save.id);
+    const worldSaves = S.saves.filter(s => s.worldId === worldId);
+    if (!worldSaves.length) { startGame(); return; }
+    const latest = worldSaves.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0];
+    loadSave(latest.id);
 }
 
 // ★ 载入会话：把存档数据灌入运行时（S.currentWorld / S.gameState / S.activeLoreKB / 历史等），不跳转界面。
@@ -116,6 +122,8 @@ export function prepareSessionFromSave(save) {
     if (S.gameState) S.gameState.current_date = normalizeCurrentDate(S.gameState.current_date, getTimeConfig().timeConfig);
     // Phase 2：多世界时恢复/补齐全线 current_date（非多世界为 no-op）
     ensureTimelineState(S.gameState, getTimeConfig());
+    // ★ 事件系统：读档时若 events 模块开启且世界尚无 stamina 变量，补入默认定义（须在 syncVariablesToSchema 之前）
+    ensureEventsWorldReady(S.currentWorld);
     // ★ B2：读档时按当前世界 variable_schema 同步变量（新增变量补默认、已删变量清除）
     if (S.gameState) S.gameState.variables = syncVariablesToSchema(S.currentWorld, S.gameState.variables);
     // ★ B4：读档仅兜底 bonds 字段（不回填老档 → 不兼容旧存档，老档关系页签只显示文字层）
@@ -144,6 +152,7 @@ export function loadSave(saveId) {
         return;
     }
     prepareSessionFromSave(save);
+    S.currentSession.saveId = saveId; // ★ 多存档槽位：绑定会话到所读槽位，之后自动存档只更新它
     showToast(`加载存档：${save.worldName}`, "success");
     closeAllModals();
     showScreen("gameScreen");
@@ -167,6 +176,7 @@ export function loadSave(saveId) {
 
 export function deleteSave(saveId) {
     if (!confirm("确定要删除这个存档吗？")) return;
+    if (S.currentSession.saveId === saveId) S.currentSession.saveId = null; // ★ 多存档槽位：删掉当前活动档则解绑，避免悬空
     S.saves = S.saves.filter(s => s.id !== saveId);
     saveSaves();
     renderSaveList();
@@ -198,7 +208,9 @@ export function deleteWorld(worldId) {
 
 export function createOrUpdateSave() {
     if (!S.currentWorld || !S.gameState) return;
-    const existing = S.saves.find(s => s.worldId === S.currentWorld.id);
+    // ★ 多存档槽位：按"当前槽位 id"定位（不再按 worldId 覆盖，避免同世界多存档互相抹掉）
+    const saveId = S.currentSession.saveId;
+    let existing = saveId ? S.saves.find(s => s.id === saveId) : null;
     const progress = formatWorldTime(S.gameState);
     const now = new Date().toLocaleString("zh-CN", { hour12: false });
     const cleanHistory = S.conversationHistory.filter(e => !e.isWarning);
@@ -221,8 +233,11 @@ export function createOrUpdateSave() {
         existing.pending_lore_revision = deepClone(S._loreRevisionBuffer);
         existing.player_notes = (typeof S.playerNotes === "string") ? S.playerNotes : ""; // ★ C4：写回玩家备忘
     } else {
+        const newId = saveId || ("s" + Date.now());
+        S.currentSession.saveId = newId;
         S.saves.unshift({
-            id: "s" + Date.now(), worldId: S.currentWorld.id, worldName: S.currentWorld.name,
+            id: newId, worldId: S.currentWorld.id, worldName: S.currentWorld.name,
+            name: defaultSlotName(S.currentWorld.id, S.currentWorld.name),
             progress, updatedAt: now,
             state: JSON.parse(stateStr), history: JSON.parse(cleanHistoryStr), chatHistory: cleanChat,
             chatSummary: [...S.chatSummary],
@@ -238,4 +253,46 @@ export function createOrUpdateSave() {
     saveSaves();
     // 使用已序列化的字符串保存 localStorage，避免 saveState 再次序列化
     saveState({ state: stateStr, history: historyStr, chatHistory: JSON.stringify(S.chatHistory) });
+}
+
+// ★ 多存档槽位：默认槽位名 = 世界名 + " · 存档 N"（N 为该世界现有档数 + 1）
+function defaultSlotName(worldId, worldName) {
+    const n = S.saves.filter(s => s.worldId === worldId).length + 1;
+    return (worldName || "世界") + " · 存档 " + n;
+}
+
+// ★ 多存档槽位：保存当前槽位（带 toast 反馈）
+export function saveCurrentSlot() {
+    createOrUpdateSave();
+    showToast("已保存当前存档", "success");
+}
+
+// ★ 多存档槽位：把当前进度另存为一个全新的存档槽位（分叉新线），随后切到该槽位
+export function saveAsNewSave(name) {
+    if (!S.currentWorld || !S.gameState) { showToast("请先进入一个世界并开始游玩", "warn"); return; }
+    const progress = formatWorldTime(S.gameState);
+    const now = new Date().toLocaleString("zh-CN", { hour12: false });
+    const cleanHistory = S.conversationHistory.filter(e => !e.isWarning);
+    const cleanHistoryStr = JSON.stringify(cleanHistory);
+    const stateStr = JSON.stringify(S.gameState);
+    const historyStr = JSON.stringify(S.conversationHistory);
+    const slotName = (name && name.trim()) ? name.trim().slice(0, 60) : defaultSlotName(S.currentWorld.id, S.currentWorld.name);
+    const newId = "s" + Date.now();
+    S.saves.unshift({
+        id: newId, worldId: S.currentWorld.id, worldName: S.currentWorld.name,
+        name: slotName, progress, updatedAt: now,
+        state: JSON.parse(stateStr), history: JSON.parse(cleanHistoryStr), chatHistory: deepClone(S.chatHistory),
+        chatSummary: [...S.chatSummary],
+        schema_version: LATEST_SAVE_SCHEMA_VERSION,
+        lore_kb: deepClone(S.activeLoreKB),
+        behavior_records: deepClone(S.activeBehaviorRecords),
+        ai_enhanced: S.aiEnhanced === true,
+        last_lore_review_msg_count: S.lastLoreReviewMsgCount,
+        pending_lore_revision: deepClone(S._loreRevisionBuffer),
+        player_notes: (typeof S.playerNotes === "string") ? S.playerNotes : ""
+    });
+    S.currentSession.saveId = newId;
+    saveSaves();
+    saveState({ state: stateStr, history: historyStr, chatHistory: JSON.stringify(S.chatHistory) });
+    showToast("已另存为新存档：" + slotName, "success");
 }

@@ -191,6 +191,12 @@
             <svg class="theme-icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
             <svg class="theme-icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
+        <button class="icon-btn" data-action="openSaveMenu" title="保存">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        </button>
+        <button class="icon-btn" data-action="showEndingTracker" title="结局追踪">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+        </button>
         <button class="icon-btn" data-action="showStatusPanel" title="角色状态">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </button>
@@ -207,6 +213,8 @@
         <div class="player-tools" id="playerTools">
             <button class="btn-secondary-sm" data-action="showPlayerNoteModal">📝 我的笔记</button>
             <button class="btn-secondary-sm" data-action="showPreviewModal">🔮 前瞻</button>
+            <button class="btn-secondary-sm" data-action="showEventPanel" id="eventPanelBtn">🎴 支线</button>
+            <button class="btn-secondary-sm" data-action="requestDaily">📰 今日动态</button>
         </div>
         <div class="game-input-area">
             <div class="loading-indicator" id="loadingIndicator">
@@ -214,11 +222,42 @@
                 <span class="loading-text">正在思考...</span>
                 <span class="loading-time">0.0s</span>
             </div>
+            <div class="private-chat-banner" id="privateChatBanner" style="display:none"></div>
             <div class="input-row">
                 <textarea id="playerInput" rows="1" placeholder="输入你想做的事..." aria-label="输入你想做的事" inputmode="text" enterkeyhint="send" autocomplete="off" autocorrect="off" autocapitalize="none"></textarea>
                 <button class="send-btn" data-action="submitInput">发送</button>
             </div>
             <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 存档选择弹窗（多存档槽位） ================= -->
+<div class="modal-overlay" id="worldSaveChooserModal">
+    <div class="modal world-save-chooser" role="dialog" aria-modal="true" aria-labelledby="worldSaveChooserTitle">
+        <div class="modal-header">
+            <h2 id="worldSaveChooserTitle">选择存档</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="worldSaveChooserModal">×</button>
+        </div>
+        <div class="modal-body" id="worldSaveChooserBody"></div>
+    </div>
+</div>
+
+<!-- ================= 保存菜单（多存档槽位） ================= -->
+<div class="modal-overlay" id="saveMenuModal">
+    <div class="modal save-menu" role="dialog" aria-modal="true" aria-labelledby="saveMenuTitle">
+        <div class="modal-header">
+            <h2 id="saveMenuTitle">保存</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="saveMenuModal">×</button>
+        </div>
+        <div class="modal-body">
+            <p class="muted" id="saveMenuCurrentSlot"></p>
+            <button class="btn primary block" data-action="saveCurrentSlot">保存当前档</button>
+            <div class="form-group" style="margin-top:14px">
+                <label>另存为新存档（可命名）</label>
+                <input id="saveAsNewName" class="text-input" maxlength="60" placeholder="留空则用默认名，如「霍格沃茨 · 存档 2」">
+            </div>
+            <button class="btn secondary block" data-action="saveAsNewSlot">另存为新存档</button>
         </div>
     </div>
 </div>
@@ -232,6 +271,20 @@
         </div>
         <div class="status-tabs" id="statusTabs"></div>
         <div class="status-content" id="statusContent"></div>
+    </div>
+</div>
+
+<!-- ================= 支线事件面板 ================= -->
+<div class="modal-overlay" id="eventPanelOverlay">
+    <div class="modal event-panel" role="dialog" aria-modal="true" aria-labelledby="eventPanelTitle">
+        <div class="modal-header">
+            <h2 id="eventPanelTitle">🎴 支线事件</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="eventPanelOverlay">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="hint">点击「进入」会消耗体力，并作为一次普通行动推进剧情。体力随时间 / 天数回复（每自然日 +30，上限 100）。</div>
+            <div id="eventPanelList" class="event-panel-list"></div>
+        </div>
     </div>
 </div>
 
@@ -311,261 +364,259 @@
 
 <!-- ================= 创建世界弹窗 ================= -->
 <div class="modal-overlay" id="createWorldModal">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="createWorldModalTitle">
+    <div class="modal cw-editor-modal" role="dialog" aria-modal="true" aria-labelledby="createWorldModalTitle">
         <div class="modal-header">
             <h2 id="createWorldModalTitle">创建新世界</h2>
             <button class="modal-close" data-action="closeModal" data-modal="createWorldModal">×</button>
         </div>
-        <div class="cw-steps">
-            <span class="cw-step-dot active" data-step="1">1</span>
-            <span class="cw-step-line"></span>
-            <span class="cw-step-dot" data-step="2">2</span>
-            <span class="cw-step-line"></span>
-            <span class="cw-step-dot" data-step="3">3</span>
-            <span class="cw-step-line"></span>
-            <span class="cw-step-dot" data-step="4">4</span>
-        </div>
-        <div class="modal-body">
-            <!-- 步骤 1：名称 -->
-            <div class="cw-step active" data-step="1">
-                <p class="cw-step-title">给你的世界起个名字</p>
-                <p class="cw-step-hint">比如《剑来》《哈利波特》，或原创名如《浮世之界》。</p>
-                <div class="form-group">
-                    <label>世界名称</label>
-                    <input type="text" id="worldName" placeholder="例如：剑来、哈利波特、原创仙侠">
-                </div>
-            </div>
-            <!-- 步骤 2：类型 / IP -->
-            <div class="cw-step" data-step="2">
-                <p class="cw-step-title">这是什么类型的世界？</p>
-                <div class="form-group">
-                    <label>世界类型</label>
-                    <select id="worldType" class="lore-inp lore-sel" data-action="onWorldTypeChange" data-event="change">
-                        <option value="original">原创世界观</option>
-                        <option value="fan">同人 · 基于具体作品二创</option>
-                        <option value="ip">改编 IP · 商业版权作品</option>
-                        <option value="shared">共享宇宙 · 社群共创设定</option>
-                        <option value="public_domain">公共领域 · 版权已过期</option>
-                    </select>
-                </div>
-                <div class="conditional-field show" id="ipNameField">
+        <div class="cw-editor">
+            <nav class="cw-nav">
+                <button type="button" class="cw-nav-item active" data-action="selectCwModule" data-module="basic">基本信息</button>
+                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="style">叙事风格</button>
+                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="world">世界观</button>
+                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="modules">玩法模块</button>
+                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="time">时间系统</button>
+                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="gen">生成设置</button>
+            </nav>
+            <div class="cw-content">
+                <!-- 模块 1：基本信息 -->
+                <section class="cw-module active" data-module="basic">
+                    <p class="cw-step-title">基本信息</p>
+                    <p class="cw-step-hint">先给世界起名、选类型，可上传原著作为参考。</p>
                     <div class="form-group">
-                        <label>作品名称 <span id="ipNameReqTag" class="req-tag">必填</span></label>
-                        <input type="text" id="ipName" placeholder="例如：剑来、哈利波特、三体、红楼梦...">
-                        <div class="hint">AI 将根据作品名称从训练数据中检索相关设定、人物、力量体系来生成世界观。</div>
-                        <div class="hint opt-hint" id="ipNameOptHint" style="display:none;color:var(--primary);">已上传源文件，作品名称可留空——AI 将以你上传的原文为准生成世界观，名称仅作辅助参考。</div>
+                        <label>世界名称</label>
+                        <input type="text" id="worldName" placeholder="例如：剑来、哈利波特、原创仙侠">
                     </div>
-                    <div class="upload-tip-box">
-                        <div class="upload-tip-title">建议上传源文件以获得更精准的生成效果</div>
-                        <div class="upload-tip-desc">仅凭作品名称，AI 依赖自身训练数据，可能存在遗漏或偏差。上传原著 TXT/DOCX 文件后，AI 能从原文中精确提取世界观设定、人物关系和叙事风格。</div>
-                    </div>
-                </div>
-                <div class="conditional-field show" id="ipUploadField">
                     <div class="form-group">
-                        <label>上传世界观/小说源文件（可选）</label>
-                        <div class="file-upload-area" id="fileUploadArea">
-                            <span id="fileUploadText">点击上传 TXT / DOCX / EPUB 文件</span>
+                        <label>世界类型</label>
+                        <select id="worldType" class="lore-inp lore-sel" data-action="onWorldTypeChange" data-event="change">
+                            <option value="original">原创世界观</option>
+                            <option value="fan">同人 · 基于具体作品二创</option>
+                            <option value="ip">改编 IP · 商业版权作品</option>
+                            <option value="shared">共享宇宙 · 社群共创设定</option>
+                            <option value="public_domain">公共领域 · 版权已过期</option>
+                        </select>
+                    </div>
+                    <div class="conditional-field show" id="ipNameField">
+                        <div class="form-group">
+                            <label>作品名称 <span id="ipNameReqTag" class="req-tag">必填</span></label>
+                            <input type="text" id="ipName" placeholder="例如：剑来、哈利波特、三体、红楼梦...">
+                            <div class="hint">AI 将根据作品名称从训练数据中检索相关设定、人物、力量体系来生成世界观。</div>
+                            <div class="hint opt-hint" id="ipNameOptHint" style="display:none;color:var(--primary);">已上传源文件，作品名称可留空——AI 将以你上传的原文为准生成世界观，名称仅作辅助参考。</div>
                         </div>
-                        <input type="file" id="sourceFile" accept=".txt,.docx,.epub" data-action="handleFileSelect" data-event="change">
-                        <div class="upload-hint">支持 .txt、.docx 和 .epub 格式，源文件内容将作为世界观生成的参考材料</div>
+                        <div class="upload-tip-box">
+                            <div class="upload-tip-title">建议上传源文件以获得更精准的生成效果</div>
+                            <div class="upload-tip-desc">仅凭作品名称，AI 依赖自身训练数据，可能存在遗漏或偏差。上传原著 TXT/DOCX 文件后，AI 能从原文中精确提取世界观设定、人物关系和叙事风格。</div>
+                        </div>
                     </div>
-                </div>
-            </div>
-            <!-- 步骤 3：世界观描述 -->
-            <div class="cw-step" data-step="3">
-                <p class="cw-step-title">这个世界长什么样？</p>
-                <p class="cw-step-hint" id="worldDescHint">你可以直接使用原作的世界观描述，也可以在此基础上进行修改和扩展——例如调整力量体系、加入新势力、改变时间线等。描述越详细，AI 生成的剧情越贴合你的构想。</p>
-                <div class="form-group">
-                    <label>世界观描述</label>
-                    <textarea id="worldDesc" placeholder="可以直接填写原作的世界观概述，也可以在此基础上修改...&#10;例如：在原著的世界观基础上，增加了一个隐秘的地下组织..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>关键偏离（可选，优先级最高）</label>
-                    <textarea id="keyDivergences" placeholder="如果你改动了原作的关键设定，可在此声明，例如：时间线改到2025年 / 主角替换为原创角色 / 伏地魔已被击败..."></textarea>
-                    <div class="hint">基于已有 IP 但做了关键性修改时填写。此声明高于 AI 自动生成的一致性包，确保剧情始终跟随你的版本。</div>
-                </div>
-            </div>
-            <!-- 步骤 4：微调（可选） -->
-            <div class="cw-step" data-step="4">
-                <p class="cw-step-title">生成前的微调（都能留空）</p>
-                <div class="form-group">
-                    <label>主角设定（可选）</label>
-                    <textarea id="heroDesc" placeholder="例如：一名来自小镇的少年，性格谨慎，渴望变强..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>文风参考</label>
-                    <div class="radio-group" id="styleRefGroup">
-                        <label class="radio-option selected" >
-                            <input type="radio" name="styleRef" value="original" checked data-action="selectStyleRef" data-event="change">
-                            <div class="radio-indicator"></div>
-                            <div>
-                                <div class="radio-label">参考原版文风</div>
-                                <div class="radio-desc">AI 将模仿源文件或描述中的写作风格</div>
+                    <div class="conditional-field show" id="ipUploadField">
+                        <div class="form-group">
+                            <label>上传世界观/小说源文件（可选）</label>
+                            <div class="file-upload-area" id="fileUploadArea">
+                                <span id="fileUploadText">点击上传 TXT / DOCX / EPUB 文件</span>
                             </div>
-                        </label>
-                        <label class="radio-option" >
-                            <input type="radio" name="styleRef" value="custom" data-action="selectStyleRef" data-event="change">
-                            <div class="radio-indicator"></div>
-                            <div>
-                                <div class="radio-label">自定义文风</div>
-                                <div class="radio-desc">手动输入你想要的叙事风格</div>
-                            </div>
-                        </label>
-                        <label class="radio-option" >
-                            <input type="radio" name="styleRef" value="none" data-action="selectStyleRef" data-event="change">
-                            <div class="radio-indicator"></div>
-                            <div>
-                                <div class="radio-label">不参考文风</div>
-                                <div class="radio-desc">AI 将使用通用叙事风格</div>
-                            </div>
-                        </label>
-                    </div>
-                    <div class="conditional-field" id="customStyleField">
-                        <textarea id="customStyle" placeholder="描述你想要的文风，例如：冷峻克制、江湖气息浓厚、对话简练不拖沓..." style="min-height:80px;" data-action="onCustomStyleInput" data-event="input"></textarea>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>叙事偏好（可选，帮 AI 更贴合你的期待）</label>
-                    <div class="pref-block">
-                        <div class="pref-label">题材</div>
-                        <div class="tag-row" data-pref="genre">
-                            <button type="button" class="tag-chip" data-val="都市" data-action="selectTagPref" data-event="click">都市</button>
-                            <button type="button" class="tag-chip" data-val="仙侠" data-action="selectTagPref" data-event="click">仙侠</button>
-                            <button type="button" class="tag-chip" data-val="克苏鲁" data-action="selectTagPref" data-event="click">克苏鲁</button>
-                            <button type="button" class="tag-chip" data-val="赛博朋克" data-action="selectTagPref" data-event="click">赛博朋克</button>
-                            <button type="button" class="tag-chip" data-val="西幻" data-action="selectTagPref" data-event="click">西幻</button>
-                            <button type="button" class="tag-chip" data-val="武侠" data-action="selectTagPref" data-event="click">武侠</button>
-                            <button type="button" class="tag-chip" data-val="末世" data-action="selectTagPref" data-event="click">末世</button>
-                        </div>
-                    </div>
-                    <div class="pref-block">
-                        <div class="pref-label">主题（可多选）</div>
-                        <div class="tag-row" data-pref="tropes" data-multi="1">
-                            <button type="button" class="tag-chip" data-val="逆袭" data-action="selectTagPref" data-event="click">逆袭</button>
-                            <button type="button" class="tag-chip" data-val="复仇" data-action="selectTagPref" data-event="click">复仇</button>
-                            <button type="button" class="tag-chip" data-val="甜宠" data-action="selectTagPref" data-event="click">甜宠</button>
-                            <button type="button" class="tag-chip" data-val="系统" data-action="selectTagPref" data-event="click">系统</button>
-                            <button type="button" class="tag-chip" data-val="成长" data-action="selectTagPref" data-event="click">成长</button>
-                            <button type="button" class="tag-chip" data-val="悬疑" data-action="selectTagPref" data-event="click">悬疑</button>
-                            <button type="button" class="tag-chip" data-val="救赎" data-action="selectTagPref" data-event="click">救赎</button>
-                        </div>
-                    </div>
-                    <div class="pref-block">
-                        <div class="pref-label">口味</div>
-                        <div class="tag-row" data-pref="taste">
-                            <button type="button" class="tag-chip" data-val="爽快" data-action="selectTagPref" data-event="click">爽快</button>
-                            <button type="button" class="tag-chip" data-val="暗黑" data-action="selectTagPref" data-event="click">暗黑</button>
-                            <button type="button" class="tag-chip" data-val="治愈" data-action="selectTagPref" data-event="click">治愈</button>
-                            <button type="button" class="tag-chip" data-val="史诗" data-action="selectTagPref" data-event="click">史诗</button>
-                            <button type="button" class="tag-chip" data-val="轻松" data-action="selectTagPref" data-event="click">轻松</button>
-                        </div>
-                    </div>
-                    <div class="pref-block">
-                        <div class="pref-label">视角</div>
-                        <div class="tag-row" data-pref="pov">
-                            <button type="button" class="tag-chip" data-val="第一人称" data-action="selectTagPref" data-event="click">第一人称</button>
-                            <button type="button" class="tag-chip" data-val="第二人称" data-action="selectTagPref" data-event="click">第二人称</button>
-                            <button type="button" class="tag-chip" data-val="第三人称" data-action="selectTagPref" data-event="click">第三人称</button>
-                        </div>
-                    </div>
-                    <div class="pref-block">
-                        <div class="pref-label">文风</div>
-                        <div class="tag-row" data-pref="style">
-                            <button type="button" class="tag-chip" data-val="轻松" data-action="selectTagPref" data-event="click">轻松</button>
-                            <button type="button" class="tag-chip" data-val="克制" data-action="selectTagPref" data-event="click">克制</button>
-                            <button type="button" class="tag-chip" data-val="华丽" data-action="selectTagPref" data-event="click">华丽</button>
-                            <button type="button" class="tag-chip" data-val="冷峻" data-action="selectTagPref" data-event="click">冷峻</button>
-                            <button type="button" class="tag-chip" data-val="写实" data-action="selectTagPref" data-event="click">写实</button>
-                        </div>
-                    </div>
-                    <div class="pref-block">
-                        <div class="pref-label">自定义标签（最多 10 字）</div>
-                        <div class="custom-tag-row">
-                            <input type="text" id="customTag" maxlength="10" placeholder="例如：群像、慢热..." data-action="onCustomTagInput" data-event="input">
-                            <span class="char-count" id="customTagCount">0/10</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>剧情自由度</label>
-                    <div class="range-slider-wrapper">
-                        <input type="range" id="plotFreedom" min="1" max="5" value="3" data-action="updatePlotFreedomLabel" data-event="input">
-                        <div class="range-current" id="plotFreedomLabel">适中发散 — 在原著世界观内适度创新</div>
-                        <div class="range-labels">
-                            <span>严格遵循原著</span>
-                            <span>完全自由创作</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>AI 创造性（温度）</label>
-                    <div class="range-slider-wrapper">
-                        <input type="range" id="worldTemp" min="0" max="1" step="0.1" value="0.7" data-action="updateWorldTempLabel" data-event="input">
-                        <div class="range-current" id="worldTempLabel">0.7 — 均衡模式（适中开放）</div>
-                        <div class="range-labels">
-                            <span>严谨一致</span>
-                            <span>自由发散</span>
-                        </div>
-                    </div>
-                    <div class="hint">控制生成剧情的随机度。越低越稳定连贯，越高越自由发散。AI 已按你选的文风预填推荐值，可手动调整。</div>
-                </div>
-                <details class="advanced-details">
-                    <summary>高级选项（特殊要求）</summary>
-                    <div class="form-group">
-                        <label>特殊要求（世界观生成，可选）</label>
-                        <div class="radio-group" id="worldPrefixGroup">
-                            <label class="radio-option selected" >
-                                <input type="radio" name="worldPrefixEnable" value="off" checked data-action="toggleWorldPrefix" data-event="change">
-                                <div class="radio-indicator"></div>
-                                <div>
-                                    <div class="radio-label">不添加</div>
-                                    <div class="radio-desc">不附加额外指令</div>
-                                </div>
-                            </label>
-                            <label class="radio-option" >
-                                <input type="radio" name="worldPrefixEnable" value="on" data-action="toggleWorldPrefix" data-event="change">
-                                <div class="radio-indicator"></div>
-                                <div>
-                                    <div class="radio-label">添加特殊要求</div>
-                                    <div class="radio-desc">输入的内容将作为 AI Prompt 前缀用于生成知识库等世界观内容</div>
-                                </div>
-                            </label>
-                        </div>
-                        <div class="conditional-field" id="worldPrefixField">
-                            <textarea id="worldPrefix" placeholder="输入你想附加到世界观生成 AI Prompt 前面的特殊要求..." style="min-height:80px;"></textarea>
+                            <input type="file" id="sourceFile" accept=".txt,.docx,.epub" data-action="handleFileSelect" data-event="change">
+                            <div class="upload-hint">支持 .txt、.docx 和 .epub 格式，源文件内容将作为世界观生成的参考材料</div>
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>特殊要求（对话，可选）</label>
-                        <div class="radio-group" id="customPrefixGroup">
-                            <label class="radio-option selected" >
-                                <input type="radio" name="customPrefixEnable" value="off" checked data-action="toggleCustomPrefix" data-event="change">
-                                <div class="radio-indicator"></div>
-                                <div>
-                                    <div class="radio-label">不添加</div>
-                                    <div class="radio-desc">不附加额外指令</div>
-                                </div>
-                            </label>
-                            <label class="radio-option" >
-                                <input type="radio" name="customPrefixEnable" value="on" data-action="toggleCustomPrefix" data-event="change">
-                                <div class="radio-indicator"></div>
-                                <div>
-                                    <div class="radio-label">添加特殊要求</div>
-                                    <div class="radio-desc">输入的内容将作为 AI Prompt 前缀注入每次对话</div>
-                                </div>
-                            </label>
-                        </div>
-                        <div class="conditional-field" id="customPrefixField">
-                            <textarea id="customPrefix" placeholder="输入你想附加到 AI Prompt 前面的特殊要求，例如：叙事要更加黑暗残酷 / 增加更多悬疑元素 / NPC 对话要更口语化..." style="min-height:80px;"></textarea>
+                        <label>主角设定（可选）</label>
+                        <textarea id="heroDesc" placeholder="例如：一名来自小镇的少年，性格谨慎，渴望变强..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>剧情自由度</label>
+                        <div class="range-slider-wrapper">
+                            <input type="range" id="plotFreedom" min="1" max="5" value="3" data-action="updatePlotFreedomLabel" data-event="input">
+                            <div class="range-current" id="plotFreedomLabel">适中发散 — 在原著世界观内适度创新</div>
+                            <div class="range-labels">
+                                <span>严格遵循原著</span>
+                                <span>完全自由创作</span>
+                            </div>
                         </div>
                     </div>
-                </details>
+                </section>
+                <!-- 模块 2：叙事风格 -->
+                <section class="cw-module" data-module="style">
+                    <p class="cw-step-title">叙事风格</p>
+                    <p class="cw-step-hint">从下方模板一键套用，或完全自由书写。套用模板会自动填写文风与推荐温度，之后仍可改写。</p>
+                    <div class="form-group">
+                        <label>风格模板库</label>
+                        <div class="style-template-grid" id="styleTemplateGrid"></div>
+                        <div class="hint">当前风格：<span id="styleCurrentTag" class="style-current-tag">未选择</span></div>
+                    </div>
+                    <div class="form-group">
+                        <label>叙事文风（500~2000 字，AI 会严格遵循）</label>
+                        <textarea id="narrativeStyle" placeholder="描述你想要的世界叙事风格，例如：冷峻克制、江湖气息浓厚、对话简练不拖沓、注重氛围与细节描写……&#10;（从上方模板套用后会自动填入，可随意增删改写）" style="min-height:200px;" data-action="onNarrativeStyleInput" data-event="input"></textarea>
+                        <div class="char-count" id="narrativeStyleCount">0 字</div>
+                    </div>
+                    <div class="form-group">
+                        <label>结构化标签（帮 AI 更贴合你的期待，可选）</label>
+                        <div class="pref-block">
+                            <div class="pref-label">题材</div>
+                            <div class="tag-row" data-pref="genre">
+                                <button type="button" class="tag-chip" data-val="都市" data-action="selectTagPref" data-event="click">都市</button>
+                                <button type="button" class="tag-chip" data-val="仙侠" data-action="selectTagPref" data-event="click">仙侠</button>
+                                <button type="button" class="tag-chip" data-val="克苏鲁" data-action="selectTagPref" data-event="click">克苏鲁</button>
+                                <button type="button" class="tag-chip" data-val="赛博朋克" data-action="selectTagPref" data-event="click">赛博朋克</button>
+                                <button type="button" class="tag-chip" data-val="西幻" data-action="selectTagPref" data-event="click">西幻</button>
+                                <button type="button" class="tag-chip" data-val="武侠" data-action="selectTagPref" data-event="click">武侠</button>
+                                <button type="button" class="tag-chip" data-val="末世" data-action="selectTagPref" data-event="click">末世</button>
+                            </div>
+                        </div>
+                        <div class="pref-block">
+                            <div class="pref-label">主题（可多选）</div>
+                            <div class="tag-row" data-pref="tropes" data-multi="1">
+                                <button type="button" class="tag-chip" data-val="逆袭" data-action="selectTagPref" data-event="click">逆袭</button>
+                                <button type="button" class="tag-chip" data-val="复仇" data-action="selectTagPref" data-event="click">复仇</button>
+                                <button type="button" class="tag-chip" data-val="甜宠" data-action="selectTagPref" data-event="click">甜宠</button>
+                                <button type="button" class="tag-chip" data-val="系统" data-action="selectTagPref" data-event="click">系统</button>
+                                <button type="button" class="tag-chip" data-val="成长" data-action="selectTagPref" data-event="click">成长</button>
+                                <button type="button" class="tag-chip" data-val="悬疑" data-action="selectTagPref" data-event="click">悬疑</button>
+                                <button type="button" class="tag-chip" data-val="救赎" data-action="selectTagPref" data-event="click">救赎</button>
+                            </div>
+                        </div>
+                        <div class="pref-block">
+                            <div class="pref-label">口味</div>
+                            <div class="tag-row" data-pref="taste">
+                                <button type="button" class="tag-chip" data-val="爽快" data-action="selectTagPref" data-event="click">爽快</button>
+                                <button type="button" class="tag-chip" data-val="暗黑" data-action="selectTagPref" data-event="click">暗黑</button>
+                                <button type="button" class="tag-chip" data-val="治愈" data-action="selectTagPref" data-event="click">治愈</button>
+                                <button type="button" class="tag-chip" data-val="史诗" data-action="selectTagPref" data-event="click">史诗</button>
+                                <button type="button" class="tag-chip" data-val="轻松" data-action="selectTagPref" data-event="click">轻松</button>
+                            </div>
+                        </div>
+                        <div class="pref-block">
+                            <div class="pref-label">视角</div>
+                            <div class="tag-row" data-pref="pov">
+                                <button type="button" class="tag-chip" data-val="第一人称" data-action="selectTagPref" data-event="click">第一人称</button>
+                                <button type="button" class="tag-chip" data-val="第二人称" data-action="selectTagPref" data-event="click">第二人称</button>
+                                <button type="button" class="tag-chip" data-val="第三人称" data-action="selectTagPref" data-event="click">第三人称</button>
+                            </div>
+                        </div>
+                        <div class="pref-block">
+                            <div class="pref-label">文风</div>
+                            <div class="tag-row" data-pref="style">
+                                <button type="button" class="tag-chip" data-val="轻松" data-action="selectTagPref" data-event="click">轻松</button>
+                                <button type="button" class="tag-chip" data-val="克制" data-action="selectTagPref" data-event="click">克制</button>
+                                <button type="button" class="tag-chip" data-val="华丽" data-action="selectTagPref" data-event="click">华丽</button>
+                                <button type="button" class="tag-chip" data-val="冷峻" data-action="selectTagPref" data-event="click">冷峻</button>
+                                <button type="button" class="tag-chip" data-val="写实" data-action="selectTagPref" data-event="click">写实</button>
+                            </div>
+                        </div>
+                        <div class="pref-block">
+                            <div class="pref-label">自定义标签（最多 10 字）</div>
+                            <div class="custom-tag-row">
+                                <input type="text" id="customTag" maxlength="10" placeholder="例如：群像、慢热..." data-action="onCustomTagInput" data-event="input">
+                                <span class="char-count" id="customTagCount">0/10</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>AI 创造性（温度）</label>
+                        <div class="range-slider-wrapper">
+                            <input type="range" id="worldTemp" min="0" max="1" step="0.1" value="0.7" data-action="updateWorldTempLabel" data-event="input">
+                            <div class="range-current" id="worldTempLabel">0.7 — 均衡模式（适中开放）</div>
+                            <div class="range-labels">
+                                <span>严谨一致</span>
+                                <span>自由发散</span>
+                            </div>
+                        </div>
+                        <div class="hint">控制生成剧情的随机度。越低越稳定连贯，越高越自由发散。套用模板时已预填推荐值，可手动调整。</div>
+                    </div>
+                </section>
+                <!-- 模块 3：世界观 -->
+                <section class="cw-module" data-module="world">
+                    <p class="cw-step-title">世界观</p>
+                    <p class="cw-step-hint" id="worldDescHint">描述越详细，AI 生成的内容越贴近你的预期。</p>
+                    <div class="form-group">
+                        <label>世界观描述</label>
+                        <textarea id="worldDesc" placeholder="描述这个世界的规则、力量体系、主要势力、地点、人物关系等..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>关键偏离（可选，优先级最高）</label>
+                        <textarea id="keyDivergences" placeholder="如果你改动了原作的关键设定，可在此声明，例如：时间线改到2025年 / 主角替换为原创角色 / 伏地魔已被击败..."></textarea>
+                        <div class="hint">基于已有 IP 但做了关键性修改时填写。此声明高于 AI 自动生成的一致性包，确保剧情始终跟随你的版本。</div>
+                    </div>
+                    <div class="form-group">
+                        <label>世界书（知识库）</label>
+                        <div class="worldbook-box">
+                            <div class="worldbook-text">世界书即本作的知识库（规则 / 地点 / 人物 / 事件 / 物品 / 势力 / 冲突）。创建时 AI 会自动抽取并写入；生成后可在世界详情页「编辑知识库」查看与修改。</div>
+                            <button type="button" class="btn secondary" id="openWorldBookBtn" data-action="openWorldBookFromWizard">📚 前往编辑知识库</button>
+                        </div>
+                    </div>
+                </section>
+                <!-- 模块 4：玩法模块 -->
+                <section class="cw-module" data-module="modules">
+                    <p class="cw-step-title">玩法模块</p>
+                    <p class="cw-step-hint">勾选本世界启用的系统（核心模块始终开启）。也可在游玩后于设置页调整。</p>
+                    <div class="module-toggles" id="moduleToggles"></div>
+                </section>
+                <!-- 模块 5：时间系统 -->
+                <section class="cw-module" data-module="time">
+                    <p class="cw-step-title">时间系统</p>
+                    <p class="cw-step-hint">AI 会根据世界观自动生成时间系统；这里只做偏好提示（不影响其它设置）。</p>
+                    <div class="form-group">
+                        <label>时间推进偏好</label>
+                        <select id="timePreset" class="lore-inp lore-sel">
+                            <option value="auto">自动（由 AI 按世界观决定）</option>
+                            <option value="none">不显示时间</option>
+                            <option value="day">按「第 N 天」</option>
+                            <option value="gregorian">公历月日 + 星期</option>
+                            <option value="lunar">农历月日</option>
+                            <option value="custom">自定义历法（纪元 + 自定义月日）</option>
+                        </select>
+                        <div class="hint">生成后若想精修，可在世界详情的时间系统编辑器里细化（年份 / 历法 / 流速等）。</div>
+                    </div>
+                </section>
+                <!-- 模块 6：生成设置 -->
+                <section class="cw-module" data-module="gen">
+                    <p class="cw-step-title">生成设置</p>
+                    <p class="cw-step-hint">特殊要求可让 AI 在生成时遵循额外指令（可选）。</p>
+                    <details class="advanced-details">
+                        <summary>高级选项（特殊要求）</summary>
+                        <div class="form-group">
+                            <label>特殊要求（世界观生成，可选）</label>
+                            <div class="radio-group" id="worldPrefixGroup">
+                                <label class="radio-option selected" >
+                                    <input type="radio" name="worldPrefixEnable" value="off" checked data-action="toggleWorldPrefix" data-event="change">
+                                    <div class="radio-indicator"></div>
+                                    <div><div class="radio-label">不添加</div><div class="radio-desc">不附加额外指令</div></div>
+                                </label>
+                                <label class="radio-option" >
+                                    <input type="radio" name="worldPrefixEnable" value="on" data-action="toggleWorldPrefix" data-event="change">
+                                    <div class="radio-indicator"></div>
+                                    <div><div class="radio-label">添加特殊要求</div><div class="radio-desc">输入内容作为 AI Prompt 前缀用于生成世界观</div></div>
+                                </label>
+                            </div>
+                            <div class="conditional-field" id="worldPrefixField">
+                                <textarea id="worldPrefix" placeholder="输入想附加到世界观生成 AI Prompt 前面的特殊要求..." style="min-height:80px;"></textarea>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>特殊要求（对话，可选）</label>
+                            <div class="radio-group" id="customPrefixGroup">
+                                <label class="radio-option selected" >
+                                    <input type="radio" name="customPrefixEnable" value="off" checked data-action="toggleCustomPrefix" data-event="change">
+                                    <div class="radio-indicator"></div>
+                                    <div><div class="radio-label">不添加</div><div class="radio-desc">不附加额外指令</div></div>
+                                </label>
+                                <label class="radio-option" >
+                                    <input type="radio" name="customPrefixEnable" value="on" data-action="toggleCustomPrefix" data-event="change">
+                                    <div class="radio-indicator"></div>
+                                    <div><div class="radio-label">添加特殊要求</div><div class="radio-desc">输入内容作为 AI Prompt 前缀注入每次对话</div></div>
+                                </label>
+                            </div>
+                            <div class="conditional-field" id="customPrefixField">
+                                <textarea id="customPrefix" placeholder="输入想附加到 AI Prompt 前面的特殊要求..." style="min-height:80px;"></textarea>
+                            </div>
+                        </div>
+                    </details>
+                </section>
             </div>
         </div>
         <div class="modal-footer cw-footer">
-            <button class="btn secondary" data-action="cwPrev" id="cwPrevBtn" style="visibility:hidden;">上一步</button>
-            <button class="btn primary" data-action="cwNext" id="cwNextBtn">下一步</button>
-            <button class="btn primary" data-action="generateWorld" id="generateWorldBtn" style="display:none;">确认生成</button>
+            <button class="btn secondary" data-action="closeModal" data-modal="createWorldModal">取消</button>
+            <button class="btn primary" data-action="generateWorld" id="generateWorldBtn">确认生成</button>
         </div>
     </div>
 </div>
@@ -874,13 +925,27 @@
     </div>
 </div>
 
+<!-- ================= 结局追踪器浮层（docs/54） ================= -->
+<div class="modal-overlay" id="endingTrackerModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="endingTrackerTitle">
+        <div class="modal-header">
+            <h2 id="endingTrackerTitle">🏁 结局追踪器</h2>
+            <button class="modal-close" data-action="closeModal" data-modal="endingTrackerModal">×</button>
+        </div>
+        <div class="modal-body" id="endingTrackerBody"></div>
+    </div>
+</div>
+
 <!-- ================= 游戏结束弹窗 ================= -->
 
 <!-- 注：世界观图谱已迁入知识库弹窗（loreReviewModal）内的「🔗 图谱」页签，不再有独立弹窗 -->
 <div class="game-over-overlay" id="gameOverOverlay">
     <div class="game-over-box">
         <h2>游戏结束</h2>
+        <div class="game-over-kind"><span class="ending-kind-badge" id="gameOverKind">结局</span></div>
+        <div class="game-over-title" id="gameOverTitle">你的旅程到此为止。</div>
         <div class="reason" id="gameOverReason">你的旅程到此为止。</div>
+        <div class="ending-codex hidden" id="endingCodex"></div>
         <button class="btn primary full-width" data-action="backToHomeAfterGameOver">返回主界面</button>
         <button class="btn secondary full-width" style="margin-top:8px;" data-action="reviewDeathScene">查看结局</button>
     </div>

@@ -10,15 +10,20 @@ import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
 import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory, styleToTemperature } from "./prompt.js";
-import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative, generateConsistencyPack, predictBranches } from "./llm.js";
-import { checkDeathBanner, closeModal, getSelectedStyleRef, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry, collectStylePrefs } from "./render.js";
-import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules, recordWorldviewNag } from "./worldview.js";
+import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative, generateConsistencyPack, predictBranches, aiGenerateDaily } from "./llm.js";
+import { checkDeathBanner, closeModal, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, renderEndingTracker, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry, collectStylePrefs } from "./render.js";
+// ★ W2-Style：读取创建向导的 style_preset / 模块开关 / 时间偏好
+import { getStylePresetFromWizard, getWizardModuleSettings, getWizardTimePreset } from "./wizard-editor.js";
+import { serializeStylePreset } from "./style-presets.js";
+import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules, recordWorldviewNag, appendUniqueEnding } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { runWorldCritic } from "./critic.js"; // ★ Phase 3：审稿人
 import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
 import { sanitizeModules, isModuleEnabled } from "./modules.js"; // ★ C1：保存模块设置时归一 + 逻辑门禁
+import { evaluateGate, collectCommFlags, PRIVATE_STAMINA_COST, DAILY_STAMINA_COST } from "./comm-gate.js"; // ★ docs/53：门禁引擎
+import { commitChannel } from "./comm-channels.js"; // ★ docs/53：动态渠道固化
 import { activeTimelineKey, getTimelineTriggered, recordTrigger, resetTriggers, createBranch, resolveTimeTravelStrategy } from "./triggers.js";
 
 // UI-4：判定时间是否倒流（逆跳）。dated 模式用原生日期比较；day/none/period 用绝对分钟比较。
@@ -110,13 +115,20 @@ export async function generateWorld() {
     const desc = document.getElementById("worldDesc").value.trim();
     const hero = document.getElementById("heroDesc").value.trim();
     const ipName = (type === "ip" || type === "fan") ? document.getElementById("ipName").value.trim() : "";
-    const styleRef = getSelectedStyleRef();
-    const customStyle = styleRef === "custom" ? document.getElementById("customStyle").value.trim() : "";
+    // ★ W2-Style：从创建向导读取叙事风格预设（模板或自定义），序列化后写入 world.style_preset
+    const stylePresetObj = getStylePresetFromWizard();
+    const stylePreset = serializeStylePreset(stylePresetObj);
+    const styleRef = "original"; // 兼容 llm 兜底分支；实际文风由下方 stylePreset 注入
+    const customStyle = "";
     const plotFreedom = parseInt(document.getElementById("plotFreedom").value);
     const prefixEnabled = document.querySelector("input[name='customPrefixEnable']:checked");
     const customPrefix = (prefixEnabled && prefixEnabled.value === "on") ? document.getElementById("customPrefix").value.trim() : "";
     const worldPrefixEnabled = document.querySelector("input[name='worldPrefixEnable']:checked");
-    const worldPrefix = (worldPrefixEnabled && worldPrefixEnabled.value === "on") ? document.getElementById("worldPrefix").value.trim() : "";
+    // ★ W2-Style：时间系统偏好作为生成提示并入 worldPrefix（沿用既有「世界观生成前缀」通道）
+    const timePref = getWizardTimePreset();
+    const timeHint = timePref.hint || "";
+    const worldPrefixRaw = (worldPrefixEnabled && worldPrefixEnabled.value === "on") ? document.getElementById("worldPrefix").value.trim() : "";
+    const worldPrefix = (worldPrefixRaw + (timeHint ? "\n" + timeHint : "")).trim();
     const keyDivergences = document.getElementById("keyDivergences") ? document.getElementById("keyDivergences").value.trim() : "";
 
     if (!name || !desc) {
@@ -145,7 +157,7 @@ export async function generateWorld() {
             showToast(`本书较大，知识库将分 ${chunkCount} 段生成，可能需要较长时间（数十次 API 调用），请耐心等待。`, "warn");
             // ① 基础世界配置（结构/开场）由首段生成
             const firstChunk = src.slice(0, CHUNK_SIZE);
-            const rawGen1 = await callWorldGenerationLLM(name, type, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT);
+            const rawGen1 = await callWorldGenerationLLM(name, type, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT, stylePreset);
             warnIfTimeCorrected(rawGen1);
             generated = sanitizeWorldConfig(rawGen1);
             // ② 逐段抽取 lore 并合并（覆盖全书，同名条目汇总；含 relations 三元组）
@@ -159,13 +171,13 @@ export async function generateWorld() {
                         S.debugLog.chunkErrors.push({ time: new Date().toISOString(), chunkIndex: idx, total: chunkCount, errorMessage: err && err.message });
                     }
                 }
-            });
+            }, stylePreset);
             loreKb = { ip: name, snippets: extracted.snippets };
             try { await ensureLoreEmbeddings(loreKb, (done, total) => { btn.textContent = `生成中 (向量化 ${done}/${total})...`; }); }
             catch (e) { logError("loreEmbedPrecompute", e); }
         } else {
             // 小书：沿用原有单次生成
-            const rawGen2 = await callWorldGenerationLLM(name, type, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix);
+            const rawGen2 = await callWorldGenerationLLM(name, type, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix, undefined, null, stylePreset);
             warnIfTimeCorrected(rawGen2);
             generated = sanitizeWorldConfig(rawGen2);
             loreKb = generated.lore_kb;
@@ -191,17 +203,18 @@ export async function generateWorld() {
             system_prompt: generated.system_prompt,
             behavior_records: [],
             source_content: capSource(S.sourceFileContent),
-            style_ref: styleRef,
-            custom_style: customStyle,
-            style_profile: collectStylePrefs(), // ★ A1：题材/主题/口味/视角/文风/自定义标签
+            // ★ W2-Style：叙事风格预设（模板自动填文风+温度；运行时不改，设置页无入口）
+            style_preset: stylePreset,
             plot_freedom: plotFreedom,
             custom_prefix: customPrefix,
+            // ★ W2-Style：玩法模块开关（来自创建向导勾选；ip_scan 由世界是否填作品名在加载时自动判定）
+            modules: getWizardModuleSettings(),
             rules: [], // ★ Phase 2：规则 DSL（创作者界面配置，见 docs/Phase2改造方案.md）
             characters: [], // ★ B1：人物卡（主角 + NPC），编辑器可编辑，注入提示词
             temperature_preset: (() => {
                 const tEl = document.getElementById("worldTemp");
                 const v = tEl ? parseFloat(tEl.value) : NaN;
-                return Number.isFinite(v) ? v : styleToTemperature(customStyle);
+                return Number.isFinite(v) ? v : 0.7;
             })()
         };
         // ★ A2：用统一协调器收口 IP 身份（type / ip_name / 描述 / 上传文本 三路信号 → world.canon）。
@@ -251,7 +264,7 @@ export async function generateWorld() {
         document.getElementById("worldDesc").value = "";
         document.getElementById("heroDesc").value = "";
         document.getElementById("ipName").value = "";
-        document.getElementById("customStyle").value = "";
+        document.getElementById("narrativeStyle").value = "";
         document.getElementById("customPrefix").value = "";
         // 重置特殊要求开关
         document.querySelectorAll("#customPrefixGroup .radio-option").forEach((o, i) => {
@@ -336,10 +349,148 @@ export function saveWorldModules(worldId) {
         mods[id] = { enabled: el.checked === true };
     });
     w.modules = mods;
+    // ★ docs/53：通讯设置（判定模式 + 玩家自选联系方式）
+    const gateEl = document.querySelector('#detailWorldBody input[name="commGateMode"]:checked');
+    if (gateEl) w.comm_gate_mode = gateEl.value;
+    const chRows = document.querySelectorAll("#detailWorldBody .contact-channel-row");
+    const chs = [];
+    chRows.forEach(row => {
+        const nameEl = row.querySelector(".contact-channel-name");
+        const kindEl = row.querySelector(".contact-channel-kind");
+        const name = nameEl ? nameEl.value.trim() : "";
+        const kind = kindEl ? kindEl.value : "social";
+        if (name) chs.push({ id: "usr_" + name, name, kind, requires: {}, source: "player" });
+    });
+    w.contact_channels = chs;
     sanitizeModules(w); // 归一（核心模块强制 true）
     saveWorlds();
     invalidateSystemPromptCache(); // 模块变化影响系统提示，失效缓存以便重建
     showToast("模块设置已保存", "success");
+}
+
+// ============================================================
+// ★ docs/53：NPC 私聊 / 世界日报
+// ============================================================
+
+// 消耗体力（仅当世界存在体力系统；回答第 3 问：无体力则不消耗任何东西）
+function deductCommStamina(cost) {
+    const s = S.gameState;
+    if (!s || !s.variables || typeof s.variables.stamina !== "number") return;
+    const upd = computeVariableUpdates({ stamina: Math.max(0, s.variables.stamina - cost) }, S.currentWorld, s.variables);
+    applyStateChanges(upd);
+    createOrUpdateSave();
+}
+
+// 把联络/获报结果作为一条叙事日志注入正文流（拒绝=剧情，日报=播报）
+function injectCommEntry(narrative, kind, channel) {
+    const s = S.gameState;
+    if (!s) return;
+    const entry = {
+        player: kind === "refusal" ? "（尝试联络 / 获报）" : (kind === "daily" ? "（查看世界动态）" : ""),
+        narrative: narrative || "",
+        retrieved: [],
+        period: s.current_date ? s.current_date.period : "",
+        day: s.current_date ? stepOf(s.current_date) : 0,
+        tcd: s.current_date ? deepClone(s.current_date) : null,
+        key_facts: [],
+        _pending: false,
+        isComm: true,
+        commKind: kind,
+        commChannel: channel || ""
+    };
+    S.conversationHistory.push(entry);
+    renderLog();
+    createOrUpdateSave();
+    renderChoices(S.currentChoices || []);
+}
+
+function injectDailyEntry(daily, channel) {
+    const lines = ["【" + (channel || "世界日报") + "】"];
+    (daily.headlines || []).forEach(h => lines.push("· 《" + (h.title || "头条") + "》" + (h.detail ? "——" + h.detail : "")));
+    if (daily.rumor) lines.push("传闻：" + daily.rumor);
+    injectCommEntry(lines.join("\n"), "daily", channel);
+}
+
+// 进入与某 NPC 的私聊（先过门禁）
+export async function startPrivateChat(npcId) {
+    if (!S.currentWorld || !S.gameState) { showToast("请先进入一个世界", "warn"); return; }
+    if (!npcId) return;
+    const scene = { npcId, location: S.gameState.current_location, story_lock: false };
+    const res = await evaluateGate(S.currentWorld, S.gameState, { type: "npc_chat", npcId }, scene);
+    if (!res.allowed) {
+        if (res.blocked === "module_off") { showToast("本世界未开启 NPC 私聊", "warn"); return; }
+        injectCommEntry(res.reason || "此刻无法与他私下交谈。", "refusal");
+        return;
+    }
+    deductCommStamina(PRIVATE_STAMINA_COST);
+    S.privateChat = { npcId, channel: res.channel || "某种方式" };
+    updatePrivateChatUI();
+    showToast("已进入与「" + npcId + "」的私聊", "success");
+}
+
+export function endPrivateChat() {
+    S.privateChat = null;
+    updatePrivateChatUI();
+}
+
+function updatePrivateChatUI() {
+    const banner = document.getElementById("privateChatBanner");
+    const input = document.getElementById("playerInput");
+    if (!banner) return;
+    if (S.privateChat) {
+        banner.style.display = "flex";
+        banner.innerHTML = `🔒 正在与 <b>${escapeHtml(S.privateChat.npcId)}</b> 私聊（${escapeHtml(S.privateChat.channel)}）· `
+            + `<span data-action="endPrivateChat" style="cursor:pointer;color:var(--primary);text-decoration:underline">结束</span>`;
+        if (input) input.placeholder = "对 " + S.privateChat.npcId + " 说...";
+    } else {
+        banner.style.display = "none";
+        if (input) input.placeholder = "输入你想做的事...";
+    }
+}
+
+// 主动点"今日动态"（先过门禁）
+export async function requestDaily() {
+    if (!S.currentWorld || !S.gameState) { showToast("请先进入一个世界", "warn"); return; }
+    const scene = { location: S.gameState.current_location };
+    const res = await evaluateGate(S.currentWorld, S.gameState, { type: "world_daily" }, scene);
+    if (!res.allowed) {
+        if (res.blocked === "module_off") { showToast("本世界未开启世界日报", "warn"); return; }
+        injectCommEntry(res.reason || "此刻无法获取世界动态。", "refusal");
+        return;
+    }
+    deductCommStamina(DAILY_STAMINA_COST);
+    const flags = collectCommFlags(S.currentWorld, S.gameState, scene);
+    const daily = await aiGenerateDaily({ world: S.currentWorld, gameState: S.gameState, flags, channel: res.channel });
+    injectDailyEntry(daily, res.channel);
+}
+
+// 把系统提供的渠道"固化"为自选联系方式（回答第 5 问：允许）
+export function commitChannelAction(name, kind) {
+    if (!S.currentWorld || !S.gameState || !name) return;
+    const ch = { id: "sys_" + name, name, kind: kind || "social" };
+    const r = commitChannel(S.currentWorld, S.gameState, ch);
+    saveWorlds();
+    createOrUpdateSave();
+    showToast(r.added ? "已存入联系方式：" + name : "联系方式已存在", "success");
+}
+
+// —— 通讯设置编辑器（世界详情·模块开关页）——
+export function addContactChannelRow() {
+    const list = document.getElementById("contactChannelList");
+    if (!list) return;
+    const row = document.createElement("div");
+    row.className = "contact-channel-row";
+    row.innerHTML = `<input class="contact-channel-name" placeholder="渠道名（如：手机）">`
+        + `<select class="contact-channel-kind">`
+        + `<option value="magic">魔法</option><option value="tech">科技</option>`
+        + `<option value="social">社交</option><option value="physical">实物</option></select>`
+        + `<button data-action="removeContactChannel">✕</button>`;
+    list.appendChild(row);
+}
+
+export function removeContactChannelRow(btn) {
+    const row = btn && btn.closest ? btn.closest(".contact-channel-row") : null;
+    if (row && row.parentNode) row.parentNode.removeChild(row);
 }
 
 // ★ C4：打开「我的笔记」弹窗，载入当前存档已保存的玩家备忘
@@ -408,8 +559,12 @@ export function doRestartConfirmed() {
     if (w) S.currentWorld = w;
     closeModal("restartConfirmModal");
     S._restartWorldId = null;
+    // ★ 多存档槽位：重新开始 = 覆盖该世界"最近存档"槽位（无则开新槽位）；keepSlot 让 startGame 复用此 saveId 而非生成新槽位
+    const latest = S.saves.filter(s => s.worldId === worldId)
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0];
+    S.currentSession.saveId = latest ? latest.id : null;
     // 新周目：重置剧情进度 + 清空行为记忆（不继承旧存档）；知识库沿用世界默认（lore_kb 挂在 world 上，startGame 不改动它）
-    startGame({ resetBehavior: true });
+    startGame({ resetBehavior: true, keepSlot: true });
 }
 
 // ★ E12：玩家主动推进时间——休息到次日清晨（向前推进，合法，不触发时间倒流钳制）
@@ -477,6 +632,18 @@ export function switchTimeline(id) {
     showToast("已切换到时间线：" + (tc.timelines[id].name || id), "success");
 }
 
+
+// ★ 事件系统：常量与辅助
+const EVENT_STAMINA_REGEN_PER_DAY = 30; // 每自然日体力回复量（上限由变量 schema max 夹取）
+// 计算从 prev 到 cur 跨过了多少「自然日」（day 模式看 step 差；dated 看 calendarDayIndex 差；none 返回 0，不回复）
+function daysAdvancedSince(prev, cur, tc) {
+    if (!prev || !cur) return 0;
+    const mode = (tc && tc.timeConfig && tc.timeConfig.calendar_mode) || "day";
+    const custom = tc && tc.timeConfig && tc.timeConfig.custom_calendar;
+    if (mode === "none") return 0;
+    if (mode === "day") return (cur.step || 0) - (prev.step || 0);
+    return calendarDayIndex(cur, mode, custom) - calendarDayIndex(prev, mode, custom);
+}
 
 export function applyStateChanges(changes) {
     if (!changes) return;
@@ -711,6 +878,22 @@ export function applyStateChanges(changes) {
     } else {
         // 无时间变更：保持原状，仅规范化形状（补齐 step 等）
         s.current_date = ensureCurrentDate(s.current_date, tc.timeConfig);
+    }
+
+    // ★ 事件系统：体力跨天回复（仅 events 模块开启且世界有 stamina 变量；none 时间模式 daysAdvancedSince 返回 0 不回复）
+    if (S.currentWorld && isModuleEnabled(S.currentWorld, "events")
+        && s.variables && typeof s.variables.stamina === "number") {
+        const adv = daysAdvancedSince(prevActiveDate, s.current_date, tc);
+        if (adv > 0) {
+            const upd = computeVariableUpdates({ stamina: s.variables.stamina + EVENT_STAMINA_REGEN_PER_DAY * adv }, S.currentWorld, s.variables);
+            if (upd.applied.length) {
+                s.variables = upd.next;
+                const delta = upd.applied[0].to - upd.applied[0].from;
+                if (delta > 0 && typeof addBehaviorRecords === "function") {
+                    addBehaviorRecords([{ text: `体力随${adv > 1 ? adv + "天" : "时间"}流逝恢复 ${delta} 点`, importance: 1, type: "status" }]);
+                }
+            }
+        }
     }
 
     // Phase 2/3：把当前 active 时间线/分支的 current_date 写回（防止切换回去丢失进度）
@@ -967,7 +1150,7 @@ export function chooseOption(index) {
 
 // 新建「待生成」日志条目（流式渲染占位；定稿或失败时由调用方回填）
 function buildPendingEntry(input) {
-    return {
+    const e = {
         player: input,
         narrative: "",
         retrieved: [],
@@ -977,6 +1160,12 @@ function buildPendingEntry(input) {
         key_facts: [],
         _pending: true
     };
+    // ★ docs/53：私聊模式下的回合标记为私聊语境，供渲染层区分
+    if (S.privateChat) {
+        e.isPrivate = true;
+        e.privateNpc = S.privateChat.npcId;
+    }
+    return e;
 }
 
 // 注入拦截：写 debugLog、把待生成条目改写为拦截提示并定稿（不入多轮历史）
@@ -1041,6 +1230,17 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
     }
     applyStateChanges(resp.state_changes);
 
+    // ★ 事件系统：支线事件固定体力消耗（进入该支线回合套用；不足已在进入前拦截，此处仅扣减）
+    if (S.enteringSideEvent && S.gameState.variables && typeof S.gameState.variables.stamina === "number") {
+        const cost = Number(S.enteringSideEvent.cost_stamina) || 0;
+        if (cost > 0) {
+            // computeVariableUpdates 收绝对值，先算 target 再夹取到 [min,max]
+            const upd = computeVariableUpdates({ stamina: S.gameState.variables.stamina - cost }, S.currentWorld, S.gameState.variables);
+            if (upd.applied.length) S.gameState.variables = upd.next;
+        }
+        S.enteringSideEvent = null; // 一次性消费
+    }
+
     // ★ Phase 2：规则 DSL 解释执行（用户配置的世界规则）
     //   - tag 类动作：写回 gameState.tags（在 A2 守卫之前，使本回合新标签可影响禁律判定）
     //   - ending 类动作：触发结局弹窗（复用现有 showGameOver）
@@ -1058,9 +1258,13 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
             }
         }
         if (Array.isArray(evaluated.endings) && evaluated.endings.length) {
-            showGameOver(evaluated.endings[0].reason);
+            const e0 = evaluated.endings[0];
+            recordUnlockedEnding(e0);
+            showGameOver(e0);
         }
     }
+    // ★ docs/54：每回合刷新「结局追踪器」面板数据（无 ending 规则的世界内部显示空提示）
+    renderEndingTracker();
 
     // ★ A2 / IP#6 生成后世界观合规扫描（受 ip_scan 模块门禁；warn 模式：标黄 + 提示条，不阻断回合）
     // 选项场景一致性修复（docs/18）：把玩家选项文本也并入扫描范围。
@@ -1134,13 +1338,25 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
     }
 }
 
+// ★ docs/54：把触发的结局记入本档图鉴（按 ruleId 去重），并持久化
+function recordUnlockedEnding(e) {
+    if (!S.gameState) return;
+    if (!Array.isArray(S.gameState.unlockedEndings)) S.gameState.unlockedEndings = [];
+    S.gameState.unlockedEndings = appendUniqueEnding(S.gameState.unlockedEndings, e);
+    createOrUpdateSave(); // 持久化图鉴，随当前存档保存
+}
+
 // 定稿渲染：替换待生成条目 DOM；流式已实时出字则直接出选项，非流式回落打字机动画
 async function renderTurnOutcome(liveIndex, isWarning, finalChoices, didStream) {
     replaceEntryDOM(liveIndex);
     if (isWarning) { renderChoices([]); return; } // 警告内容不提供选项，也不做打字效果
     if (!didStream) await startTypewriter(liveIndex);
     renderChoices(finalChoices);
-    if (S.gameState.is_alive === false) setTimeout(showGameOver, 800);
+    if (S.gameState.is_alive === false) {
+        const deathInfo = { title: "死亡结局", kind: "bad", reason: (S.gameState.death_reason || "你倒下了，故事在此终结。") };
+        recordUnlockedEnding(deathInfo);
+        setTimeout(() => showGameOver(deathInfo), 800);
+    }
 }
 
 // 错误回合：把失败详情写入 debugLog.turns（含错误类型分类），供「导出调试日志」排查
@@ -1231,6 +1447,9 @@ export async function processTurn(input) {
             finalChoices = resp.choices;
             if (!finalChoices || finalChoices.length === 0) finalChoices = buildSmartFallbackChoices();
             pendingEntry.choices = finalChoices;
+            // ★ 事件系统：提取本回合 AI 返回的支线事件候选（供「🎴 支线」面板展示）
+            S.pendingSideEvents = (resp.side_events && Array.isArray(resp.side_events)) ? resp.side_events : [];
+            pendingEntry.sideEvents = S.pendingSideEvents;
             // ★ P0 性能：此处不再单独 saveState——下方 createOrUpdateSave() 内部已统一持久化（含本回合最终选项），避免重复写盘。
         }
 

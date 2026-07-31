@@ -7,7 +7,7 @@ import { dedupeStrings, getWorldSchema, resolveOpeningTokens } from "./utils.js"
 import { getTimeConfig, formatWorldTime, getPeriodLabel, stepOf } from "./theme.js";
 import { formatCalendarDate } from "./calendar.js";
 import { getProvider } from "./providers.js";
-import { buildModulePromptContext } from "./modules.js"; // ★ C1：世界模块开关——启用指令 + 未启用约束
+import { buildModulePromptContext, isModuleEnabled } from "./modules.js"; // ★ C1：世界模块开关——启用指令 + 未启用约束
 
 // 模块级缓存标志：核心知识库是否已固定注入 system（buildSystemPrompt 写、getPositionedLore 读）
 let isCoreLoreCached = false;
@@ -19,7 +19,7 @@ let cachedSystemCats = new Set();
 // 让开场白从原文第 1 章第 1 段出发（与下方 sourceContent 全文参考材料的 sourceCap 区分）。
 const OPENING_SRC_CHARS = 3000;
 
-export function buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap = 8000, loreCountMin = null) {
+export function buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap = 8000, loreCountMin = null, stylePreset = null) {
     const plotFreedomDesc = {
         1: "严格遵循原著 — 关键剧情节点、重要事件必须按原著发生，AI 不得偏移主线。",
         2: "以原著为主 — 主线遵循原著，但在支线和日常互动上可以有限发散。",
@@ -33,6 +33,18 @@ export function buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourc
         custom: customStyle ? `请严格遵循以下文风进行生成：${customStyle}` : "请使用通用叙事风格。",
         none: "请使用通用叙事风格，不需要模仿特定文风。"
     };
+
+    // ★ W2-Style：若传入了 world.style_preset（新建世界时锁定），优先用其叙事长文本注入文风要求；
+    // 否则回退到旧的 styleRef/customStyle 三选一逻辑（旧世界/预设世界、lore 补抽等兼容路径）。
+    let styleSection;
+    if (stylePreset && stylePreset.narrative_style && stylePreset.narrative_style.trim()) {
+        styleSection = `请严格遵循以下「叙事风格」进行生成：\n${stylePreset.narrative_style.trim()}`;
+        if (stylePreset.system_addendum && stylePreset.system_addendum.trim()) {
+            styleSection += `\n\n补充指令：${stylePreset.system_addendum.trim()}`;
+        }
+    } else {
+        styleSection = styleRefDesc[styleRef] || styleRefDesc.none;
+    }
 
     const ipNameSection = (type === "ip" && ipName)
         ? `\n- 作品名称：${ipName}\n  请根据你对「${ipName}」这部作品的了解，从训练数据中检索其世界观设定、核心人物、力量体系、重要事件、叙事风格等要素，用于生成游戏配置。如果你对该作品不够了解，请在知识库中如实标注"信息不确定"。`
@@ -72,7 +84,7 @@ ${sourceSection}
 ${openingSourceSection}
 # 文风要求
 
-${styleRefDesc[styleRef] || styleRefDesc.none}
+${styleSection}
 
 # 剧情控制
 
@@ -153,12 +165,17 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
 }
 
 // ★ Plan A：分块抽取知识库——针对全书某一片段，仅基于该片段抽一批 lore 条目（覆盖全书的多遍抽取之一遍）
-export function buildLoreChunkPrompt(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle) {
+export function buildLoreChunkPrompt(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle, stylePreset = null) {
     const styleRefDesc = {
         original: "请参考源文件的文风和叙事节奏进行生成。",
         custom: customStyle ? `请严格遵循以下文风进行生成：${customStyle}` : "请使用通用叙事风格。",
         none: "请使用通用叙事风格，不需要模仿特定文风。"
     };
+    // ★ W2-Style：把叙事风格作为文风提示并入知识库抽取（原实现未注入 styleRefDesc，这里补全）。
+    let styleHint = "";
+    if (stylePreset && stylePreset.narrative_style && stylePreset.narrative_style.trim()) {
+        styleHint = `\n\n# 叙事文风提示\n抽取与撰写时请贴合以下文风基调（仅影响行文语气，不改变事实准确性）：\n${stylePreset.narrative_style.trim()}`;
+    }
     const ipNote = ipName ? `\n- 作品名称：${ipName}（若你已知该作品可结合背景知识补全，但本段摘录优先。）` : "";
     // ★ 块前缀：本段所有 snippet 的 id 统一加 c{两位段号}_ 前缀，保证跨块全局唯一，
     //    使 links.target 能精确指向某条片段（而非易重名的标题），合并/重编号后链接 100% 可解析。
@@ -183,7 +200,7 @@ ${chunkContent}
 
 # 输出
 只输出一个合法 JSON，不含 markdown 代码块标记：
-{ "lore_kb": { "ip": "${name}", "snippets": [ ... ] } }`;
+{ "lore_kb": { "ip": "${name}", "snippets": [ ... ] } }` + styleHint;
 }
 
 // ★ A2：把一致性包里的 must_read / style_anchor / key_divergences 拼进 system prompt。
@@ -683,8 +700,9 @@ export function buildToneGuide() {
 
     // ★ 自定义优先：玩家已明确文风时，不再用关键词推断（避免与风格打架）
     const sp = buildStyleProfile(S.currentWorld);
-    if (sp.custom && sp.custom.trim()) {
-        return `叙事基调：以玩家自定义文风为准（${sp.custom.trim()}）。\n\n请据此调整叙事的紧张程度、信息密度与情感表达，保持全篇一致。`;
+    if (sp.narrative && sp.narrative.trim()) {
+        const head = sp.narrative.trim().slice(0, 120);
+        return `叙事基调：以玩家选定的叙事风格为准（${head}${sp.narrative.trim().length > 120 ? "…" : ""}）。\n\n请据此调整叙事的紧张程度、信息密度与情感表达，保持全篇一致。`;
     }
     if (sp.style || sp.taste) {
         const given = [sp.style, sp.taste].filter(Boolean).join(" / ");
@@ -1052,14 +1070,28 @@ export function buildAuthorNote() {
     }
     // ★ 文风保持（中部纠偏位）：双保险，漂移可被即时拦回
     const spNote = buildStyleProfile(S.currentWorld);
-    const styleLabel = (spNote.custom && spNote.custom.trim()) ? spNote.custom.trim()
-        : [spNote.genre, spNote.style, spNote.taste].filter(Boolean).join("/") || (spNote.mode === "original" ? "源文件文风" : "通用文风");
+    const styleLabel = (spNote.narrative && spNote.narrative.trim()) ? spNote.narrative.trim().slice(0, 60)
+        : (spNote.custom && spNote.custom.trim()) ? spNote.custom.trim()
+        : [spNote.genre, spNote.style, spNote.taste].filter(Boolean).join("/") || "通用文风";
     if (styleLabel) {
         parts.push("【文风保持】本轮及后续所有输出，必须维持本世界强制文风（见系统提示“本世界强制文风”节）。如检测到语气/用词偏离，立即回调，不要等玩家纠正。");
     }
     // ★ P0：合并玩家可控的叙事节奏 / 字数指令（中部每轮生效，中途改即下一回合生效）
     const ctrlNote = buildNarrativeControlNote(S.narrativePacing, S.narrativeLength);
     if (ctrlNote) parts.push(ctrlNote);
+    // ★ 事件系统：仅 events 模块开启时，向中部每轮位注入支线事件候选产出指令
+    // 放中部每轮重建位（非 system 缓存），中途开启/关闭模块下一回合即生效；与 P0 同位置，已验证安全。
+    if (S.currentWorld && isModuleEnabled(S.currentWorld, "events")) {
+        parts.push("【支线事件】若当前没有明显强主线必须推进，请额外构思 2~3 个玩家可主动去做的支线事件候选，"
+            + "经工具字段 side_events 返回，每张含：title（标题）、desc（一句话描述）、cost_stamina（体力消耗，建议 10~40 的整数）、cost_time（时间消耗，如“半天”/“1天”，仅作提示）、tag（类型标签）。"
+            + "支线应是可选的行动（如探查某地、与某人交谈、处理琐事），不是主线必需。");
+    }
+    // ★ docs/53：私聊语境注入（中部每轮位）——让 AI 以 NPC 身份回应私语
+    if (S.privateChat) {
+        parts.push("【私聊语境】你正与「" + S.privateChat.npcId + "」私下交谈（渠道：" + (S.privateChat.channel || "某种方式") + "），周围无人偷听。"
+            + "以下玩家输入是他说给「" + S.privateChat.npcId + "」听的私语；请完全以「" + S.privateChat.npcId + "」的身份与口吻回应，"
+            + "不要跳出角色，也不要描写旁观者。");
+    }
     return parts.join("\n\n");
 }
 
@@ -1299,24 +1331,41 @@ export function detectPromptInjection(input) {
 }
 
 // ============================================================
-// 文风一致性（文档24/26）：运行时强制文风约束
-// 把玩家建世界时选定的文风，在每轮生成时强制约束，避免漂移。
-// 预留 world.style_profile 扩展位，供 docs/25 结构化标签直接 plug in。
+// 文风一致性（文档24/26，W2-Style 升级）：运行时强制文风约束
+// 把玩家建世界时选定的文风（world.style_preset），在每轮生成时强制约束，避免漂移。
+// 结构化标签（题材/主题/口味/视角/文风/自定义）随 style_preset 一并注入。
 // ============================================================
 
-// 把世界现有 style_ref/custom_style 与未来的 style_profile 统一成一个对象
+// 把世界现有 style_preset（优先）与旧字段 style_ref/custom_style/style_profile（兜底）统一成一个对象
 export function buildStyleProfile(world) {
     const w = world || {};
-    const sp = (w.style_profile && typeof w.style_profile === "object") ? w.style_profile : {};
+    // ★ W2-Style：新模型 world.style_preset 优先；兼容旧字段（旧世界/预设世界未迁移仍可渲染）
+    const sp = (w.style_preset && typeof w.style_preset === "object") ? w.style_preset : null;
+    if (sp) {
+        return {
+            mode: sp.source || "custom",                       // template | custom
+            narrative: sp.narrative_style || "",                // 核心文风长文本
+            custom: sp.system_addendum || "",                   // 系统追加指令
+            genre: sp.genre || null,
+            tropes: Array.isArray(sp.tropes) ? sp.tropes : [],
+            taste: sp.taste || null,
+            pov: sp.pov || null,
+            style: sp.style || null,
+            custom_tag: sp.custom_tag || ""
+        };
+    }
+    // 旧字段兜底（style_ref / custom_style / style_profile）
+    const lp = (w.style_profile && typeof w.style_profile === "object") ? w.style_profile : {};
     return {
         mode: w.style_ref || "none",          // original | custom | none
+        narrative: "",
         custom: w.custom_style || "",          // 自由文本文风要求
-        genre: sp.genre || null,               // 题材（docs/25 填）
-        tropes: Array.isArray(sp.tropes) ? sp.tropes : [],  // 主题（A1 由"爽点"改名，字段名保持 tropes）
-        taste: sp.taste || null,               // 口味（docs/25 填）
-        pov: sp.pov || null,                   // 视角（docs/25 填）
-        style: sp.style || null,               // 文风标签（docs/25 填）
-        custom_tag: sp.custom_tag || ""        // 自定义标签（A1 加，≤10字）
+        genre: lp.genre || null,
+        tropes: Array.isArray(lp.tropes) ? lp.tropes : [],
+        taste: lp.taste || null,
+        pov: lp.pov || null,
+        style: lp.style || null,
+        custom_tag: lp.custom_tag || ""
     };
 }
 
@@ -1328,18 +1377,20 @@ export function buildStyleGuide(world) {
     lines.push("若世界知识库(world.system_prompt)中的文风描述与本条冲突，以本条为准。");
     lines.push("");
 
-    if (p.mode === "original") {
-        lines.push("· 文风模式：沿用源文件本身的文风与叙事节奏（如为原创世界则使用通用叙事风格）。");
-    } else if (p.mode === "none") {
+    if (p.narrative && p.narrative.trim()) {
+        // ★ W2-Style：叙事风格长文本是文风约束主体
+        lines.push("· 叙事文风要求（必须执行）：" + p.narrative.trim());
+    } else if (p.mode === "none" || p.mode === "original") {
         lines.push("· 文风模式：通用叙事风格，不模仿特定文风。");
     } else {
         lines.push("· 文风模式：严格遵循玩家自定义要求。");
     }
 
+    // 系统追加指令作为补充约束
     if (p.custom && p.custom.trim()) {
-        lines.push("· 玩家自定义文风要求（必须执行）：" + p.custom.trim());
+        lines.push("· 补充指令：" + p.custom.trim());
     }
-    // ★ docs/25 结构化标签接入点：这些字段现在多半为空，Doc 25 落地后自动生效
+    // 结构化标签（template 自带 / 玩家可改）
     if (p.genre) lines.push("· 题材：" + p.genre);
     if (p.tropes.length) lines.push("· 主题：" + p.tropes.join("、"));
     if (p.taste) lines.push("· 口味：" + p.taste);
@@ -1352,7 +1403,7 @@ export function buildStyleGuide(world) {
 // 按文风分类输出表情/语气词指南（填充模板 {STYLE_EXPRESSION_GUIDE}）
 export function buildExpressionGuide(world) {
     const p = buildStyleProfile(world);
-    const text = [p.style, p.taste, p.genre, p.custom, p.custom_tag].filter(Boolean).join(" ");
+    const text = [p.style, p.taste, p.genre, p.custom, p.custom_tag, p.narrative].filter(Boolean).join(" ");
 
     // 轻松/日常/恋爱/甜宠/治愈 → 启用 emoji + 心形 + 语气词（原模板内容）
     if (/(轻松|日常|恋爱|甜宠|甜|宠|治愈|温馨|活泼|少女|校园|田园|种田|咖啡|烘焙)/.test(text)) {

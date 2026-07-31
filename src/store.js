@@ -36,7 +36,7 @@ export const S = {
   currentStatusTab: "profile",
   sourceFileContent: "",
   currentTheme: _lsGet("aigame_theme", "dark"),
-  currentSession: { epoch: 0, worldId: null },
+  currentSession: { epoch: 0, worldId: null, saveId: null }, // ★ 多存档槽位：saveId 绑定会话到具体存档
   currentAbortController: null,
   auxiliaryControllers: new Set(),
   isGenerating: false,
@@ -51,6 +51,9 @@ export const S = {
   narrativePacing: _lsGet("aigame_pacing", "standard"),   // compact / standard / relaxed
   narrativeLength: _lsGet("aigame_narrlen", "standard"),  // short / standard / long
   readingSpeed: _lsGet("aigame_readspeed", "standard"),  // slow / standard / fast / instant
+  // ★ 事件系统：当前待展示的支线事件候选（AI 每回合返回）与本次进入的支线消耗标记（一次性消费）
+  pendingSideEvents: [],
+  enteringSideEvent: null,
   renderedEntryCount: 0,
   typingTimer: null,
   typingIndex: -1,

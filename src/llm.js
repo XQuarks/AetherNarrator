@@ -33,7 +33,7 @@ export function logTurnStats(hit, miss, total, usage) {
     });
 }
 
-export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap = 8000, loreCountMin = null) {
+export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap = 8000, loreCountMin = null, stylePreset = null) {
     const mock = document.getElementById("mockMode").checked;
     if (mock) {
         await sleep(1200);
@@ -45,7 +45,7 @@ export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sou
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
 
-    const prompt = buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap, loreCountMin);
+    const prompt = buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap, loreCountMin, stylePreset);
     return await callStructured([{ role: "system", content: prompt }], "generate_world", {
         temperature: 0.7, maxTokens: 8192,
         mockFn: () => mockGenerateWorld(name, type, desc, hero, ipName)
@@ -53,7 +53,7 @@ export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sou
 }
 
 // ★ Plan A：分块抽取单段 lore（与 callWorldGenerationLLM 同构，但只返回 lore_kb）
-export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle) {
+export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle, stylePreset = null) {
     const mockEl = document.getElementById("mockMode");
     const mock = mockEl && mockEl.checked;
     if (mock) {
@@ -79,7 +79,7 @@ export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, c
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
 
-        const prompt = buildLoreChunkPrompt(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle);
+        const prompt = buildLoreChunkPrompt(name, ipName, chunkContent, chunkIndex, chunkTotal, countHint, styleRef, customStyle, stylePreset);
     const obj = await callStructured([{ role: "system", content: prompt }], "extract_lore_chunk", {
         temperature: 0.7, maxTokens: 16000,
         mockFn: () => ({ ip: name, snippets: [
@@ -97,7 +97,7 @@ export async function callLoreChunkLLM(name, ipName, chunkContent, chunkIndex, c
 // ★ Phase 3 · NER：从源文本抽取知识库（分块 + 并发 + 合并去重 + 重排 id + 改写 links.target）。
 // 供 generateWorld（建世界时）与「从源文档补抽」（已有世界 enrich）复用。
 // opts：{ onProgress(done,total), onChunkError(idx,err) }；返回 { ip, snippets }（snippets 已合并、id 重排、links 解析）。
-export async function extractLoreFromSource(sourceContent, name, ipName, styleRef, customStyle, opts = {}) {
+export async function extractLoreFromSource(sourceContent, name, ipName, styleRef, customStyle, opts = {}, stylePreset = null) {
     const CHUNK_SIZE = 15000;
     const COUNT_HINT = 25;
     const src = sourceContent || "";
@@ -105,7 +105,7 @@ export async function extractLoreFromSource(sourceContent, name, ipName, styleRe
     const chunks = chunkText(src, CHUNK_SIZE);
     const CONCURRENCY = getChunkConcurrency();
     const chunkResults = await runPool(chunks, CONCURRENCY,
-        (content, idx) => callLoreChunkLLM(name, ipName, content, idx + 1, chunks.length, COUNT_HINT, styleRef, customStyle),
+        (content, idx) => callLoreChunkLLM(name, ipName, content, idx + 1, chunks.length, COUNT_HINT, styleRef, customStyle, stylePreset),
         {
             retries: 4,
             isRetryable: (e) => /429|timeout|network|fetch|abort|ECONN|ETIMEDOUT|无法修复|JSON 解析失败|截断|结构损坏/i.test(String((e && e.message) || "")),
@@ -400,10 +400,14 @@ export const TOOLS = {
                 atmosphere: { type: "string" },
                 is_forced_plot: { type: "boolean" },
                 next_period: { type: "string" },
-                comment: { type: "string" }
-            }
+                comment: { type: "string" },
+                side_events: { type: "array", items: { type: "object", additionalProperties: true, properties: {
+                    title: { type: "string" }, desc: { type: "string" },
+                    cost_stamina: { type: "number" }, cost_time: { type: "string" }, tag: { type: "string" }
+                } } }
         }
     },
+},
     generate_world: {
         name: "generate_world",
         description: "返回一个完整世界配置对象（name/desc/type/opening_narrative/initial_choices/characters/lore_kb/hero/rules/time_config/variables 等）",
@@ -458,6 +462,27 @@ export const TOOLS = {
             branches: { type: "array", items: { type: "object", additionalProperties: true, properties: {
                 branch: { type: "string" }, likely: { type: "string" }, risk: { type: "string" }
             } } }
+        } }
+    },
+    // ★ docs/53：世界状态裁判（联络/获报是否允许）
+    judge_contact: {
+        name: "judge_contact",
+        description: "返回玩家进行联络/获报动作是否允许，以及所用的渠道与叙事化拒绝理由",
+        parameters: { type: "object", additionalProperties: true, properties: {
+            allowed: { type: "boolean" },
+            channel: { type: "string" },
+            reason: { type: "string" }
+        } }
+    },
+    // ★ docs/53：世界日报生成
+    generate_daily: {
+        name: "generate_daily",
+        description: "返回今日世界动态：若干头条（标题+细节）与一条小道消息",
+        parameters: { type: "object", additionalProperties: true, properties: {
+            headlines: { type: "array", items: { type: "object", additionalProperties: true, properties: {
+                title: { type: "string" }, detail: { type: "string" }
+            } } },
+            rumor: { type: "string" }
         } }
     }
 };
@@ -556,6 +581,73 @@ export async function predictBranches() {
         ])
     });
     return normalizeBranches(raw);
+}
+
+// ★ docs/53：世界摘要（喂给裁判/日报 prompt）
+function buildWorldSummary(world) {
+    if (!world) return "（未知世界）";
+    const t = world.type ? `类型=${world.type}；` : "";
+    const desc = (world.desc || "").slice(0, 200);
+    return `${world.name || "无名世界"}（${t}设定：${desc}）`;
+}
+
+// ★ docs/53：AI 世界状态裁判——返回 { allowed, channel, reason }
+// reason 为叙事化拒绝（贴合世界、不剧透）。AI 不可用时兜底允许。
+export async function aiJudgeContact(ctx) {
+    const { world, gameState: gs, action, flags, channels } = ctx || {};
+    const worldSummary = buildWorldSummary(world);
+    const npcLine = action && action.type === "npc_chat"
+        ? `目标 NPC：${action.npcId}（好感度 ${flags && flags.affinity != null ? flags.affinity : "未知"}；已共享联系方式：${(action._sharedContacts || []).join("、") || "无"}；在场状态：${flags && flags.npc_state || "未知"}）`
+        : "（本动作是获取世界日报，无特定 NPC）";
+    const channelLines = (channels || []).map(c => `- ${c.name}（${c.kind}·${c.source === "system" ? "系统依情境提供" : "玩家设定"}）`).join("\n");
+    const userMsg = `世界设定：${worldSummary}
+当前场景：地点=${flags && flags.location}，时段=${flags && flags.time_of_day}
+玩家状态：背包渠道物=${flags && (flags.inventory_channels || []).join("、") || "无"}，体力=${flags && flags.stamina == null ? "无体力系统" : flags.stamina}，临时状态=${JSON.stringify((gs && gs.status_effects) || [])}
+世界约束：${flags && (flags.world_constraints || []).join("、") || "无"}
+${npcLine}
+可用渠道：
+${channelLines || "（无）"}
+请求动作：${action && action.type === "npc_chat" ? `玩家想与目标 NPC「${action.npcId}」私下对话` : "玩家想获取今日世界动态（日报）"}
+
+请综合判断：当前世界状态是否允许该动作？若允许，选择最合适的渠道填入 channel。若不允许，reason 写一句第二人称、当下时的叙事化拒绝——必须贴合世界语气、不能出现"系统/功能/门禁/规则"等破坏沉浸的元词汇，且绝对不能泄露任何隐藏剧情或未触发事件。`;
+
+    const messages = [
+        { role: "system", content: "你是本文字游戏的“世界状态裁判”。只依据给定事实判断玩家能否进行请求的动作，返回结构化结果。严禁剧透。" },
+        { role: "user", content: userMsg }
+    ];
+    try {
+        const parsed = await callStructured(messages, "judge_contact", { temperature: 0.3, maxTokens: 600 });
+        if (!parsed || typeof parsed.allowed !== "boolean") {
+            return { allowed: true, channel: (channels && channels[0] && channels[0].name) || null, reason: "" };
+        }
+        return { allowed: !!parsed.allowed, channel: parsed.channel || null, reason: parsed.reason || "" };
+    } catch (e) {
+        return { allowed: true, channel: (channels && channels[0] && channels[0].name) || null, reason: "" };
+    }
+}
+
+// ★ docs/53：AI 生成世界日报——返回 { headlines:[{title,detail}], rumor }
+export async function aiGenerateDaily(ctx) {
+    const { world, flags } = ctx || {};
+    const summary = buildWorldSummary(world);
+    const userMsg = `世界：${summary}
+时间：${flags && flags.time_of_day}，地点=${flags && flags.location}
+请生成“今日世界动态”：3-5 条简短头条（每条含 title 与 detail），外加 1 条 rumor（小道消息）。
+要求：内容须与本世界设定一致、不重复近期已知剧情、不泄露未触发主线；若世界处于信息管制，头条可含被审查或宣传性质内容。`;
+    const messages = [
+        { role: "system", content: "你是本世界的“日报编辑”。生成贴合世界观的今日动态，简短、有信息量、不剧透。" },
+        { role: "user", content: userMsg }
+    ];
+    try {
+        const parsed = await callStructured(messages, "generate_daily", { temperature: 0.8, maxTokens: 1200 });
+        if (!parsed) return { headlines: [], rumor: "" };
+        return {
+            headlines: Array.isArray(parsed.headlines) ? parsed.headlines.slice(0, 5) : [],
+            rumor: parsed.rumor || ""
+        };
+    } catch (e) {
+        return { headlines: [], rumor: "" };
+    }
 }
 
 function recordCacheStats(usage, provider) {

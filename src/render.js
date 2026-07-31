@@ -9,8 +9,11 @@ import { isModuleEnabled, MODULE_REGISTRY } from "./modules.js"; // ★ C1：状
 // 注：页面按钮的 chooseOption / startGame / loadSave 等动作均通过 data-action 属性由 app.js 事件接线分发，
 // 本模块不直接引用这些函数，不反向依赖 game.js / save.js，避免循环引用（docs/34 #1）。
 import { abortCurrentRequest } from "./turn-lifecycle.js";
-import { styleToTemperature, formatStateChanges } from "./prompt.js";
+import { formatStateChanges } from "./prompt.js";
+// ★ W2-Style：创建向导编辑器逻辑（模块导航 / 风格模板库 / 模块开关 / 世界书入口）
+import { selectCwModule, resetCreateWizard, initCreateWizardDOM } from "./wizard-editor.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
+import { evaluateEndingStatus, ENDING_KINDS } from "./worldview.js"; // ★ docs/54：结局状态评估
 import { saveWorlds } from "./storage.js";
 
 // ★ 世界来源类型元数据：角标/详情文案/校验统一从这里取，新增类型只改这里
@@ -26,6 +29,19 @@ function worldTypeLabel(type)      { return (WORLD_TYPE_META[type] || WORLD_TYPE
 function worldTypeBadgeClass(type) { return (WORLD_TYPE_META[type] || WORLD_TYPE_META[WORLD_TYPE_DEFAULT]).cls; }
 function worldTypeDetail(type)     { return (WORLD_TYPE_META[type] || WORLD_TYPE_META[WORLD_TYPE_DEFAULT]).detail; }
 function needsSourceWork(type)     { return type === "ip" || type === "fan"; } // 改编IP/同人需填作品名
+
+// ★ docs/54：结局分类标签与配色（与 worldview.ENDING_KINDS 对应）
+const ENDING_KIND_LABELS = { normal: "普通", good: "好/通关", bad: "坏", true: "真结局", secret: "隐藏" };
+function endingKindLabel(kind) { return ENDING_KIND_LABELS[kind] || "结局"; }
+function endingWhenText(when) {
+    if (!when || !when.type || when.type === "always") return "始终";
+    switch (when.type) {
+        case "concept": return `文本出现「${when.term || "?"}」`;
+        case "state": return `状态 ${when.field || "?"} ${when.op || "=="} ${when.value ?? "?"}`;
+        case "tag": return `标签「${when.tag || "?"}」活跃`;
+        default: return "条件触发";
+    }
+}
 
 // ★ 详情页编辑世界类型：弹窗内可改类型 + 作品名，立即持久化
 export function editWorldType(worldId) {
@@ -153,27 +169,21 @@ export function showSettingsScreen() {
     updateSettingsValues();
 }
 
-let cwStep = 1;
-const CW_TOTAL = 4;
-
+// ★ W2-Style：创建向导改为编辑器式长页（模块导航见 wizard-editor.js）
 export function showCreateWorldModal() {
+    initCreateWizardDOM();   // 渲染风格模板库 + 模块开关
     resetCreateWorldForm();
-    cwStep = 1;
-    renderCwStep();
+    selectCwModule("basic"); // 默认进入「基本信息」模块
     showModal("createWorldModal");
 }
 
-// 打开创建弹窗时完整重置表单（含步骤回到第 1 步、各选项回到默认）
+// 打开创建弹窗时完整重置表单（含各选项回到默认）
 function resetCreateWorldForm() {
-    const clearIds = ["worldName", "ipName", "worldDesc", "heroDesc", "customStyle", "customPrefix", "worldPrefix"];
+    const clearIds = ["worldName", "ipName", "worldDesc", "heroDesc", "customPrefix", "worldPrefix"];
     clearIds.forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
     const wt = document.getElementById("worldType");
     if (wt) wt.value = "original";
     onWorldTypeChange("original"); // 默认原创类型
-    // 文风参考默认：参考原版
-    document.querySelectorAll("#styleRefGroup .radio-option").forEach((o, i) => o.classList.toggle("selected", i === 0));
-    document.querySelectorAll("#styleRefGroup input[type=radio]").forEach((r, i) => r.checked = i === 0);
-    const csf = document.getElementById("customStyleField"); if (csf) csf.classList.remove("show");
     // 两个特殊要求默认：不添加
     ["customPrefixGroup", "worldPrefixGroup"].forEach(gid => {
         document.querySelectorAll("#" + gid + " .radio-option").forEach((o, i) => o.classList.toggle("selected", i === 0));
@@ -198,57 +208,14 @@ function resetCreateWorldForm() {
     // 剧情自由度默认：3
     const pf = document.getElementById("plotFreedom"); if (pf) pf.value = "3";
     updatePlotFreedomLabel("3");
-    // 每世界温度默认：0.7（与「参考原版」风格一致），标签同步
+    // 每世界温度默认：0.7，标签同步
     const wtEl = document.getElementById("worldTemp"); if (wtEl) wtEl.value = "0.7";
     updateWorldTempLabel();
-    // ★ A1：叙事偏好标签重置
-    resetStylePrefs();
+    // ★ W2-Style：重置编辑器（模板选择 / 叙事文风 / 结构化标签 / 模块开关 / 时间偏好）
+    resetCreateWizard();
     // 收起高级折叠
     const adv = document.querySelector("#createWorldModal details.advanced-details");
     if (adv) adv.open = false;
-}
-
-// 向导「下一步」：先校验当前步必填项，通过才前进
-export function cwNext() {
-    if (cwStep === 1) {
-        if (!document.getElementById("worldName").value.trim()) { showToast("请先填写世界名称", "error"); return; }
-    } else if (cwStep === 2) {
-        const typeVal = document.getElementById("worldType").value;
-        const ipNameVal = document.getElementById("ipName").value.trim();
-        // ★ 同人 / 改编IP 需填作品名（上传源文件后可留空）
-        if (needsSourceWork(typeVal) && !ipNameVal && !isSourceFileUploaded()) {
-            showToast("基于已有 IP / 同人 时请填写作品名称，或上传小说源文件后留空", "error"); return;
-        }
-    } else if (cwStep === 3) {
-        if (!document.getElementById("worldDesc").value.trim()) { showToast("请填写世界观描述", "error"); return; }
-    }
-    if (cwStep < CW_TOTAL) { cwStep++; renderCwStep(); }
-}
-
-// 向导「上一步」
-export function cwPrev() {
-    if (cwStep > 1) { cwStep--; renderCwStep(); }
-}
-
-// 切换步骤显示 + 更新步骤指示 + 底部按钮 + 焦点
-function renderCwStep() {
-    document.querySelectorAll("#createWorldModal .cw-step").forEach(s => {
-        s.classList.toggle("active", Number(s.dataset.step) === cwStep);
-    });
-    document.querySelectorAll("#createWorldModal .cw-step-dot").forEach(d => {
-        const n = Number(d.dataset.step);
-        d.classList.toggle("active", n === cwStep);
-        d.classList.toggle("done", n < cwStep);
-    });
-    const prev = document.getElementById("cwPrevBtn");
-    const next = document.getElementById("cwNextBtn");
-    const gen = document.getElementById("generateWorldBtn");
-    if (prev) prev.style.visibility = cwStep > 1 ? "visible" : "hidden";
-    if (next) next.style.display = cwStep === CW_TOTAL ? "none" : "";
-    if (gen) gen.style.display = cwStep === CW_TOTAL ? "" : "none";
-    const cur = document.querySelector('#createWorldModal .cw-step[data-step="' + cwStep + '"]');
-    const f = cur && cur.querySelector("input, select, textarea");
-    if (f) setTimeout(() => f.focus(), 50);
 }
 
 export function onWorldTypeChange(value) {
@@ -303,24 +270,8 @@ export function refreshIpNameRequirement() {
     if (optHint) optHint.style.display = optional ? "" : "none";
 }
 
-export function selectStyleRef(value, el) {
-    document.querySelectorAll("#styleRefGroup .radio-option").forEach(o => o.classList.remove("selected"));
-    document.querySelectorAll("#styleRefGroup input[type=radio]").forEach(r => r.checked = false);
-    el.classList.add("selected");
-    el.querySelector("input[type=radio]").checked = true;
-    const customField = document.getElementById("customStyleField");
-    if (value === "custom") {
-        customField.classList.add("show");
-    } else {
-        customField.classList.remove("show");
-    }
-    syncWorldTempToStyle(); // ★ 每世界温度：切换文风时同步推荐温度
-}
-
-export function getSelectedStyleRef() {
-    const checked = document.querySelector("input[name='styleRef']:checked");
-    return checked ? checked.value : "original";
-}
+// ★ W2-Style：叙事风格改用模板库（见 wizard-editor.js 的 selectStyleTemplate），
+// 旧的三选一 styleRef / customStyle 已废弃，故移除 selectStyleRef / getSelectedStyleRef / syncWorldTempToStyle。
 
 export function updatePlotFreedomLabel(value) {
     const labels = {
@@ -340,19 +291,6 @@ export function updateWorldTempLabel() {
     const v = parseFloat(slider.value);
     const lbl = document.getElementById("worldTempLabel");
     if (lbl) lbl.textContent = v.toFixed(1) + " — " + tempLabelText(v);
-}
-
-// ★ 每世界温度：根据所选文风预填推荐温度（original/none → 0.7，custom → 解析文风文本）
-export function syncWorldTempToStyle() {
-    const ref = getSelectedStyleRef();
-    let t = 0.7;
-    if (ref === "custom") {
-        const cs = document.getElementById("customStyle");
-        t = styleToTemperature(cs ? cs.value : "");
-    }
-    const slider = document.getElementById("worldTemp");
-    if (slider) slider.value = t.toFixed(1);
-    updateWorldTempLabel();
 }
 
 // ★ A1 结构化偏好标签：题材/主题(可多选)/口味/视角/文风 + 自定义标签(≤10字)
@@ -518,7 +456,8 @@ export function renderSaveList() {
         return `
         <div class="list-item save-item${isDead ? " dead-save" : ""}${worldMissing ? " missing-world" : ""}">
             <div class="save-info">
-                <div class="item-title">${escapeHtml(s.worldName)}${titleBadges}</div>
+                <div class="item-title">${escapeHtml(s.name || s.worldName)}${titleBadges}</div>
+                ${(s.name && s.worldName && s.name !== s.worldName) ? `<div class="item-sub">${escapeHtml(s.worldName)}</div>` : ""}
                 <div class="item-meta">${escapeHtml(s.progress)}<br>最后游玩：${escapeHtml(s.updatedAt)}</div>
             </div>
             <div class="save-actions">
@@ -527,6 +466,52 @@ export function renderSaveList() {
             </div>
         </div>
     `}).join("");
+}
+
+// ★ 多存档槽位：游戏内「保存」菜单
+export function openSaveMenu() {
+    if (!S.currentSession.saveId) { showToast("请先进入一个世界并开始游玩", "warn"); return; }
+    const cur = S.saves.find(s => s.id === S.currentSession.saveId);
+    const curName = cur ? (cur.name || cur.worldName) : "未命名存档";
+    const curEl = document.getElementById("saveMenuCurrentSlot");
+    if (curEl) curEl.textContent = "当前存档：" + curName;
+    const nameInput = document.getElementById("saveAsNewName");
+    if (nameInput) nameInput.value = "";
+    showModal("saveMenuModal");
+}
+
+// ★ 多存档槽位：世界详情「选择存档」弹窗（列出该世界全部存档 + 开新存档）
+export function openWorldSaveChooser(worldId) {
+    const world = S.worlds.find(w => w.id === worldId);
+    if (!world) return;
+    const worldSaves = S.saves.filter(s => s.worldId === worldId)
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    const titleEl = document.getElementById("worldSaveChooserTitle");
+    if (titleEl) titleEl.textContent = "选择存档 · " + world.name;
+    const body = document.getElementById("worldSaveChooserBody");
+    if (!body) return;
+    if (!worldSaves.length) {
+        body.innerHTML = '<p class="muted">该世界还没有存档。<br>进入世界后自动生成。</p>';
+        showModal("worldSaveChooserModal");
+        return;
+    }
+    body.innerHTML = worldSaves.map(s => {
+        const isDead = s.state && s.state.is_alive === false;
+        const title = escapeHtml(s.name || s.worldName);
+        return `
+        <div class="list-item save-item${isDead ? " dead-save" : ""}">
+            <div class="save-info">
+                <div class="item-title">${title}</div>
+                <div class="item-meta">${escapeHtml(s.progress)}<br>最后游玩：${escapeHtml(s.updatedAt)}</div>
+            </div>
+            <div class="save-actions">
+                <button class="save-play-btn" data-action="loadSave" data-id="${s.id}">继续</button>
+                <button class="save-del-btn" data-action="deleteSave" data-id="${s.id}">删除</button>
+            </div>
+        </div>`;
+    }).join("") + `
+        <button class="btn primary block" data-action="startNewSave" data-id="${worldId}" style="margin-top:12px">＋ 开新存档</button>`;
+    showModal("worldSaveChooserModal");
 }
 
 let _detailTabBound = {};
@@ -639,7 +624,7 @@ export function showWorldDetail(worldId) {
             <div class="form-group"><label>进度系统</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${escapeHtml(schema.progression_path_label)} / ${escapeHtml(schema.progression_label)}</p></div>
             <div class="form-group"><label>创建时间</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${w.createdAt}</p></div>
             ${w.opening_narrative ? `<div class="form-group"><label>开场白预览</label><p style="margin:0;font-size:14px;line-height:1.8;color:var(--text-secondary);white-space:pre-line;">${escapeHtml(w.opening_narrative.slice(0, 200))}${w.opening_narrative.length > 200 ? "..." : ""}</p></div>` : ""}
-            ${w.style_ref ? `<div class="form-group"><label>文风参考</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${w.style_ref === "original" ? "参考原版文风" : w.style_ref === "custom" ? "自定义文风：" + escapeHtml(w.custom_style || "未填写") : "不参考文风"}</p></div>` : ""}
+            ${w.style_preset && w.style_preset.short_tag ? `<div class="form-group"><label>叙事风格</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${escapeHtml(w.style_preset.short_tag)}（推荐温度 ${w.style_preset.recommended_temperature}）</p></div>` : (w.style_ref ? `<div class="form-group"><label>文风参考</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${w.style_ref === "original" ? "参考原版文风" : w.style_ref === "custom" ? "自定义文风：" + escapeHtml(w.custom_style || "未填写") : "不参考文风"}</p></div>` : "")}
             ${w.plot_freedom ? `<div class="form-group"><label>剧情自由度</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${["", "严格遵循原著", "以原著为主", "适中发散", "自由发挥", "完全自由"][w.plot_freedom] || "适中发散"}</p></div>` : ""}
             ${w.custom_prefix ? `<div class="form-group"><label>特殊要求</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.custom_prefix)}</p></div>` : ""}
             ${w.source_content ? `<div class="form-group"><label>源文件</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">已上传（${Math.ceil(w.source_content.length / 1024)} KB）</p></div>` : ""}
@@ -672,22 +657,47 @@ export function showWorldDetail(worldId) {
         </div>
         <div class="detail-tab-content" data-detail-tab-content="modules">
             ${renderModuleSwitches(w)}
+            <div class="status-section">
+                <div class="status-section-title">通讯设置（docs/53）</div>
+                <div class="form-group"><label>判定模式</label>
+                    <label class="radio-inline"><input type="radio" name="commGateMode" value="ai" ${(w.comm_gate_mode || 'ai') === 'ai' ? 'checked' : ''}> AI 自动判断</label>
+                    <label class="radio-inline"><input type="radio" name="commGateMode" value="rules" ${w.comm_gate_mode === 'rules' ? 'checked' : ''}> 纯规则（不调 AI）</label>
+                </div>
+                <div class="form-group"><label>玩家自选联系方式</label>
+                    <div id="contactChannelList">
+                        ${(Array.isArray(w.contact_channels) ? w.contact_channels : []).map(c => `
+                            <div class="contact-channel-row">
+                                <input class="contact-channel-name" value="${escapeHtml(c.name || '')}">
+                                <select class="contact-channel-kind">
+                                    ${["magic", "tech", "social", "physical"].map(k => `<option value="${k}" ${c.kind === k ? 'selected' : ''}>${k}</option>`).join("")}
+                                </select>
+                                <button data-action="removeContactChannel">✕</button>
+                            </div>`).join("")}
+                    </div>
+                    <button class="btn-secondary-sm" data-action="addContactChannel">+ 添加联系方式</button>
+                </div>
+            </div>
             <button class="btn primary" data-action="saveWorldModules" data-id="${id}">保存模块设置</button>
         </div>
     `;
 
-    const hasSave = S.saves.some(s => s.worldId === w.id);
+    const worldSaves = S.saves.filter(s => s.worldId === w.id);
+    const hasSave = worldSaves.length > 0;
     const footer = document.getElementById("detailModalFooter");
     if (hasSave) {
+        const primaryBtn = worldSaves.length >= 2
+            ? `<button class="btn primary" data-action="openWorldSaveChooser" data-id="${id}">选择存档（${worldSaves.length}）</button>`
+            : `<button class="btn primary" data-action="continueLatestSave" data-id="${id}">继续游戏</button>`;
         footer.innerHTML = `
             <div class="dropdown dropdown-up">
                 <button class="btn secondary" data-action="toggleDropdown">更多 ▾</button>
                 <div class="dropdown-menu">
+                    <button class="dropdown-item" data-action="startNewSave" data-id="${id}">开新存档</button>
                     <button class="dropdown-item" data-action="showExportWorldChoice" data-id="${id}">导出世界</button>
                     <button class="dropdown-item" data-action="confirmRestart" data-id="${id}">重新开始</button>
                 </div>
             </div>
-            <button class="btn primary" data-action="continueLatestSave" data-id="${id}">继续游戏</button>`;
+            ${primaryBtn}`;
     } else {
         footer.innerHTML = `
             <div class="dropdown dropdown-up">
@@ -986,6 +996,7 @@ export function renderStatusPanel(tab) {
                             <div class="bond-bar"><div class="bond-fill ${side}" style="width:${pct}%"></div></div>
                             ${tags.length ? `<div class="bond-tags">${tags.map(t => `<span class="bond-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
                             ${desc ? `<div class="text-block">${escapeHtml(desc)}</div>` : ""}
+                            ${isModuleEnabled(S.currentWorld, "npc_chat") ? `<button class="bond-chat-btn" data-action="privateChat" data-npc="${escapeHtml(name)}">私聊</button>` : ""}
                         </div>`;
                     }).join("") : '<div class="empty-hint">暂无人物关系</div>'}
                 </div>
@@ -1283,6 +1294,7 @@ export function renderScanWarnBar(entry, index) {
 export function renderLog(reset) {
     const log = document.getElementById("gameLog");
     if (reset) { S.renderedEntryCount = 0; log.innerHTML = '<div class="choices-row in-log" id="choicesArea"></div>'; }
+    updateEventButtonVisibility(); // ★ 事件系统：每轮重绘时同步「🎴 支线」按钮显隐
 
     // 只追加新增的条目
     for (let i = S.renderedEntryCount; i < S.conversationHistory.length; i++) {
@@ -1512,6 +1524,37 @@ export function renderChoices(choices) {
     }).join("");
 }
 
+// ★ 事件系统：渲染支线事件卡面板（事件面板 modal 的列表容器 eventPanelList）
+export function renderEventPanel(events) {
+    const list = document.getElementById("eventPanelList");
+    if (!list) return;
+    const evs = Array.isArray(events) ? events : [];
+    if (!evs.length) {
+        list.innerHTML = '<div class="empty-hint">当前没有可进入的支线事件。继续推进剧情，AI 会适时给出新的支线候选。</div>';
+        return;
+    }
+    const cur = (S.gameState && S.gameState.variables && typeof S.gameState.variables.stamina === "number") ? S.gameState.variables.stamina : null;
+    list.innerHTML = evs.map((ev, i) => {
+        const cost = Number(ev.cost_stamina) || 0;
+        const lack = (cur !== null && cost > cur);
+        const badge = "体力 " + cost + (ev.cost_time ? " · 时间 " + escapeHtml(ev.cost_time) : "");
+        return `<div class="event-card${lack ? " disabled" : ""}">
+            <div class="event-card-head">
+                <span class="event-card-title">${escapeHtml(ev.title || "未命名事件")}</span>
+                <span class="event-card-badge">${escapeHtml(badge)}</span>
+            </div>
+            <div class="event-card-desc">${escapeHtml(ev.desc || "")}</div>
+            <button class="btn-secondary-sm event-enter" data-action="enterSideEvent" data-idx="${i}" ${lack ? "disabled" : ""}>${lack ? "体力不足" : "进入"}</button>
+        </div>`;
+    }).join("");
+}
+
+// ★ 事件系统：根据 events 模块开关控制「🎴 支线」按钮显隐（renderLog 每轮调用）
+export function updateEventButtonVisibility() {
+    const btn = document.getElementById("eventPanelBtn");
+    if (btn) btn.style.display = (S.currentWorld && isModuleEnabled(S.currentWorld, "events")) ? "" : "none";
+}
+
 export function checkDeathBanner() {
     if (!S.gameState || S.gameState.is_alive !== false) {
         document.getElementById("deathBanner").classList.add("hidden");
@@ -1558,10 +1601,78 @@ export function restoreLastChoices() {
     }
 }
 
-export function showGameOver() {
-    const reason = S.gameState && S.gameState.death_reason ? S.gameState.death_reason : "你的旅程到此为止。";
-    document.getElementById("gameOverReason").textContent = reason;
+export function showGameOver(info) {
+    // info 可为字符串（旧调用/死亡说明）或 { title, kind, reason }
+    let title = "结局", kind = "normal", reason = "你的旅程到此为止。";
+    if (typeof info === "string") {
+        reason = info || reason;
+    } else if (info && typeof info === "object") {
+        title = info.title || "结局";
+        kind = ENDING_KINDS.includes(info.kind) ? info.kind : "normal";
+        reason = info.reason || reason;
+    }
+    const titleEl = document.getElementById("gameOverTitle");
+    if (titleEl) titleEl.textContent = title;
+    const kindEl = document.getElementById("gameOverKind");
+    if (kindEl) {
+        kindEl.textContent = endingKindLabel(kind);
+        kindEl.className = "ending-kind-badge kind-" + kind;
+    }
+    const reasonEl = document.getElementById("gameOverReason");
+    if (reasonEl) reasonEl.textContent = reason;
+    renderEndingCodex();
     document.getElementById("gameOverOverlay").classList.add("show");
+}
+
+// ★ docs/54：结局图鉴渲染（游戏结束弹窗内）
+function renderEndingCodex() {
+    const box = document.getElementById("endingCodex");
+    if (!box) return;
+    const list = (S.gameState && Array.isArray(S.gameState.unlockedEndings)) ? S.gameState.unlockedEndings : [];
+    if (!list.length) { box.innerHTML = ""; box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    box.innerHTML = `<div class="codex-title">已解锁结局图鉴（${list.length}）</div>` + list.map(e => {
+        const k = e.kind || "normal";
+        return `<div class="codex-item kind-${k}">
+            <span class="ending-kind-badge kind-${k}">${escapeHtml(endingKindLabel(k))}</span>
+            <span class="codex-item-title">${escapeHtml(e.title || "结局")}</span>
+        </div>`;
+    }).join("");
+}
+
+// ★ docs/54：游玩时「结局追踪器」渲染
+export function renderEndingTracker() {
+    const body = document.getElementById("endingTrackerBody");
+    if (!body) return;
+    const world = S.currentWorld, gs = S.gameState;
+    if (!world || !gs) { body.innerHTML = ""; return; }
+    const list = evaluateEndingStatus(world, gs, null);
+    if (!list.length) {
+        body.innerHTML = `<p class="muted">该世界没有配置「结局」规则。</p>`;
+        return;
+    }
+    body.innerHTML = list.map(e => {
+        const statusLabel = e.met ? "已满足" : (e.progress != null ? "进行中" : "未满足");
+        const statusCls = e.met ? "met" : (e.progress != null ? "progress" : "unmet");
+        const progPct = e.progress != null ? Math.round(e.progress * 100) : 0;
+        const progBar = e.progress != null
+            ? `<div class="tracker-progress"><div class="tracker-progress-bar" style="width:${progPct}%"></div></div>`
+            : "";
+        return `<div class="tracker-card kind-${e.kind}">
+            <div class="tracker-card-head">
+                <span class="ending-kind-badge kind-${e.kind}">${escapeHtml(endingKindLabel(e.kind))}</span>
+                <span class="tracker-title">${escapeHtml(e.title)}</span>
+            </div>
+            <div class="tracker-cond">${escapeHtml(endingWhenText(e.when))}</div>
+            <span class="tracker-status ${statusCls}">${statusLabel}</span>
+            ${progBar}
+        </div>`;
+    }).join("");
+}
+
+export function showEndingTracker() {
+    renderEndingTracker();
+    showModal("endingTrackerModal");
 }
 
 export function showToast(msg, type = "", duration = 2000) {
