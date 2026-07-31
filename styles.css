@@ -34,6 +34,8 @@
             --accent-rgb: 201, 168, 124; /* 日间会自动改为墨蓝；夜间保持金棕，确保深浅主题互不牵连 */
             --success: #7BAA92;
             --danger: #C56B5E;
+            --badge-success: #1D9E75;
+            --badge-danger: #E24B4A;
             --warning: #C9A455;
             --text-muted: rgba(217, 207, 192, 0.42);
             --separator: rgba(217, 207, 192, 0.08);
@@ -49,7 +51,7 @@
             --scrollbar-thumb: rgba(217,207,192,0.18);
             --radio-inner: #221E18;
             --btn-primary-text: #1A160F;
-            --text-tertiary: rgba(217, 207, 192, 0.30);
+            --text-tertiary: rgba(217, 207, 192, 0.60);
             --card-bg: rgba(217, 207, 192, 0.06);
             --log-entry-bg: var(--card);
             --mist-a: rgba(var(--accent-rgb), 0.10);
@@ -88,6 +90,8 @@
             --accent: #3C6063;
             --success: #4F8A6E;
             --danger: #A85A4A;
+            --badge-success: #1D9E75;
+            --badge-danger: #E24B4A;
             --warning: #9A7A38;
             --separator: #D4DEDA;
             --shadow-card: 0 1px 3px rgba(60,96,99,0.10);
@@ -128,7 +132,7 @@
 
         .hidden { display: none !important; }
         html, body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", "Noto Sans SC", sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", "Noto Sans SC", sans-serif;
             margin: 0;
             padding: 0;
             height: 100%;
@@ -633,7 +637,7 @@
         .new-badge {
             display: inline-block;
             font-size: 10px; font-weight: 500;
-            color: #fff; background: #1D9E75;
+            color: #fff; background: var(--badge-success);
             padding: 1px 6px; border-radius: 3px;
             margin-left: 6px; vertical-align: middle;
         }
@@ -641,8 +645,8 @@
             from { opacity: 0; transform: translateY(12px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .dead-badge { font-size: 12px; color: #E24B4A; font-weight: 500; }
-        .deleted-badge { font-size: 12px; color: #E24B4A; font-weight: 500; background: rgba(226,75,74,0.12); padding: 1px 6px; border-radius: 6px; }
+        .dead-badge { font-size: 12px; color: var(--badge-danger); font-weight: 500; }
+        .deleted-badge { font-size: 12px; color: var(--badge-danger); font-weight: 500; background: rgba(226,75,74,0.12); padding: 1px 6px; border-radius: 6px; }
         .save-item.missing-world { opacity: 0.72; }
         /* ★ 多存档槽位：存档列表的槽位名副标题 + 保存菜单/通用块按钮 */
         .list-item .item-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
@@ -1237,9 +1241,9 @@
         .game-header .day-info { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; font-family: var(--sans, system-ui, sans-serif); display: flex; align-items: center; flex-wrap: wrap; }
         .cache-indicator { font-size: 10px; color: var(--text-tertiary); margin-left: 8px; padding: 2px 6px; border-radius: 4px;
             background: var(--card-bg); border: 1px solid var(--card-border); cursor: default; }
-        .cache-indicator.good { color: #1D9E75; border-color: #5DCAA5; }
+        .cache-indicator.good { color: var(--badge-success); border-color: #5DCAA5; }
         .cache-indicator.warn { color: #BA7517; border-color: #EF9F27; }
-        .cache-indicator.bad { color: #E24B4A; border-color: #F09595; }
+        .cache-indicator.bad { color: var(--badge-danger); border-color: #F09595; }
         .timeline-switch { display: flex; gap: 4px; margin-top: 3px; }
         .timeline-switch .tl-chip {
             font-size: 11px; padding: 2px 9px; border-radius: 10px; cursor: pointer;
@@ -1477,7 +1481,7 @@
             margin: 0 0 0 0;
             background: rgba(226, 75, 74, 0.12);
             border-bottom: 1px solid rgba(226, 75, 74, 0.3);
-            font-size: 13px; color: #E24B4A;
+            font-size: 13px; color: var(--badge-danger);
         }
         .death-banner-icon { font-size: 16px; }
         .death-banner-text { flex: 1; }
@@ -2756,6 +2760,8 @@ html[data-theme="light"] .char-card select {
     -webkit-backdrop-filter: blur(14px) saturate(140%);
     z-index: 6;
 }
+/* 进游戏时隐藏全局底部导航：游戏屏顶部 header 已含返回/设置等入口，避免与首页导航重复（UI 审查 P2-2） */
+#gameScreen.active ~ #globalBottomNav { display: none; }
 .bottom-nav button {
     flex: 1;
     display: flex;
