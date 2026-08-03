@@ -844,6 +844,8 @@ export function renderStatusTabs() {
     if (isModuleEnabled(world, "time")) {
         tabs.push({ key: "timeline", label: "时间线" });
     }
+    // ★ 57：偏离原著报告页签（本局对知识库工作副本做过的改动一览）
+    tabs.push({ key: "divergence", label: "偏离" });
 
     document.getElementById("statusTabs").innerHTML = tabs.map(t => `
         <button class="status-tab ${S.currentStatusTab === t.key ? "active" : ""}" data-action="switchStatusTab" data-key="${t.key}">${t.label}</button>
@@ -1189,7 +1191,36 @@ export function renderStatusPanel(tab) {
                 </div>`;
             break;
         }
+
+        case "divergence":
+            // ★ 57：偏离原著报告——本局对知识库工作副本做过的改动一览
+            container.innerHTML = renderLoreDeltaHTML();
+            break;
     }
+}
+
+// ★ 57：偏离原著报告——把 S.worldRuntime.deltaLog 渲染为可读列表（状态面板「偏离」页签）
+export function renderLoreDeltaHTML() {
+    const rt = S.worldRuntime;
+    if (!rt || !Array.isArray(rt.deltaLog) || !rt.deltaLog.length) {
+        return '<div class="empty-hint">本局尚未发生偏离原著的剧情变更。</div>';
+    }
+    const rows = rt.deltaLog.slice().reverse().map(d => {
+        const what = (d.entity ? d.entity + (d.lore_id ? "/" + d.lore_id : "") : (d.lore_id || "?"));
+        const to = (typeof d.to === "string") ? d.to : JSON.stringify(d.to || "");
+        const from = (typeof d.from === "string" && d.from) ? d.from : null;
+        const opLabel = d.op === "add" ? "新增本局事实" : "改写设定";
+        return `
+            <div class="divergence-row">
+                <div class="divergence-head"><span class="divergence-turn">回合 ${d.turn || "?"}</span><span class="divergence-op">${opLabel}</span></div>
+                <div class="divergence-what">${escapeHtml(what)}</div>
+                ${from ? `<div class="divergence-from">原：${escapeHtml(from.slice(0, 120))}</div>` : ""}
+                <div class="divergence-to">→ ${escapeHtml(to.slice(0, 160))}</div>
+                ${d.note ? `<div class="divergence-note">备注：${escapeHtml(d.note)}</div>` : ""}
+            </div>`;
+    }).join("");
+    return `<div class="status-section"><div class="status-section-title">📊 本局偏离原著报告</div><div class="divergence-list">${rows}</div>
+        <div class="muted" style="margin-top:8px;">这些是 AI 据本局剧情对知识库工作副本做出的改动；原著设定未被修改，重开新档即复原。</div></div>`;
 }
 
 export function updateGameDayInfo() {

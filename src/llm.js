@@ -388,7 +388,7 @@ export function extractPartialNarrative(raw) {
 export const TOOLS = {
     apply_turn_state: {
         name: "apply_turn_state",
-        description: "返回本回合的叙事文本、状态变化与选项",
+        description: "返回本回合的叙事文本、状态变化与选项。若玩家行为导致本局剧情偏离原著设定（如角色死亡、阵营易主、关键事件未发生），请在 lore_delta 中以 op:\"override\" 更新对应知识条目的 content；本局新发生的既成事实可用 op:\"add\" 新增「本局事实」类条目（id 以 fact_ 前缀）。切勿删除原著条目。",
         parameters: {
             type: "object",
             additionalProperties: true,
@@ -404,6 +404,11 @@ export const TOOLS = {
                 side_events: { type: "array", items: { type: "object", additionalProperties: true, properties: {
                     title: { type: "string" }, desc: { type: "string" },
                     cost_stamina: { type: "number" }, cost_time: { type: "string" }, tag: { type: "string" }
+                } } },
+                lore_delta: { type: "array", items: { type: "object", additionalProperties: true, properties: {
+                    op: { type: "string" }, lore_id: { type: "string" }, content: { type: "string" },
+                    category: { type: "string" }, title: { type: "string" }, note: { type: "string" },
+                    entity: { type: "string" }, state: { type: "object" }
                 } } }
         }
     },
@@ -1005,7 +1010,7 @@ const JUDGE_SYSTEM_PROMPT = `你是一个严格且克制的「世界观一致性
 其中 severity：hard=明确引入了外来 IP/力量体系；soft=疑似但不确定；none=无问题。`;
 
 // 提取「世界设定摘要」供裁判参考（不依赖写死的字段名，容错处理）
-function getWorldLoreForJudge() {
+export function getWorldLoreForJudge() {
     const w = S.currentWorld;
     if (!w) return "";
     const parts = [];
@@ -1028,6 +1033,16 @@ function getWorldLoreForJudge() {
             : snips.filter(s => s && s.content).slice(0, 12).map(s => "· " + (s.title || s.category || "") + "：" + s.content);
         const loreText = finalSnips.join("\n");
         if (loreText) parts.push("【世界知识库（节选）】\n" + loreText.slice(0, 2000));
+    }
+    // ★ 57：本局实际发生的事实变更——裁判应以此为准，避免把合理的剧情分支误判为"偏离原著"
+    const rt = S.worldRuntime;
+    if (rt && Array.isArray(rt.deltaLog) && rt.deltaLog.length) {
+        const dl = rt.deltaLog.slice(-15).map(d => {
+            const what = (d.entity ? d.entity + (d.lore_id ? "/" + d.lore_id : "") : (d.lore_id || "?"));
+            const to = (typeof d.to === "string") ? d.to.slice(0, 200) : JSON.stringify(d.to || "");
+            return `· 回合${d.turn || "?"}：${what} → ${to}${d.note ? "（" + d.note + "）" : ""}`;
+        }).join("\n");
+        if (dl) parts.push("【本局实际发生的事实变更（裁判请以此为准，勿将合理分支判为违和）】\n" + dl);
     }
     return parts.join("\n\n");
 }

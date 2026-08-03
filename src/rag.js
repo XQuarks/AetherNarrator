@@ -306,6 +306,22 @@ function isLoreTriggered(snip, context, embScore) {
     return kw || emb; // 关键词命中 或 语义足够近 → 注入
 }
 
+// ★ docs/56：按剧情进度解锁的「隐形门禁」纯函数。
+// 复用 gameState.story_progress 当"当前剧情阶段指针"（1..K，单调只增）；
+// 未到阶段的 lore（unlock_stage > 当前进度）视为「尚未揭示」，应被剔除、且不给任何提示（防剧透、不破坏沉浸）。
+// - 老存档/老 lore 缺 unlock_stage → 默认 1（全程可用，不锁），向后兼容。
+// - 行为记录（玩家记忆）以 behavior_ 开头，永远是记忆而非世界设定，不受门禁影响。
+// 抽出为纯函数便于单测；S.gameState 缺失时按进度 1 处理（所有 stage≥1 卡片可用）。
+export function loreStageUnlocked(snip) {
+    if (!snip) return true;
+    if (String(snip.id || "").startsWith("behavior_")) return true; // 记忆不受限
+    const stage = (typeof snip.unlock_stage === "number" && isFinite(snip.unlock_stage) && snip.unlock_stage >= 1)
+        ? Math.floor(snip.unlock_stage) : 1;
+    const cur = (S.gameState && typeof S.gameState.story_progress === "number" && isFinite(S.gameState.story_progress) && S.gameState.story_progress >= 1)
+        ? Math.floor(S.gameState.story_progress) : 1;
+    return stage <= cur;
+}
+
 // ★ B4：递归触发 —— 已注入片段的正文里若出现其它片段的激活词，则连带触发它们
 // （复用 B1 的关键词门槛，基于"已注入内容"动态连锁，而非依赖预定义硬链；深度封顶避免爆炸）
 const RECURSIVE_MAX_DEPTH = 3;
@@ -576,6 +592,17 @@ export async function retrieve(input) {
                 }
             }
         }
+    }
+
+    // ★ docs/56：剧情进度门禁（隐形剔除，无任何提示）。
+    // 在最终排序/裁剪前统一过滤召回池：未解锁阶段（unlock_stage > 当前 story_progress）的 lore 不进入注入池，
+    // 既防剧透、又让"提前聊到后期概念"时 AI 以角色当前认知自然回避，强化沉浸。
+    // 此步位于所有召回路径（关键词/向量/常驻/递归/链接/关系图）之后，故上述任意路径带入的卡片都会被统一门禁；
+    // 行为记录（behavior_ 开头）跳过——记忆不受剧情阶段限制。
+    for (const [key, val] of merged.entries()) {
+        if (String(key).startsWith("behavior_")) continue;
+        const snip = val && val.snippet;
+        if (snip && !loreStageUnlocked(snip)) merged.delete(key);
     }
 
     // ★ B4：token 预算裁剪 —— 先按 priority（重要度）再按相关度排序，累计到预算上限即停。

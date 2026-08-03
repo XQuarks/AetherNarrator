@@ -13,6 +13,7 @@ import {
 } from "./render.js";
 import { normalizeSimulationState } from "./simulation.js";
 import { deepClone, defaultInitialState, resolveOpeningTokens, detectTimeConflict, formatConflictMessage } from "./utils.js";
+import { defaultWorldRuntime } from "./store.js"; // ★ 57：双轨知识库运行态
 import { invalidateSystemPromptCache, rebuildChatFromHistory, rebuildSummaryFromHistory } from "./prompt.js";
 import { formatWorldTime, stepOf, ensureTimelineState, getTimeConfig } from "./theme.js";
 import { normalizeCurrentDate } from "./calendar.js";
@@ -57,6 +58,8 @@ export async function startGame(opts = {}) {
 
     // ★ B7：从世界出厂默认深拷贝知识库为当前存档副本（后续编辑只改副本）
     S.activeLoreKB = S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null;
+    // ★ 57：双轨知识库运行态随新周目清空（原著永不承载游玩产物）
+    S.worldRuntime = defaultWorldRuntime();
 
     // ★ P0/P1: 重置缓存 + 聊天历史 + 摘要
     invalidateSystemPromptCache();
@@ -131,6 +134,8 @@ export function prepareSessionFromSave(save) {
 
     // ★ B7：恢复存档独立知识库（若存档无副本则从 world 出厂默认深拷贝，兼容老存档）
     S.activeLoreKB = (save.lore_kb) ? deepClone(save.lore_kb) : (S.currentWorld && S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null);
+    // ★ 57：恢复双轨知识库运行态（无则按默认空）
+    S.worldRuntime = (save.world_runtime) ? deepClone(save.world_runtime) : defaultWorldRuntime();
     S.activeBehaviorRecords = deepClone(save.behavior_records || []);
     S.aiEnhanced = save.ai_enhanced === true;
     S.lastLoreReviewMsgCount = save.last_lore_review_msg_count || 0;
@@ -232,6 +237,7 @@ export function createOrUpdateSave() {
         existing.last_lore_review_msg_count = S.lastLoreReviewMsgCount;
         existing.pending_lore_revision = deepClone(S._loreRevisionBuffer);
         existing.player_notes = (typeof S.playerNotes === "string") ? S.playerNotes : ""; // ★ C4：写回玩家备忘
+        existing.world_runtime = deepClone(S.worldRuntime); // ★ 57：双轨运行态随存档持久化
     } else {
         const newId = saveId || ("s" + Date.now());
         S.currentSession.saveId = newId;
@@ -243,6 +249,7 @@ export function createOrUpdateSave() {
             chatSummary: [...S.chatSummary],
             schema_version: LATEST_SAVE_SCHEMA_VERSION,
             lore_kb: deepClone(S.activeLoreKB),
+            world_runtime: deepClone(S.worldRuntime), // ★ 57：双轨运行态随存档持久化
             behavior_records: deepClone(S.activeBehaviorRecords),
             ai_enhanced: S.aiEnhanced === true,
             last_lore_review_msg_count: S.lastLoreReviewMsgCount,
@@ -285,6 +292,7 @@ export function saveAsNewSave(name) {
         chatSummary: [...S.chatSummary],
         schema_version: LATEST_SAVE_SCHEMA_VERSION,
         lore_kb: deepClone(S.activeLoreKB),
+        world_runtime: deepClone(S.worldRuntime), // ★ 57：双轨运行态随存档持久化
         behavior_records: deepClone(S.activeBehaviorRecords),
         ai_enhanced: S.aiEnhanced === true,
         last_lore_review_msg_count: S.lastLoreReviewMsgCount,

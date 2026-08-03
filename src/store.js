@@ -70,6 +70,7 @@ export const S = {
   _loreRevisionBuffer: null, // ★ B5：AI 修订后待审阅的知识库条目缓冲
   lastLoreReviewMsgCount: 0,  // ★ B5：上次回写时的对话条数，用于触发阈值判断
   loreRequireConfirm: _lsGet("aigame_lore_confirm", "false") === "true", // ★ 知识晋升确认开关：默认关=自动同意+提示；开=弹窗手动确认
+  worldRuntime: null,       // ★ 57：双轨知识库运行态 { deltaLog, entityStates }，随存档持久化；原著 currentWorld.lore_kb 永不在此被改写
 };
 
 // Phase 2：规则 DSL 解释器（纯函数，无 store 反向依赖，避免循环引用）
@@ -788,4 +789,94 @@ export function applyConsistencyPack(world, pack) {
     };
     c.pack_source = (p && p._seed) ? "seed" : "generated";
     return c;
+}
+
+// ============================================================
+// ★ docs/57：双轨知识库运行时（方案 B）
+// 原著 currentWorld.lore_kb 永不可变；游玩中只写「每存档工作副本」S.activeLoreKB（B7 深拷贝）。
+// 本组函数把 AI 返回的 lore_delta 应用到工作副本，并把每次改动记入 S.worldRuntime，
+// 供「偏离原著报告」（render 状态面板「偏离」页签）、生成层覆盖段（prompt.js）、
+// 裁判（llm.js getWorldLoreForJudge）读取。原著资产因此永不丢失。
+// ============================================================
+
+// 运行态结构：deltaLog=历史流水（每条改动），entityStates=实体当前快照（便于 UI/裁判快速读）。
+export function defaultWorldRuntime() {
+    return { deltaLog: [], entityStates: {} };
+}
+
+// AI 契约产物 lore_delta 应用：每项是 { op, lore_id, content, category?, title?, note?, entity?, state? }
+// - op:"override"（默认）：改写 activeLoreKB 中已存在片段的 content（不删除原著条目、不新增）。
+// - op:"add"：仅允许新增「本局事实」类片段（用户拍板：可新增本局事实，但不得自由篡改/扩写整本设定）。
+//   新增片段标记 _runtime:true，category 默认「本局事实」，id 建议 fact_ 前缀。
+// 返回 { applied, skipped } 便于调用方判断是否需要重算向量/播报。
+export function applyLoreDelta(deltaList) {
+    if (!S.worldRuntime || typeof S.worldRuntime !== "object") S.worldRuntime = defaultWorldRuntime();
+    if (!Array.isArray(deltaList) || !deltaList.length) return { applied: [], skipped: [] };
+    const kb = S.activeLoreKB;
+    if (!kb || !Array.isArray(kb.snippets)) {
+        return { applied: [], skipped: deltaList.map(d => ({ ...(d || {}), reason: "no_lore_kb" })) };
+    }
+    const turn = (S.gameState && typeof S.gameState.story_progress === "number" && isFinite(S.gameState.story_progress))
+        ? S.gameState.story_progress
+        : (Array.isArray(S.conversationHistory) ? S.conversationHistory.length + 1 : 1);
+    const applied = [];
+    const skipped = [];
+    for (const d of deltaList) {
+        if (!d || typeof d !== "object") { skipped.push({ reason: "invalid" }); continue; }
+        const content = (typeof d.content === "string") ? d.content : null;
+        if (!content) { skipped.push({ ...d, reason: "missing_content" }); continue; }
+        const op = d.op === "add" ? "add" : "override";
+
+        if (op === "override") {
+            const id = d.lore_id || d.id;
+            if (!id) { skipped.push({ ...d, reason: "missing_lore_id" }); continue; }
+            const snip = kb.snippets.find(s => s && s.id === id);
+            if (!snip) { skipped.push({ ...d, reason: "lore_not_found:" + id }); continue; }
+            const from = snip.content;
+            snip.content = content;
+            if (d.title) snip.title = d.title;
+            if (Array.isArray(d.keywords)) snip.keywords = d.keywords.slice(0, 40);
+            // ★ 向量过期标记：触发 retrieve 重算时只重算本片段（ensureLoreEmbeddings 仅重算缺向量项）
+            snip.embedding = null; snip.embedDim = null; snip.embedModel = null;
+            const entry = { turn, op: "override", lore_id: id, field: "content", from, to: content, note: d.note || "", entity: d.entity || null };
+            S.worldRuntime.deltaLog.push(entry);
+            if (d.entity) mergeEntityState(d.entity, d.state, { turn, note: d.note, summary: content });
+            applied.push(entry);
+        } else { // add —— 仅新增「本局事实」类片段
+            const newId = d.lore_id || d.id || ("fact_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+            if (kb.snippets.some(s => s && s.id === newId)) { skipped.push({ ...d, reason: "id_collision:" + newId }); continue; }
+            const snip = {
+                id: newId,
+                category: (typeof d.category === "string" && d.category.trim()) ? d.category.trim().slice(0, 20) : "本局事实",
+                title: (typeof d.title === "string" && d.title.trim()) ? d.title.trim().slice(0, 40) : "本局事实",
+                content,
+                keywords: Array.isArray(d.keywords) ? d.keywords.slice(0, 40) : [],
+                activation_keys: Array.isArray(d.activation_keys) ? d.activation_keys.slice(0, 40) : [],
+                trigger_mode: "keyword",
+                priority: 0,
+                _runtime: true,          // 标记：运行期新增，区别于原著
+                unlock_stage: 1
+            };
+            kb.snippets.push(snip);
+            const entry = { turn, op: "add", lore_id: newId, field: "content", from: null, to: content, note: d.note || "", entity: d.entity || null };
+            S.worldRuntime.deltaLog.push(entry);
+            if (d.entity) mergeEntityState(d.entity, d.state, { turn, note: d.note, summary: content });
+            applied.push(entry);
+        }
+    }
+    return { applied, skipped };
+}
+
+// 合并实体快照（如哈利 alive=false），供 UI/裁判快速读取
+function mergeEntityState(entity, state, meta) {
+    if (!S.worldRuntime) S.worldRuntime = defaultWorldRuntime();
+    if (!entity || typeof entity !== "string") return;
+    const prev = S.worldRuntime.entityStates[entity] || {};
+    S.worldRuntime.entityStates[entity] = {
+        ...prev,
+        ...(state && typeof state === "object" ? state : {}),
+        changedTurn: meta.turn,
+        note: meta.note || prev.note || "",
+        summary: meta.summary
+    };
 }

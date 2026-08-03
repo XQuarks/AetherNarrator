@@ -124,7 +124,7 @@ export function sanitizeWorldConfig(raw) {
     if (!raw || typeof raw !== "object") return {};
     const out = {};
     // 允许的顶层键（其余一律丢弃）
-    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags", "modules"];
+    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags", "modules", "lore_stage_count", "lore_stage_labels"];
     for (const k of ALLOWED) {
         if (k in raw && raw[k] !== undefined) out[k] = raw[k];
     }
@@ -144,6 +144,16 @@ export function sanitizeWorldConfig(raw) {
             .map(t => (typeof t === "string" ? t.trim() : ""))
             .filter(t => t && t.length <= 20)
     ).slice(0, 8);
+    // ★ docs/56：剧情阶段刻度（可选）。lore_stage_count 为阶段总数 K（门禁上限，仅作 story_progress 钳制与作者端展示）；
+    //   lore_stage_labels 为作者端阶段名（红岸/危机/…）。缺省则门禁仍按 unlock_stage 绝对值生效。
+    if (typeof raw.lore_stage_count === "number" && raw.lore_stage_count >= 1) {
+        out.lore_stage_count = Math.min(Math.floor(raw.lore_stage_count), 50);
+    }
+    if (Array.isArray(raw.lore_stage_labels)) {
+        out.lore_stage_labels = dedupeStrings(
+            raw.lore_stage_labels.map(t => (typeof t === "string" ? t.trim() : "")).filter(t => t && t.length <= 20)
+        ).slice(0, 50);
+    }
     // lore_kb：{ ip, snippets[] }
     if (out.lore_kb && typeof out.lore_kb === "object") {
         const snippets = Array.isArray(out.lore_kb.snippets) ? out.lore_kb.snippets.slice(0, 50) : [];
@@ -170,6 +180,8 @@ export function sanitizeWorldConfig(raw) {
                 // ★ B4：priority（重要度，预算裁剪时优先保留）+ recursive（是否允许被连带触发）
                 priority: (typeof s.priority === "number") ? Math.max(-10, Math.min(Math.floor(s.priority), 10)) : 0,
                 recursive: s.recursive === false ? false : undefined,
+                // ★ docs/56：解锁阶段（防剧透门禁）。缺字段/非法 → 默认 1（全程可用，不锁），向后兼容老 lore。
+                unlock_stage: (typeof s.unlock_stage === "number" && s.unlock_stage >= 1) ? Math.min(Math.floor(s.unlock_stage), 50) : 1,
                 // ★ 时间线单向：timeline 归一（与 normSnippet 一致，供小书单次生成路径保留 timeline）
                 timeline: Array.isArray(s.timeline) ? s.timeline.slice(0, 12).map((t, i) => ({
                     order: (typeof t.order === "number" && t.order > 0) ? Math.floor(t.order) : (i + 1),
@@ -586,6 +598,8 @@ export function mergeLoreSnippets(existing, incoming) {
         trigger_mode: (typeof s.trigger_mode === "string" && s.trigger_mode) ? s.trigger_mode.slice(0, 20) : "keyword",
         scan_depth: (typeof s.scan_depth === "number" && s.scan_depth > 0) ? Math.min(Math.floor(s.scan_depth), 10) : 1,
         priority: (typeof s.priority === "number") ? Math.max(-10, Math.min(Math.floor(s.priority), 10)) : 0,
+        // ★ docs/56：解锁阶段（防剧透门禁）。缺字段/非法 → 默认 1（不锁），向后兼容。
+        unlock_stage: (typeof s.unlock_stage === "number" && s.unlock_stage >= 1) ? Math.min(Math.floor(s.unlock_stage), 50) : 1,
         links: Array.isArray(s.links) ? s.links.slice(0, 8).map((l) => ({
             target: typeof l.target === "string" ? l.target.slice(0, 50) : "",
             relation: (typeof l.relation === "string") ? l.relation : "related"

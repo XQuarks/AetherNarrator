@@ -29,7 +29,7 @@ function syncLoreEditFromDOM() {
     S._loreEdit.forEach((s, i) => {
         const g = (p) => document.getElementById(p + i);
         const title = g("le_title_"), cat = g("le_cat_"), content = g("le_content_");
-        const keys = g("le_keys_"), mode = g("le_mode_"), pri = g("le_pri_"), depth = g("le_depth_"), links = g("le_links_"), pos = g("le_pos_");
+        const keys = g("le_keys_"), mode = g("le_mode_"), pri = g("le_pri_"), depth = g("le_depth_"), links = g("le_links_"), pos = g("le_pos_"), stage = g("le_stage_");
         if (title) s.title = title.value;
         if (cat) s.category = cat.value;
         if (content) s.content = content.value;
@@ -38,6 +38,7 @@ function syncLoreEditFromDOM() {
         if (pos) s.insert_at = pos.value; // ★ P0-2：注入位置
         if (pri) s.priority = parseInt(pri.value) || 0;
         if (depth) s.scan_depth = Math.max(1, Math.min(10, parseInt(depth.value) || 1));
+        if (stage) s.unlock_stage = Math.max(1, Math.min(50, parseInt(stage.value) || 1)); // ★ docs/56：解锁阶段，1=不锁
         if (links) s.links = links.value.split(/[,，、\n]+/).map(part => {
             const [target, relation = "related"] = part.split(":").map(x => x.trim());
             return target ? { target, relation } : null;
@@ -255,6 +256,7 @@ function renderNotePanel(note, idx) {
             <div class="lore-prop"><label>注入位置</label><select id="le_pos_${idx}" class="lore-inp lore-sel">${posOpts}</select></div>
             <div class="lore-prop"><label>优先级</label><input id="le_pri_${idx}" class="lore-inp lore-pri" type="number" value="${Number(note.priority) || 0}"></div>
             <div class="lore-prop"><label>扫描深度</label><input id="le_depth_${idx}" class="lore-inp lore-pri" type="number" min="1" max="10" value="${Number(note.scan_depth) || 1}"></div>
+            <div class="lore-prop"><label>解锁阶段</label><input id="le_stage_${idx}" class="lore-inp lore-pri" type="number" min="1" max="${S && S.currentWorld && typeof S.currentWorld.lore_stage_count === "number" && S.currentWorld.lore_stage_count >= 1 ? S.currentWorld.lore_stage_count : 50}" value="${Number(note.unlock_stage) || 1}" title="该设定首次在剧情中被触及的阶段（1=开篇即可用；越大越后期才揭示）。当前剧情进度未到该阶段时，此卡片不会被注入，防剧透。"></div>
             <div class="lore-prop lore-prop-wide"><label>关联（目标ID:关系，逗号分隔）</label><input id="le_links_${idx}" class="lore-inp" value="${escapeHtml((note.links || []).map(l => `${l.target}:${l.relation || 'related'}`).join('，'))}" placeholder="如：p001:causal，p002:related"></div>
         </div>`;
 }
@@ -1141,6 +1143,7 @@ function wireNotePanel() {
     on("le_pos_", "change", (e) => { s.insert_at = e.target.value; });
     on("le_pri_", "input", (e) => { s.priority = parseInt(e.target.value) || 0; });
     on("le_depth_", "input", (e) => { s.scan_depth = Math.max(1, Math.min(10, parseInt(e.target.value) || 1)); });
+    on("le_stage_", "input", (e) => { s.unlock_stage = Math.max(1, Math.min(50, parseInt(e.target.value) || 1)); }); // ★ docs/56：解锁阶段
     on("le_links_", "input", (e) => {
         s.links = e.target.value.split(/[,，、\n]+/).map(part => {
             const [target, relation = "related"] = part.split(":").map(x => x.trim());
@@ -1228,6 +1231,7 @@ export function addLoreEntry() {
         id: "u" + Date.now().toString(36),
         category: "补充", title: "", content: "",
         keywords: [], activation_keys: [], trigger_mode: "keyword", scan_depth: 1, priority: 0,
+        unlock_stage: 1, // ★ docs/56：默认全程可用（不锁）
         insert_at: "before_user", insert_depth: 1 // ★ P0-2：默认注入位置
     });
     S._loreActiveIndex = S._loreEdit.length - 1;
@@ -1279,6 +1283,7 @@ export async function saveLoreReview() {
         s.activation_keys = (s.activation_keys || []).slice(0, 20);
         if (!s.trigger_mode) s.trigger_mode = s.activation_keys.length ? "keyword" : "always";
         s.scan_depth = (typeof s.scan_depth === "number" && s.scan_depth > 0) ? s.scan_depth : 1;
+        s.unlock_stage = (typeof s.unlock_stage === "number" && s.unlock_stage >= 1) ? Math.min(Math.floor(s.unlock_stage), 50) : 1; // ★ docs/56：解锁阶段，默认 1（不锁）
         s.insert_at = ["system", "author_note", "before_user", "after_user"].includes(s.insert_at) ? s.insert_at : "before_user"; // ★ P0-2
         s.priority = Number(s.priority) || 0;
         if (!Array.isArray(s.keywords) || !s.keywords.length) s.keywords = s.activation_keys.slice();

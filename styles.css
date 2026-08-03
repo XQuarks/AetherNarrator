@@ -3073,3 +3073,14 @@ html[data-theme="light"] .char-card select {
 .codex-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--card-border); }
 .codex-item:last-child { border-bottom: none; }
 .codex-item-title { font-size: 13px; color: var(--text); }
+
+/* ★ 57：偏离原著报告（状态面板「偏离」页签） */
+.divergence-list { display: flex; flex-direction: column; gap: 10px; }
+.divergence-row { border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px; background: var(--bg-secondary); }
+.divergence-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.divergence-turn { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.divergence-op { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: rgba(180,90,40,.15); color: #b65a28; }
+.divergence-what { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.divergence-from { font-size: 12px; color: var(--text-secondary); text-decoration: line-through; opacity: .8; }
+.divergence-to { font-size: 13px; color: var(--text); line-height: 1.5; }
+.divergence-note { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }

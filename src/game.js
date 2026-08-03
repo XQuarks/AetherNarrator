@@ -2,7 +2,7 @@
 // AetherNarrator · game.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts, ensureWorldCanon, resolveCanonContext, applyConsistencyPack, computeVariableUpdates, computeBondUpdates } from "./store.js";
+import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts, ensureWorldCanon, resolveCanonContext, applyConsistencyPack, computeVariableUpdates, computeBondUpdates, applyLoreDelta } from "./store.js";
 import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape, logError, removeSentenceWithTerm } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
 import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartDate, applySyncRules, calendarDayIndex } from "./calendar.js";
@@ -702,8 +702,13 @@ export function applyStateChanges(changes) {
     // ★ 时间线进度指针：单向只增（取 max）；推进时失效 system prompt 缓存，使下轮注入的 story_progress 值同步更新
     if (typeof changes.story_progress === "number" && isFinite(changes.story_progress)) {
         const nextSp = Math.max(1, Math.floor(changes.story_progress));
+        // ★ docs/56：若世界定义了剧情阶段总数 K（lore_stage_count），把 story_progress 上限钳制到 K，
+        //   保证「当前阶段指针」与门禁刻度对齐（AI 偶发给超出 K 的值不会让门禁失效）。
+        const k = (S.currentWorld && typeof S.currentWorld.lore_stage_count === "number" && S.currentWorld.lore_stage_count >= 1)
+            ? S.currentWorld.lore_stage_count : null;
+        const bounded = (k != null) ? Math.min(nextSp, k) : nextSp;
         const curSp = (typeof s.story_progress === "number") ? s.story_progress : 1;
-        if (nextSp > curSp) { s.story_progress = nextSp; invalidateSystemPromptCache(); }
+        if (bounded > curSp) { s.story_progress = bounded; invalidateSystemPromptCache(); }
     }
     // 注意：current_date 不在本处直接写回——时间钳制段（下方）须基于「旧时间」推导目标，
     // 若先写回则 prevSeq 失真、回退钳制失效（P1#8 真实缺陷修复）。
@@ -1229,6 +1234,17 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
         pendingVarChanges = computeVariableUpdates(resp.state_changes.variables, S.currentWorld, preVars).applied;
     }
     applyStateChanges(resp.state_changes);
+
+    // ★ 57：双轨知识库——把 AI 本回合返回的 lore_delta 应用到工作副本 activeLoreKB（原著 currentWorld.lore_kb 不动）。
+    if (resp.lore_delta && Array.isArray(resp.lore_delta) && resp.lore_delta.length) {
+        try {
+            const loreRes = applyLoreDelta(resp.lore_delta);
+            if (loreRes.applied.length && S.activeLoreKB && typeof ensureLoreEmbeddings === "function") {
+                // 局部重算被改/新增片段向量（applyLoreDelta 已将对应片段 embedding 置空，此处仅重算这些项）
+                ensureLoreEmbeddings(S.activeLoreKB).catch(() => {});
+            }
+        } catch (e) { logError("loreDelta", e); }
+    }
 
     // ★ 事件系统：支线事件固定体力消耗（进入该支线回合套用；不足已在进入前拦截，此处仅扣减）
     if (S.enteringSideEvent && S.gameState.variables && typeof S.gameState.variables.stamina === "number") {
