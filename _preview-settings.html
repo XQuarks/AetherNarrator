@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>选项页 UI 预览 · 当前 vs 新设计</title>
+<style>
+    /* ===== 变量：从 styles.css 原样抄录，保证预览与真实界面同色 ===== */
+    :root, [data-theme="dark"] {
+        --bg: #191510;
+        --bg-gradient: radial-gradient(ellipse at 50% -10%, #28221A 0%, #211B14 38%, #15110C 100%);
+        --card: rgba(217, 207, 192, 0.05);
+        --card-hover: rgba(217, 207, 192, 0.09);
+        --card-border: rgba(217, 207, 192, 0.12);
+        --card-border-hover: rgba(217, 207, 192, 0.20);
+        --text: #D9CFC0;
+        --text-secondary: rgba(217, 207, 192, 0.62);
+        --text-muted: rgba(217, 207, 192, 0.42);
+        --primary: #C9A87C;
+        --accent-rgb: 201, 168, 124;
+        --radius-s: 6px; --radius-m: 8px; --radius-l: 12px;
+        --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, Georgia, serif;
+        --sans: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+        /* 新设计专用 */
+        --seg-track: rgba(217, 207, 192, 0.07);
+        --seg-active-bg: rgba(201, 168, 124, 0.16);
+        --row-divider: rgba(217, 207, 192, 0.08);
+        --switch-off: rgba(217, 207, 192, 0.22);
+    }
+    [data-theme="light"] {
+        --bg: #E8EFEC;
+        --bg-gradient: radial-gradient(ellipse at 50% -10%, #F2F6F3 0%, #E9EFEB 42%, #DEE7E2 100%);
+        --card: rgba(244, 247, 245, 0.55);
+        --card-hover: rgba(244, 247, 245, 0.7);
+        --card-border: #C4D2CB;
+        --card-border-hover: #9FB4AB;
+        --text: #2E3A38;
+        --text-secondary: #5C6E6A;
+        --text-muted: #93A39E;
+        --primary: #3C6063;
+        --accent-rgb: 60, 96, 99;
+        --seg-track: rgba(46, 58, 56, 0.06);
+        --seg-active-bg: #FFFFFF;
+        --row-divider: rgba(46, 58, 56, 0.08);
+        --switch-off: #B9C7C1;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: var(--sans);
+        background: var(--bg);
+        background-image: var(--bg-gradient);
+        background-attachment: fixed;
+        color: var(--text);
+        min-height: 100vh;
+        padding-bottom: 60px;
+    }
+
+    /* ===== 顶部预览控制条（仅预览用，不进真实代码） ===== */
+    .preview-bar {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+        padding: 12px 16px;
+        background: var(--bg);
+        border-bottom: 1px solid var(--card-border);
+    }
+    .preview-bar .group { display: flex; gap: 6px; align-items: center; }
+    .preview-bar .tag { font-size: 11px; color: var(--text-muted); margin-right: 2px; }
+    .pv-btn {
+        padding: 6px 14px; font-size: 12px; cursor: pointer;
+        border-radius: 999px; border: 1px solid var(--card-border);
+        background: transparent; color: var(--text-secondary);
+        transition: all .15s;
+    }
+    .pv-btn.on { background: var(--primary); border-color: var(--primary); color: var(--bg); font-weight: 600; }
+
+    /* ===== 页头（两种设计共用） ===== */
+    .topbar { padding: 26px 22px 10px; max-width: 560px; margin: 0 auto; }
+    .topbar .title { font-family: var(--serif); font-size: 24px; letter-spacing: .08em; }
+    .topbar .sub { font-size: 12px; color: var(--text-muted); margin-top: 5px; letter-spacing: .04em; }
+
+    /* ================================================================
+       A. 当前设计（1:1 复刻现有 styles.css 样式）
+       ================================================================ */
+    .settings-content {
+        max-width: 560px; margin: 0 auto;
+        padding: 16px 18px;
+        display: flex; flex-direction: column; gap: 12px;
+    }
+    .settings-card {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: var(--radius-m);
+        padding: 16px 18px;
+        transition: background .15s ease, border-color .15s ease;
+    }
+    .settings-card:hover { background: var(--card-hover); }
+    .settings-label {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 14px; font-weight: 600; font-family: var(--serif);
+        letter-spacing: .04em; margin-bottom: 10px;
+    }
+    .settings-hint { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-top: 8px; }
+    .font-size-controls { display: flex; gap: 8px; }
+    .font-size-btn {
+        flex: 1; padding: 12px; border-radius: var(--radius-m);
+        border: 1px solid var(--card-border); background: var(--card);
+        color: var(--text-secondary); font-size: 14px; cursor: pointer;
+        text-align: center; transition: all .15s;
+    }
+    .font-size-btn:hover { border-color: var(--card-border-hover); background: var(--card-hover); }
+    .font-size-btn.active { color: var(--text); border-color: var(--primary); background: rgba(var(--accent-rgb),0.12); }
+    .btn {
+        padding: 12px 20px; font-size: 13px; cursor: pointer;
+        border-radius: var(--radius-m); transition: all .15s;
+        font-family: var(--sans);
+    }
+    .btn.primary { border: 1px solid var(--primary); background: var(--primary); color: var(--bg); font-weight: 600; }
+    .btn.secondary { border: 1px solid var(--card-border); background: transparent; color: var(--text-secondary); }
+    .btn.secondary:hover { border-color: var(--card-border-hover); color: var(--text); }
+    .old-checkbox { width: 16px; height: 16px; accent-color: var(--primary); }
+
+    /* ================================================================
+       B. 新设计：分组 + 分段选择器 + 开关 + 行式维护项
+       ================================================================ */
+    .n-content { max-width: 560px; margin: 0 auto; padding: 8px 18px; }
+    .n-section { margin-bottom: 26px; }
+    .n-section-title {
+        font-family: var(--serif); font-size: 12px; letter-spacing: .18em;
+        color: var(--text-muted); padding: 0 6px; margin-bottom: 8px;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .n-section-title::after { content: ""; flex: 1; height: 1px; background: var(--row-divider); }
+    .n-group {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: var(--radius-l);
+        overflow: hidden;
+    }
+    .n-row { padding: 15px 18px; }
+    .n-row + .n-row { border-top: 1px solid var(--row-divider); }
+    .n-row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .n-row-title { font-family: var(--serif); font-size: 14px; font-weight: 600; letter-spacing: .04em; }
+    .n-row-hint { font-size: 12px; color: var(--text-muted); line-height: 1.65; margin-top: 7px; }
+    .n-row-control { margin-top: 12px; }
+
+    /* 分段选择器 */
+    .seg {
+        display: flex; gap: 3px; padding: 3px;
+        background: var(--seg-track);
+        border-radius: 10px;
+    }
+    .seg button {
+        flex: 1; padding: 8px 4px; border: none; cursor: pointer;
+        background: transparent; color: var(--text-secondary);
+        font-size: 13px; font-family: var(--sans);
+        border-radius: 8px; transition: all .18s ease;
+    }
+    .seg button:hover { color: var(--text); }
+    .seg button.active {
+        background: var(--seg-active-bg);
+        color: var(--primary);
+        font-weight: 600;
+        box-shadow: 0 1px 4px rgba(0,0,0,.18);
+    }
+    [data-theme="light"] .seg button.active { color: var(--primary); }
+
+    /* 开关 */
+    .switch {
+        position: relative; width: 46px; height: 27px; flex-shrink: 0;
+        border: none; cursor: pointer; border-radius: 999px;
+        background: var(--switch-off); transition: background .2s ease;
+        padding: 0;
+    }
+    .switch::after {
+        content: ""; position: absolute; top: 2.5px; left: 3px;
+        width: 22px; height: 22px; border-radius: 50%;
+        background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+        transition: transform .2s ease;
+    }
+    .switch.on { background: var(--primary); }
+    .switch.on::after { transform: translateX(18px); }
+
+    /* 维护行：左文右钮 */
+    .n-action-btn {
+        padding: 7px 15px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+        border-radius: 999px; border: 1px solid var(--card-border);
+        background: transparent; color: var(--text-secondary);
+        font-family: var(--sans); transition: all .15s;
+    }
+    .n-action-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .n-action-btn.accent { border-color: rgba(var(--accent-rgb), .45); color: var(--primary); }
+
+    .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- 预览控制条（不会进真实代码） -->
+<div class="preview-bar">
+    <div class="group">
+        <span class="tag">设计</span>
+        <button class="pv-btn on" id="pvNew" onclick="showDesign('new')">新设计</button>
+        <button class="pv-btn" id="pvOld" onclick="showDesign('old')">当前设计</button>
+    </div>
+    <div class="group">
+        <span class="tag">主题</span>
+        <button class="pv-btn on" id="pvDark" onclick="setTheme('dark')">夜间</button>
+        <button class="pv-btn" id="pvLight" onclick="setTheme('light')">日间</button>
+    </div>
+</div>
+
+<header class="topbar">
+    <div class="title">选项</div>
+    <div class="sub">API、存档与世界管理</div>
+</header>
+
+<!-- ============ A. 当前设计 ============ -->
+<div class="settings-content hidden" id="designOld">
+    <div class="settings-card">
+        <label class="settings-label">字体大小</label>
+        <div class="font-size-controls">
+            <button class="font-size-btn">小</button>
+            <button class="font-size-btn active">中</button>
+            <button class="font-size-btn">大</button>
+        </div>
+    </div>
+    <div class="settings-card">
+        <label class="settings-label">阅读速度</label>
+        <div class="font-size-controls">
+            <button class="font-size-btn">慢</button>
+            <button class="font-size-btn active">标准</button>
+            <button class="font-size-btn">快</button>
+            <button class="font-size-btn">瞬显</button>
+        </div>
+        <div class="settings-hint">调节 AI 剧情逐字浮现与流式刷新的节奏；「瞬显」直接显示整段。游玩中也可在「游戏设置」里调叙事节奏与字数。</div>
+    </div>
+    <div class="settings-card">
+        <label class="settings-label">
+            <input type="checkbox" class="old-checkbox" checked>
+            知识库修订需我手动确认
+        </label>
+        <div class="settings-hint">开启后，AI 回写知识库（含记忆晋升）会弹窗让你确认；关闭时自动同意并提示「知识库已更新」。</div>
+    </div>
+    <div class="settings-card" style="text-align:center;">
+        <button class="btn primary">导出调试日志</button>
+    </div>
+    <div class="settings-card">
+        <label class="settings-label">清除向量索引缓存</label>
+        <div class="settings-hint">知识库向量索引会缓存在浏览器本地（IndexedDB）以加快检索。编辑知识库后旧索引会自动失效，但会残留占用空间。点此可手动清空所有索引缓存，下次进入世界会重新构建（不影响存档与剧情）。</div>
+        <button class="btn secondary" style="margin-top:10px;">清除索引缓存</button>
+    </div>
+</div>
+
+<!-- ============ B. 新设计 ============ -->
+<div class="n-content" id="designNew">
+
+    <!-- 显示 -->
+    <div class="n-section">
+        <div class="n-section-title">显 示</div>
+        <div class="n-group">
+            <div class="n-row">
+                <div class="n-row-head"><span class="n-row-title">字体大小</span></div>
+                <div class="n-row-control">
+                    <div class="seg" data-seg>
+                        <button>小</button>
+                        <button class="active">中</button>
+                        <button>大</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 阅读 -->
+    <div class="n-section">
+        <div class="n-section-title">阅 读</div>
+        <div class="n-group">
+            <div class="n-row">
+                <div class="n-row-head"><span class="n-row-title">阅读速度</span></div>
+                <div class="n-row-control">
+                    <div class="seg" data-seg>
+                        <button>慢</button>
+                        <button class="active">标准</button>
+                        <button>快</button>
+                        <button>瞬显</button>
+                    </div>
+                </div>
+                <div class="n-row-hint">调节 AI 剧情逐字浮现与流式刷新的节奏；「瞬显」直接显示整段。游玩中也可在「游戏设置」里调叙事节奏与字数。</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识库 -->
+    <div class="n-section">
+        <div class="n-section-title">知 识 库</div>
+        <div class="n-group">
+            <div class="n-row">
+                <div class="n-row-head">
+                    <span class="n-row-title">知识库修订需我手动确认</span>
+                    <button class="switch on" onclick="this.classList.toggle('on')" aria-label="知识库修订确认开关"></button>
+                </div>
+                <div class="n-row-hint">开启后，AI 回写知识库（含记忆晋升）会弹窗让你确认；关闭时自动同意并提示「知识库已更新」。</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 维护 -->
+    <div class="n-section">
+        <div class="n-section-title">维 护</div>
+        <div class="n-group">
+            <div class="n-row">
+                <div class="n-row-head">
+                    <span class="n-row-title">导出调试日志</span>
+                    <button class="n-action-btn accent">导出</button>
+                </div>
+                <div class="n-row-hint">排查问题时，将运行日志导出为文件发给开发者。</div>
+            </div>
+            <div class="n-row">
+                <div class="n-row-head">
+                    <span class="n-row-title">清除向量索引缓存</span>
+                    <button class="n-action-btn">清除</button>
+                </div>
+                <div class="n-row-hint">知识库向量索引缓存在浏览器本地（IndexedDB）以加快检索。编辑知识库后旧索引会自动失效，但会残留占用空间。清除后下次进入世界会重新构建，不影响存档与剧情。</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    function showDesign(which) {
+        document.getElementById('designNew').classList.toggle('hidden', which !== 'new');
+        document.getElementById('designOld').classList.toggle('hidden', which !== 'old');
+        document.getElementById('pvNew').classList.toggle('on', which === 'new');
+        document.getElementById('pvOld').classList.toggle('on', which === 'old');
+    }
+    function setTheme(t) {
+        document.documentElement.setAttribute('data-theme', t);
+        document.getElementById('pvDark').classList.toggle('on', t === 'dark');
+        document.getElementById('pvLight').classList.toggle('on', t === 'light');
+    }
+    // 分段选择器交互（仅预览）
+    document.querySelectorAll('[data-seg]').forEach(seg => {
+        seg.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                seg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+    });
+</script>
+</body>
+</html>

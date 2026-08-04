@@ -68,6 +68,11 @@
             --text-2: rgba(217, 207, 192, 0.64);
             --text-3: rgba(217, 207, 192, 0.40);
             --primary-strong: #DDBE92;
+            /* 选项页 v2：分段选择器 / 开关 / 分组行（2026-08-04） */
+            --seg-track: rgba(217, 207, 192, 0.07);
+            --seg-active-bg: rgba(201, 168, 124, 0.16);
+            --row-divider: rgba(217, 207, 192, 0.08);
+            --switch-off: rgba(217, 207, 192, 0.22);
             --blur: saturate(140%) blur(14px);
             --serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", SimSun, Georgia, serif;
             --sans: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
@@ -121,6 +126,11 @@
             --text-3: rgba(46,58,56,0.42);
             --primary-strong: #28484B;
             --accent-rgb: 60, 96, 99;
+            /* 选项页 v2（日间） */
+            --seg-track: rgba(46, 58, 56, 0.06);
+            --seg-active-bg: #FFFFFF;
+            --row-divider: rgba(46, 58, 56, 0.08);
+            --switch-off: #B9C7C1;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -2748,6 +2758,67 @@ html[data-theme="light"] .char-card select {
     line-height: 1.6;
     margin-top: 8px;
 }
+
+/* ---- ★ 选项页 v2：分组 + 分段选择器 + 开关（2026-08-04，旧 .settings-card 保留给游戏设置弹窗） ---- */
+.settings-content { gap: 0; } /* v2：分区自带下间距，不再用卡片间 gap */
+.st-section { margin-bottom: 26px; }
+.st-section-title {
+    font-family: var(--serif); font-size: 12px; letter-spacing: .18em;
+    color: var(--text-muted); padding: 0 6px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 10px;
+}
+.st-section-title::after { content: ""; flex: 1; height: 1px; background: var(--row-divider); }
+.st-group {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-l);
+    overflow: hidden;
+}
+[data-theme="light"] .st-group { background: rgba(244, 247, 245, 0.55); }
+.st-row { padding: 15px 18px; }
+.st-row + .st-row { border-top: 1px solid var(--row-divider); }
+.st-row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.st-row-title { font-family: var(--serif); font-size: 14px; font-weight: 600; letter-spacing: .04em; }
+.st-row-hint { font-size: 12px; color: var(--text-muted); line-height: 1.65; margin-top: 7px; }
+.st-row-control { margin-top: 12px; }
+/* 分段选择器（药丸轨道 + 浮起选中项；.active 由 theme.js 按 id 切换） */
+.seg { display: flex; gap: 3px; padding: 3px; background: var(--seg-track); border-radius: 10px; }
+.seg-btn {
+    flex: 1; padding: 8px 4px; border: none; cursor: pointer;
+    background: transparent; color: var(--text-secondary);
+    font-size: 13px; font-family: var(--sans);
+    border-radius: 8px; transition: all .18s ease;
+}
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active {
+    background: var(--seg-active-bg); color: var(--primary);
+    font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.18);
+}
+/* iOS 风开关（保留真实 checkbox，JS 零改动；render.js 写 .checked 即生效） */
+.switch { position: relative; display: inline-block; width: 46px; height: 27px; flex-shrink: 0; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
+.switch-knob {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: var(--switch-off); transition: background .2s ease;
+}
+.switch-knob::after {
+    content: ""; position: absolute; top: 2.5px; left: 3px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    transition: transform .2s ease;
+}
+.switch input:checked + .switch-knob { background: var(--primary); }
+.switch input:checked + .switch-knob::after { transform: translateX(18px); }
+.switch input:focus-visible + .switch-knob { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* 维护行按钮（左文右钮） */
+.st-action-btn {
+    padding: 7px 15px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+    border-radius: 999px; border: 1px solid var(--card-border);
+    background: transparent; color: var(--text-secondary);
+    font-family: var(--sans); transition: all .15s;
+}
+.st-action-btn:hover { border-color: var(--primary); color: var(--primary); }
+.st-action-btn.accent { border-color: rgba(var(--accent-rgb), .45); color: var(--primary); }
 
 /* ---- 底部导航（全尺寸显示；游戏屏由 .hidden 隐藏） ---- */
 .bottom-nav {
