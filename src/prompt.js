@@ -19,7 +19,8 @@ let cachedSystemCats = new Set();
 // 让开场白从原文第 1 章第 1 段出发（与下方 sourceContent 全文参考材料的 sourceCap 区分）。
 const OPENING_SRC_CHARS = 3000;
 
-export function buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap = 8000, loreCountMin = null, stylePreset = null) {
+// ★ docs/58：移除 type 参数（类型概念已删除）；新增 pov 参数（solo/ensemble）控制主角/群像剧指令。
+export function buildWorldGenerationPrompt(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap = 8000, loreCountMin = null, stylePreset = null) {
     const plotFreedomDesc = {
         1: "严格遵循原著 — 关键剧情节点、重要事件必须按原著发生，AI 不得偏移主线。",
         2: "以原著为主 — 主线遵循原著，但在支线和日常互动上可以有限发散。",
@@ -46,8 +47,9 @@ export function buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourc
         styleSection = styleRefDesc[styleRef] || styleRefDesc.none;
     }
 
-    const ipNameSection = (type === "ip" && ipName)
-        ? `\n- 作品名称：${ipName}\n  请根据你对「${ipName}」这部作品的了解，从训练数据中检索其世界观设定、核心人物、力量体系、重要事件、叙事风格等要素，用于生成游戏配置。如果你对该作品不够了解，请在知识库中如实标注"信息不确定"。`
+    // ★ docs/58：去掉「仅改编IP类型才注入」限制——只要填了参考的世界（ipName）就注入。
+    const ipNameSection = (ipName && String(ipName).trim())
+        ? `\n- 参考的世界（作品名称）：${ipName}\n  请根据你对「${ipName}」这部作品的了解，从训练数据中检索其世界观设定、核心人物、力量体系、重要事件、叙事风格等要素，用于生成游戏配置。如果你对该作品不够了解，请在知识库中如实标注"信息不确定"。`
         : "";
 
     const sourceSection = sourceContent
@@ -71,9 +73,11 @@ export function buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourc
 # 输入
 
 - 世界名称：${name}
-- 类型：${type === "ip" ? "基于已有 IP / 小说" : "原创世界观"}
+${ipName ? `- 参考的世界（作品名称）：${ipName}` : ""}
 - 世界观描述：${desc}
-- 主角设定：${hero || "未指定，由你设计"}
+${pov === "ensemble"
+        ? `- 叙事视角：群像剧（无单一主角）。请设计戏份均衡、彼此关联的多角色群像，玩家以「参与者」视角推进剧情，不绑定单一主人公。`
+        : `- 主角设定：${hero || "未指定，由你设计（单人主角模式，AI 按世界观自动设计主角身份/背景/能力）"}`}
 
 **重要：主角设定描述的是角色当前已经具备的能力、身份、背景。这是已经成立的事实，不是"成长起点"。** 例如：
 - 若主角设定为"催眠之王"，则 initial_state 中应体现其催眠能力已臻化境，relationships 中应包含因催眠能力建立的声望/人脉/敌人。**不得**将其设为"催眠初学者""刚接触催眠"。
@@ -148,9 +152,9 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - 让玩家立即感受身处该世界、知晓处境与初步目标
    - 结尾暗示第一个行动方向，但不要强制
    - 篇幅适中（200-500字）
-   - 兜底：无【原文开头】段（纯描述生成的世界）时，按原逻辑基于【世界观描述】+【主角设定】写富有氛围感的开场。
+   - 兜底：无【原文开头】段（纯描述生成的世界）时，按原逻辑基于【世界观描述】（+【主角设定】或群像剧设定）写富有氛围感的开场。
 
-6. tags: 字符串数组（建议 3-6 个），用于世界列表/卡片上展示的「作品标签」。请由你根据世界的题材、风格、核心设定**自由判断**最合适的标签，**不受任何固定词表限制**——你可以给出任意贴切的短词（2-6字）。例如：「双界穿梭」「意识穿越」「时间独立」「赛博朋克」「蒸汽朋克」「克苏鲁式」「废土求生」「宫廷权谋」「校园异能」「末世丧尸」「轻松日常」「硬核生存」「群像」「多结局」「暗黑童话」「废土公路」等。要求：短小、具体、有辨识度；**不要**写与下方 type 徽章重复的内容（type 徽章已表明世界来源：原创 / 同人 / 改编IP / 共享宇宙 / 公共领域）。
+6. tags: 字符串数组（建议 3-6 个），用于世界列表/卡片上展示的「作品标签」。请由你根据世界的题材、风格、核心设定**自由判断**最合适的标签，**不受任何固定词表限制**——你可以给出任意贴切的短词（2-6字）。例如：「双界穿梭」「意识穿越」「时间独立」「赛博朋克」「蒸汽朋克」「克苏鲁式」「废土求生」「宫廷权谋」「校园异能」「末世丧尸」「轻松日常」「硬核生存」「群像」「多结局」「暗黑童话」「废土公路」等。要求：短小、具体、有辨识度。
 
 7. initial_choices: 开场选项数组（2-4个），每个选项包含 {text: "选项文本", hint: "简短提示"}，用于玩家首次进入时选择第一个行动。选项要符合世界观和角色设定，引导而非强制。
 
@@ -163,7 +167,7 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
 - 所有内容要符合该世界的力量体系，不要跨世界观混杂。
 - 请在 initial_state.tags 中按世界类型设定时代标签：古代/武侠/仙侠→era_ancient；魔法/中世纪→era_medieval；近代工业→era_industrial；现代都市→era_modern；科幻未来→era_future。该标签供引擎判定现代/科技概念是否被允许出现（解锁世界观禁律）。
 - 若剧情推进需要（如跨越时代、获得特定物品、关键 NPC 在场），可在每轮的 state_changes 中返回 tags:{add:[...],remove:[...]} 与 present_npcs:{add:[...],remove:[...]}，用于动态解锁禁律。例如时代推进到现代时 add "era_modern"，则手机/汽车等概念不再被视为违和；玩家合法持有火器时可在物品上加 tags:["has_firearm"] 来解锁枪械相关概念。
-- ${["ip","fan"].includes(type) ? "改编IP/同人作品不要篡改原作不可改变的核心设定和关键角色命运。" : type === "shared" ? "共享宇宙（如后室/SCP/克苏鲁神话）请保留核心设定梗概，细节可自由发挥。" : "原创/公共领域世界请保持内部逻辑自洽。"}
+- ${ipName ? "参考作品改编（已填写「参考的世界」）：不要篡改该作品不可改变的核心设定和关键角色命运。" : "原创/公共领域世界请保持内部逻辑自洽。"}
 - attributes / relationships / skills 全部使用文字描述，不要输出数字。
 - 输出必须是合法 JSON，不要包含 markdown 代码块标记。`;
 }
@@ -309,8 +313,8 @@ export function buildSystemPrompt() {
     // ★ A2 世界观禁律（生成前约束；自由度 ≥4 时 getBannedConcepts 返回空，自动不注入）
     const bannedConcepts = getBannedConcepts();
     if (bannedConcepts.length) {
-        const worldType = (S.currentWorld && S.currentWorld.type) ? S.currentWorld.type : "架空";
-        systemPrompt += "\n\n# 世界观禁律（生成前约束）\n\n本世界为「" + worldType + "」背景，请严格避免让以下现代/科技概念自行出现在叙事中（若玩家在游戏内明确、合理地要求引入，可酌情处理，但请勿无故自行添加）：\n" + bannedConcepts.map((c, i) => (i + 1) + ". " + c).join("\n");
+        const worldName = (S.currentWorld && S.currentWorld.name) ? S.currentWorld.name : "本世界";
+        systemPrompt += "\n\n# 世界观禁律（生成前约束）\n\n本世界为「" + worldName + "」背景，请严格避免让以下现代/科技概念自行出现在叙事中（若玩家在游戏内明确、合理地要求引入，可酌情处理，但请勿无故自行添加）：\n" + bannedConcepts.map((c, i) => (i + 1) + ". " + c).join("\n");
     }
 
     // ★ A2：一致性包补充约束（必读设定 / 文风锚点 / 用户关键偏离）
@@ -525,22 +529,28 @@ export function buildTimeModeRules() {
 export function buildHeroContext() {
     // ★ 身份锚点：始终注入，与剧情自由度(plot_freedom)无关。
     // 即便创建时选了「完全自由」，AI 也恒定知道「你扮演的是谁」，不会连主角身份都遗忘或跳出角色。
+    // ★ docs/58：群像剧（pov=ensemble）世界以「参与者」视角推进，无固定单一主人公。
+    const isEnsemble = !!(S.currentWorld && S.currentWorld.pov === "ensemble");
     const hName = S.gameState && S.gameState.name;
     const hRole = (S.currentWorld && S.currentWorld.hero)
         || (S.gameState && S.gameState.background)
         || (S.gameState && S.gameState.personality && S.gameState.personality.length ? S.gameState.personality.join("、") : "");
     let anchor;
-    if (hName) {
+    if (isEnsemble) {
+        anchor = "【身份锚点】本世界为群像剧，没有单一固定的主人公；你以「参与者」视角推进剧情，始终是你自己（玩家），不得把自己当作 AI、助手或旁白，也不得长期独占某一既定角色的视角。";
+    } else if (hName) {
         anchor = `【身份锚点】你始终扮演：${hName}${hRole ? "（" + hRole + "）" : ""}。无论剧情如何自由发展，这一身份恒定不变，不得把自己替换成其他角色或 AI 本身。`;
     } else {
         anchor = "【身份锚点】你始终是玩家所扮演的主角。无论剧情如何自由发展，都不得把自己当作 AI、助手或旁白，必须以第一人称推进玩家角色的视角。";
     }
 
     let hero = "";
-    if (S.currentWorld && S.currentWorld.hero) {
+    if (isEnsemble) {
+        hero = "- 本世界为群像剧，无单一主角设定；请保持多角色戏份均衡，玩家以参与者身份与各方角色互动。";
+    } else if (S.currentWorld && S.currentWorld.hero) {
         hero = "- 主角设定（来自玩家创建世界时填写）：" + S.currentWorld.hero;
     }
-    if (S.gameState) {
+    if (S.gameState && !isEnsemble) {
         const parts = [];
         if (S.gameState.name) parts.push("姓名：" + S.gameState.name);
         if (S.gameState.background) parts.push("背景：" + S.gameState.background);

@@ -10,7 +10,7 @@ import { applyFontSize, applyTheme, changeFontSize, toggleTheme, changeNarrative
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
-import { closeModal, closeStatusPanel, hideStatusPanel, onWorldTypeChange, renderSaveList, renderWorldList, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, selectTagPref, onCustomTagInput, collectStylePrefs, showToast, editWorldType, onEditWorldTypeChange, saveWorldTypeEdit, renderEventPanel, showModal, openSaveMenu, openWorldSaveChooser, showEndingTracker } from "./render.js";
+import { closeModal, closeStatusPanel, hideStatusPanel, renderSaveList, renderWorldList, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, selectTagPref, onCustomTagInput, collectStylePrefs, showToast, renderEventPanel, showModal, openSaveMenu, openWorldSaveChooser, showEndingTracker } from "./render.js";
 import { selectCwModule, selectStyleTemplate, openWorldBookFromWizard, updateNarrativeStyleCount } from "./wizard-editor.js";
 import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, removeBannedSentence, ignoreBannedTerm, regenerateTurn, startPrivateChat, endPrivateChat, requestDaily, commitChannelAction, addContactChannelRow, removeContactChannelRow } from "./game.js";
 import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame, createOrUpdateSave, saveAsNewSave } from "./save.js";
@@ -194,7 +194,7 @@ const ACTIONS = {
     updatePlotFreedomLabel: (el) => updatePlotFreedomLabel(el.value),
     updateWorldTempLabel: () => updateWorldTempLabel(),
     worldTempChanged: () => updateTcTempLabel(),
-    onWorldTypeChange: (el) => onWorldTypeChange(el.value),
+    // ★ docs/58：世界类型下拉已移除，onWorldTypeChange 不再存在
     onProviderChange: (el) => applyProviderPreset(el.value),
     handleFileSelect: (el, e) => handleFileSelect(e),
     // ★ W2-Style：创建向导编辑器
@@ -210,9 +210,7 @@ const ACTIONS = {
     startGame: (el) => startGame(el.dataset.opts ? JSON.parse(el.dataset.opts) : undefined),
     // 世界详情/存档（动态生成）
     showWorldDetail: (el) => showWorldDetail(el.dataset.id),
-    editWorldType: (el) => editWorldType(el.dataset.id),
-    onEditWorldTypeChange: (el) => onEditWorldTypeChange(el.value),
-    saveWorldTypeEdit: (el) => saveWorldTypeEdit(el),
+    // ★ docs/58：世界类型编辑动作已移除（editWorldType / onEditWorldTypeChange / saveWorldTypeEdit）
     continueLatestSave: (el) => continueLatestSave(el.dataset.id),
     confirmRestart: (el) => confirmRestart(el.dataset.id),
     doRestartConfirmed: () => doRestartConfirmed(),

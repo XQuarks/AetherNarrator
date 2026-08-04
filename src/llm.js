@@ -33,11 +33,12 @@ export function logTurnStats(hit, miss, total, usage) {
     });
 }
 
-export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap = 8000, loreCountMin = null, stylePreset = null) {
+// ★ docs/58：移除 type 参数；新增 pov 参数（solo/ensemble）控制主角/群像剧。
+export async function callWorldGenerationLLM(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap = 8000, loreCountMin = null, stylePreset = null) {
     const mock = document.getElementById("mockMode").checked;
     if (mock) {
         await sleep(1200);
-        return mockGenerateWorld(name, type, desc, hero, ipName);
+        return mockGenerateWorld(name, desc, hero, ipName, pov);
     }
 
     const { baseUrl, corsProxy, apiKey, model } = readApiInputs();
@@ -45,10 +46,10 @@ export async function callWorldGenerationLLM(name, type, desc, hero, ipName, sou
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
 
-    const prompt = buildWorldGenerationPrompt(name, type, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, sourceCap, loreCountMin, stylePreset);
+    const prompt = buildWorldGenerationPrompt(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap, loreCountMin, stylePreset);
     return await callStructured([{ role: "system", content: prompt }], "generate_world", {
         temperature: 0.7, maxTokens: 8192,
-        mockFn: () => mockGenerateWorld(name, type, desc, hero, ipName)
+        mockFn: () => mockGenerateWorld(name, desc, hero, ipName, pov)
     });
 }
 
@@ -145,7 +146,8 @@ export async function extractLoreFromSource(sourceContent, name, ipName, styleRe
     return { ip: name, snippets: allSnippets };
 }
 
-export function mockGenerateWorld(name, type, desc, hero, ipName) {
+// ★ docs/58：移除 type 参数；新增 pov 参数（solo/ensemble）。
+export function mockGenerateWorld(name, desc, hero, ipName, pov = "solo") {
     const isXianxia = /仙|侠|修|道|武|玄|魔/.test(name + desc);
     const isMagicSchool = /霍格沃茨|哈利|魔法|学院|巫师/.test(name + desc);
 

@@ -16,11 +16,12 @@ import { createCthulhuWorld, createUrbanLegendWorld, createDualWorld } from "../
 globalThis.document = { getElementById: () => ({ checked: true }) };
 
 test("提示词：buildWorldGenerationPrompt 含顶层 tags 字段且要求自由判断", () => {
-    const p = buildWorldGenerationPrompt("赛博都市", "original", "赛博朋克未来都市", "主角", null, "", "none", undefined, 3, "");
+    // ★ docs/58：签名 (name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, ...)
+    //   类型徽章概念已移除，不再提示「不要与 type 徽章重复」。
+    const p = buildWorldGenerationPrompt("赛博都市", "赛博朋克未来都市", "主角", null, "", "none", undefined, 3, "", "solo");
     assert.ok(p.includes("tags"), "prompt 应包含 tags 字段要求");
     assert.ok(p.includes("自由判断") || p.includes("不受任何固定词表限制"), "应明说不受固定词表限制");
     assert.ok(p.includes("赛博朋克"), "示例标签应出现「赛博朋克」");
-    assert.ok(p.includes("原创") && p.includes("共享宇宙"), "应提示不要与 type 徽章（原创/同人/改编IP/共享宇宙/公共领域）重复");
 });
 
 test("sanitizeWorldConfig：放行并清洗 tags", () => {
@@ -43,13 +44,14 @@ test("sanitizeWorldConfig：无 tags 字段时回退为空数组", () => {
 });
 
 test("mockGenerateWorld：返回自由标签（含非 18 词表的词）", () => {
-    const magic = mockGenerateWorld("霍格沃茨", "original", "魔法学院", "", null);
+    // ★ docs/58：签名 (name, desc, hero, ipName, pov)
+    const magic = mockGenerateWorld("霍格沃茨", "魔法学院", "", null, "solo");
     assert.ok(Array.isArray(magic.tags) && magic.tags.length > 0, "魔法世界应返回标签");
 
-    const xian = mockGenerateWorld("蜀山", "original", "修仙", "", null);
+    const xian = mockGenerateWorld("蜀山", "修仙", "", null, "solo");
     assert.ok(xian.tags.includes("修仙世界"), "仙侠分支应有「修仙世界」");
 
-    const cyber = mockGenerateWorld("赛博都市", "original", "赛博朋克未来都市", "", null);
+    const cyber = mockGenerateWorld("赛博都市", "赛博朋克未来都市", "", null, "solo");
     assert.ok(cyber.tags.includes("赛博朋克"), "应生成非 18 词表的自由标签「赛博朋克」");
 });
 
@@ -70,7 +72,8 @@ test("pickWorldTags：优先用 AI 标签，缺失时正则兜底且不含来源
 });
 
 test("analyzeWorldTags：不再写入来源标签", () => {
-    const r = analyzeWorldTags("测试", "修真", "", "original", null);
+    // ★ docs/58：签名 (name, desc, hero, ipName)
+    const r = analyzeWorldTags("测试", "修真", "", null);
     assert.ok(!r.includes("原创"), "analyzeWorldTags 不应再写「原创」");
     assert.ok(r.includes("修仙"), "仍应命中题材标签");
 });

@@ -498,7 +498,7 @@ export function ensureWorldCanon(world) {
     if (!world || typeof world !== "object") return;
     if (!world.canon || typeof world.canon !== "object") {
         world.canon = {
-            mode: (world.ip_name || world.type === "ip") ? "ip_adaptation" : "original",
+            mode: world.ip_name ? "ip_adaptation" : "original",
             ip_name: world.ip_name || null,
             source: "none",
             detected: [],
@@ -508,7 +508,7 @@ export function ensureWorldCanon(world) {
         };
     }
     const c = world.canon;
-    if (c.mode == null) c.mode = (c.ip_name || world.type === "ip") ? "ip_adaptation" : "original";
+    if (c.mode == null) c.mode = c.ip_name ? "ip_adaptation" : "original";
     if (c.source == null) c.source = "none";
     if (!Array.isArray(c.detected)) c.detected = [];
     if (typeof c.key_divergences !== "string") c.key_divergences = "";
@@ -745,9 +745,10 @@ export function resolveCanonContext({ type, ipName, desc, sourceFileContent } = 
     } else if (detected.length > 1) {
         conflicts.push({ type: "ambiguous_ip", detected });
     }
-    const mode = (type === "ip" || type === "ip_adaptation" || userIp) ? "ip_adaptation" : "original";
+    // ★ docs/58：移除 type 依赖——mode/ip_name 只认 ipName（参考的世界）；
+    //   描述里检测到作品名仅用于「歧义/冲突」提示，不再自动认定为改编来源。
+    const mode = userIp ? "ip_adaptation" : "original";
     let ip_name = userIp || null;
-    if (!ip_name && type === "ip" && detected.length === 1) ip_name = detected[0];
     const source = sourceFileContent ? "uploaded_text" : "description";
     return { mode, ip_name, source, detected, conflicts };
 }

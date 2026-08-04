@@ -6,10 +6,10 @@ import assert from "node:assert/strict";
 import { buildWorldGenerationPrompt } from "../src/prompt.js";
 
 // 统一用最小参数调用；sourceContent 为唯一变量
+// ★ docs/58：签名已改为 (name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, ...)
 function gen(opts = {}) {
     return buildWorldGenerationPrompt(
         opts.name || "测试世界",
-        opts.type || "original",
         opts.desc || "一个被读者改造为中世纪魔法背景的世界",
         opts.hero || "赫敏·格兰杰（读者把主角从哈利改为赫敏）",
         opts.ipName || null,
@@ -17,7 +17,8 @@ function gen(opts = {}) {
         opts.styleRef || "none",
         opts.customStyle || undefined,
         opts.plotFreedom || 3,
-        opts.worldPrefix || ""
+        opts.worldPrefix || "",
+        opts.pov || "solo"
     );
 }
 

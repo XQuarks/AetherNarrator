@@ -177,7 +177,13 @@ export function initModuleToggles() {
         if (m.core) cb.disabled = true; // 核心模块不可关
         const name = document.createElement("span");
         name.className = "module-name";
-        name.textContent = m.name + (m.core ? "（核心）" : "");
+        name.textContent = m.name;
+        if (m.core) {
+            const badge = document.createElement("span");
+            badge.className = "module-core-badge";
+            badge.textContent = "核心";
+            name.appendChild(badge);
+        }
         const desc = document.createElement("span");
         desc.className = "module-desc";
         desc.textContent = m.desc;

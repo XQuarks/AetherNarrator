@@ -478,11 +478,11 @@ export function normFact(t) {
         .toLowerCase();
 }
 
-export function analyzeWorldTags(name, desc, hero, type, ipName) {
+export function analyzeWorldTags(name, desc, hero, ipName) {
     const clues = [name || "", desc || "", hero || "", ipName || ""].join(" ");
     const tags = [];
 
-    // 题材分类（仅题材标签；世界来源类型由渲染层的 type 徽章统一展示：原创 / 同人 / 改编IP / 共享宇宙 / 公共领域，不再重复写入）
+    // 题材分类（仅题材标签；世界来源类型概念已移除——来源信息统一由渲染层「参考作品」展示）
     const genreRules = [
         { pattern: /修仙|修真|仙|道|玄|渡劫|飞升|筑基|金丹|元婴/, tag: "修仙" },
         { pattern: /武侠|江湖|武林|门派|剑|侠|轻功|内功/, tag: "武侠" },
@@ -520,7 +520,7 @@ export function pickWorldTags(generated, meta) {
     if (generated && Array.isArray(generated.tags) && generated.tags.length) {
         return generated.tags;
     }
-    return analyzeWorldTags(meta.name, meta.desc, meta.hero, meta.type, meta.ipName);
+    return analyzeWorldTags(meta.name, meta.desc, meta.hero, meta.ipName);
 }
 
 export function dedupeStrings(arr) {
@@ -885,6 +885,8 @@ export function computeWorldCompletion(world) {
     const rules = Array.isArray(w.rules) ? w.rules : [];
     const eventSnippets = snippets.filter(s => s && s.trigger && typeof s.trigger === "object");
 
+    // ★ docs/58：主角设定改为可选维度——群像剧（pov=ensemble）世界本就无需单一主角，
+    //   hero 不计入「完成度」分母，避免它阻塞「圆满」评级。
     const items = [
         { key: "title", label: "标题", done: has(w.name), hint: "世界名称" },
         { key: "worldview", label: "世界观", done: has(w.desc), hint: "去编辑世界观描述" },
@@ -892,11 +894,13 @@ export function computeWorldCompletion(world) {
         { key: "characters", label: "≥1 角色", done: characters.length >= 1, hint: "去添加角色卡" },
         { key: "rules", label: "游玩系统", done: rules.length >= 1, hint: "去添加规则" },
         { key: "events", label: "重要事件", done: eventSnippets.length >= 1, hint: "去知识库给片段挂触发" },
-        { key: "hero", label: "主角设定", done: has(w.hero), hint: "去补主角动机/身份" }
+        { key: "hero", label: "主角设定", done: has(w.hero), hint: "去补主角动机/身份", optional: true }
     ];
 
-    const done = items.filter(i => i.done).length;
-    const total = items.length;
+    // 计入评级的仅「必填维度」（不含 optional）
+    const required = items.filter(i => !i.optional);
+    const done = required.filter(i => i.done).length;
+    const total = required.length;
     const pct = total ? Math.round((done / total) * 100) : 0;
     let grade;
     if (done >= total) grade = "圆满";

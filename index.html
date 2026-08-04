@@ -373,7 +373,6 @@
             <nav class="cw-nav">
                 <button type="button" class="cw-nav-item active" data-action="selectCwModule" data-module="basic">基本信息</button>
                 <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="style">叙事风格</button>
-                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="world">世界观</button>
                 <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="modules">玩法模块</button>
                 <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="time">时间系统</button>
                 <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="gen">生成设置</button>
@@ -382,36 +381,22 @@
                 <!-- 模块 1：基本信息 -->
                 <section class="cw-module active" data-module="basic">
                     <p class="cw-step-title">基本信息</p>
-                    <p class="cw-step-hint">先给世界起名、选类型，可上传原著作为参考。</p>
+                    <p class="cw-step-hint">先给世界起名，可填写参考作品、上传原著，再描述世界观设定。</p>
                     <div class="form-group">
-                        <label>世界名称</label>
+                        <label>世界名称 <span class="req-tag">必填</span></label>
                         <input type="text" id="worldName" placeholder="例如：剑来、哈利波特、原创仙侠">
-                    </div>
-                    <div class="form-group">
-                        <label>世界类型</label>
-                        <select id="worldType" class="lore-inp lore-sel" data-action="onWorldTypeChange" data-event="change">
-                            <option value="original">原创世界观</option>
-                            <option value="fan">同人 · 基于具体作品二创</option>
-                            <option value="ip">改编 IP · 商业版权作品</option>
-                            <option value="shared">共享宇宙 · 社群共创设定</option>
-                            <option value="public_domain">公共领域 · 版权已过期</option>
-                        </select>
                     </div>
                     <div class="conditional-field show" id="ipNameField">
                         <div class="form-group">
-                            <label>作品名称 <span id="ipNameReqTag" class="req-tag">必填</span></label>
+                            <label>参考的世界（作品名，可选）</label>
                             <input type="text" id="ipName" placeholder="例如：剑来、哈利波特、三体、红楼梦...">
-                            <div class="hint">AI 将根据作品名称从训练数据中检索相关设定、人物、力量体系来生成世界观。</div>
-                            <div class="hint opt-hint" id="ipNameOptHint" style="display:none;color:var(--primary);">已上传源文件，作品名称可留空——AI 将以你上传的原文为准生成世界观，名称仅作辅助参考。</div>
-                        </div>
-                        <div class="upload-tip-box">
-                            <div class="upload-tip-title">建议上传源文件以获得更精准的生成效果</div>
-                            <div class="upload-tip-desc">仅凭作品名称，AI 依赖自身训练数据，可能存在遗漏或偏差。上传原著 TXT/DOCX 文件后，AI 能从原文中精确提取世界观设定、人物关系和叙事风格。</div>
+                            <div class="hint">填了参考作品，AI 会结合对该作品的了解生成，并在游玩时启用「世界观约束」扫描（标黄偏离设定的概念）。留空即为完全原创。</div>
+                            <div class="hint opt-hint" id="ipNameOptHint" style="color:var(--primary);">已上传源文件，也可不填作品名——AI 将以你上传的原文为准生成世界观。</div>
                         </div>
                     </div>
                     <div class="conditional-field show" id="ipUploadField">
                         <div class="form-group">
-                            <label>上传世界观/小说源文件（可选）</label>
+                            <label>上传小说 / 原著源文件（可选）</label>
                             <div class="file-upload-area" id="fileUploadArea">
                                 <span id="fileUploadText">点击上传 TXT / DOCX / EPUB 文件</span>
                             </div>
@@ -420,8 +405,29 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>主角设定（可选）</label>
-                        <textarea id="heroDesc" placeholder="例如：一名来自小镇的少年，性格谨慎，渴望变强..."></textarea>
+                        <label>世界观知识与描述 <span class="req-tag">必填</span></label>
+                        <textarea id="worldDesc" placeholder="描述这个世界的规则、力量体系、主要势力、地点、人物关系等..." style="min-height:120px;"></textarea>
+                        <div class="hint">填写描述，或上方上传源文件，二者至少一项；描述越详细，AI 生成越贴合预期。</div>
+                    </div>
+                    <div class="form-group">
+                        <label>关键偏离（可选，优先级最高）</label>
+                        <textarea id="keyDivergences" placeholder="如果你改动了原作的关键设定，可在此声明，例如：时间线改到2025年 / 主角替换为原创角色 / 伏地魔已被击败..." style="min-height:80px;"></textarea>
+                        <div class="hint">基于已有作品但做了关键性修改时填写。此声明高于 AI 自动生成的一致性包，确保剧情始终跟随你的版本。</div>
+                    </div>
+                    <div class="form-group">
+                        <label>叙事视角</label>
+                        <div class="radio-group" id="povGroup">
+                            <label class="radio-option selected">
+                                <input type="radio" name="povMode" value="solo" checked>
+                                <div class="radio-indicator"></div>
+                                <div><div class="radio-label">单人主角</div><div class="radio-desc">由 AI 按世界观自动设计主角身份 / 背景 / 能力，你扮演该主角</div></div>
+                            </label>
+                            <label class="radio-option">
+                                <input type="radio" name="povMode" value="ensemble">
+                                <div class="radio-indicator"></div>
+                                <div><div class="radio-label">群像剧（无唯一主角）</div><div class="radio-desc">设计戏份均衡的多角色群像，你以参与者视角推进剧情</div></div>
+                            </label>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>剧情自由度</label>
@@ -524,27 +530,6 @@
                         <div class="hint">控制生成剧情的随机度。越低越稳定连贯，越高越自由发散。套用模板时已预填推荐值，可手动调整。</div>
                     </div>
                 </section>
-                <!-- 模块 3：世界观 -->
-                <section class="cw-module" data-module="world">
-                    <p class="cw-step-title">世界观</p>
-                    <p class="cw-step-hint" id="worldDescHint">描述越详细，AI 生成的内容越贴近你的预期。</p>
-                    <div class="form-group">
-                        <label>世界观描述</label>
-                        <textarea id="worldDesc" placeholder="描述这个世界的规则、力量体系、主要势力、地点、人物关系等..."></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>关键偏离（可选，优先级最高）</label>
-                        <textarea id="keyDivergences" placeholder="如果你改动了原作的关键设定，可在此声明，例如：时间线改到2025年 / 主角替换为原创角色 / 伏地魔已被击败..."></textarea>
-                        <div class="hint">基于已有 IP 但做了关键性修改时填写。此声明高于 AI 自动生成的一致性包，确保剧情始终跟随你的版本。</div>
-                    </div>
-                    <div class="form-group">
-                        <label>世界书（知识库）</label>
-                        <div class="worldbook-box">
-                            <div class="worldbook-text">世界书即本作的知识库（规则 / 地点 / 人物 / 事件 / 物品 / 势力 / 冲突）。创建时 AI 会自动抽取并写入；生成后可在世界详情页「编辑知识库」查看与修改。</div>
-                            <button type="button" class="btn secondary" id="openWorldBookBtn" data-action="openWorldBookFromWizard">📚 前往编辑知识库</button>
-                        </div>
-                    </div>
-                </section>
                 <!-- 模块 4：玩法模块 -->
                 <section class="cw-module" data-module="modules">
                     <p class="cw-step-title">玩法模块</p>
@@ -632,40 +617,6 @@
         <div class="modal-footer" id="detailModalFooter">
             <button class="btn secondary" data-action="closeModal" data-modal="worldDetailModal">返回</button>
             <button class="btn primary" data-action="startGame" data-opts='{"resetBehavior":true}' >开始游玩</button>
-        </div>
-    </div>
-</div>
-
-<!-- ================= 编辑世界类型弹窗 ================= -->
-<div class="modal-overlay" id="worldTypeEditModal">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="worldTypeEditTitle">
-        <div class="modal-header">
-            <h2 id="worldTypeEditTitle">编辑世界类型</h2>
-            <button class="modal-close" data-action="closeModal" data-modal="worldTypeEditModal">×</button>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>世界类型</label>
-                <select id="editWorldTypeSelect" class="lore-inp lore-sel" data-action="onEditWorldTypeChange" data-event="change">
-                    <option value="original">原创世界观</option>
-                    <option value="fan">同人 · 基于具体作品二创</option>
-                    <option value="ip">改编 IP · 商业版权作品</option>
-                    <option value="shared">共享宇宙 · 社群共创设定</option>
-                    <option value="public_domain">公共领域 · 版权已过期</option>
-                </select>
-                <p class="muted" id="editWorldTypeHint" style="margin-top:6px;font-size:12px;"></p>
-            </div>
-            <div class="conditional-field" id="editIpNameField">
-                <div class="form-group">
-                    <label>作品名称 <span id="editIpNameReqTag" class="req-tag">必填</span></label>
-                    <input type="text" id="editIpName" class="lore-inp" placeholder="例如：哈利波特、三体、红楼梦...">
-                    <div class="hint" id="editIpNameHint">AI 将根据作品名称从训练数据中检索相关设定、人物、力量体系。</div>
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn secondary" data-action="closeModal" data-modal="worldTypeEditModal">取消</button>
-            <button class="btn primary" data-action="saveWorldTypeEdit" data-id="" id="saveWorldTypeEditBtn">保存</button>
         </div>
     </div>
 </div>

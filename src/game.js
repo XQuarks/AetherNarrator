@@ -111,10 +111,15 @@ function warnIfTimeCorrected(rawGen) {
 
 export async function generateWorld() {
     const name = document.getElementById("worldName").value.trim();
-    const type = document.getElementById("worldType").value;
     const desc = document.getElementById("worldDesc").value.trim();
-    const hero = document.getElementById("heroDesc").value.trim();
-    const ipName = (type === "ip" || type === "fan") ? document.getElementById("ipName").value.trim() : "";
+    // ★ docs/58：主角设定不再由玩家手填；改为「叙事视角」显式选项（单人主角 / 群像剧）。
+    const povEl = document.querySelector("input[name='povMode']:checked");
+    const pov = (povEl && povEl.value === "ensemble") ? "ensemble" : "solo";
+    // ★ docs/58：hero 不再由玩家手填，改为由 AI 按世界观自动设计（solo 模式）；群像剧留空。
+    // 先置空，生成后若为 solo 且拿到 initial_state 则回填 world.hero（供展示/注入/完成度清单）。
+    let hero = "";
+    // ★ docs/58：去掉世界类型下拉；「参考的世界」（作品名）随时可填，不再受类型限制。
+    const ipName = document.getElementById("ipName") ? document.getElementById("ipName").value.trim() : "";
     // ★ W2-Style：从创建向导读取叙事风格预设（模板或自定义），序列化后写入 world.style_preset
     const stylePresetObj = getStylePresetFromWizard();
     const stylePreset = serializeStylePreset(stylePresetObj);
@@ -131,13 +136,13 @@ export async function generateWorld() {
     const worldPrefix = (worldPrefixRaw + (timeHint ? "\n" + timeHint : "")).trim();
     const keyDivergences = document.getElementById("keyDivergences") ? document.getElementById("keyDivergences").value.trim() : "";
 
-    if (!name || !desc) {
-        showToast("请填写世界名称和世界观描述", "error");
+    // ★ docs/58：校验规则——世界名称必填；世界观「描述」或「上传源文件」至少填一项。
+    if (!name) {
+        showToast("请填写世界名称", "error");
         return;
     }
-    // ★ 上传了小说源文件后，作品名称改为可选填写
-    if ((type === "ip" || type === "fan") && !ipName && !isSourceFileUploaded()) {
-        showToast("基于已有 IP / 同人 时请填写作品名称，或上传小说源文件后留空", "error");
+    if (!desc && !isSourceFileUploaded()) {
+        showToast("请填写世界观描述，或上传小说源文件（二者至少一项）", "error");
         return;
     }
 
@@ -157,7 +162,7 @@ export async function generateWorld() {
             showToast(`本书较大，知识库将分 ${chunkCount} 段生成，可能需要较长时间（数十次 API 调用），请耐心等待。`, "warn");
             // ① 基础世界配置（结构/开场）由首段生成
             const firstChunk = src.slice(0, CHUNK_SIZE);
-            const rawGen1 = await callWorldGenerationLLM(name, type, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, CHUNK_SIZE, COUNT_HINT, stylePreset);
+            const rawGen1 = await callWorldGenerationLLM(name, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, pov, CHUNK_SIZE, COUNT_HINT, stylePreset);
             warnIfTimeCorrected(rawGen1);
             generated = sanitizeWorldConfig(rawGen1);
             // ② 逐段抽取 lore 并合并（覆盖全书，同名条目汇总；含 relations 三元组）
@@ -177,7 +182,7 @@ export async function generateWorld() {
             catch (e) { logError("loreEmbedPrecompute", e); }
         } else {
             // 小书：沿用原有单次生成
-            const rawGen2 = await callWorldGenerationLLM(name, type, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix, undefined, null, stylePreset);
+            const rawGen2 = await callWorldGenerationLLM(name, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix, pov, undefined, null, stylePreset);
             warnIfTimeCorrected(rawGen2);
             generated = sanitizeWorldConfig(rawGen2);
             loreKb = generated.lore_kb;
@@ -189,12 +194,13 @@ export async function generateWorld() {
         const world = {
             id: "w" + Date.now(),
             name,
-            type,
             desc,
-            hero,
+            // ★ docs/58：type 概念已移除（旧世界 type 字段保留兼容，不再参与逻辑）
+            pov, // ★ docs/58：solo（单人主角，AI 自动设计）/ ensemble（群像剧，无唯一主角）
+            hero, // 初始空；solo 模式生成后由 AI 设计结果回填（下方）
             ip_name: ipName,
             createdAt: new Date().toISOString().split("T")[0],
-            tags: pickWorldTags(generated, { name, desc, hero, type, ipName }),
+            tags: pickWorldTags(generated, { name, desc, hero, ipName }),
             schema: generated.schema || defaultWorldSchema(name + " " + desc),
             initial_state: generated.initial_state,
             lore_kb: loreKb,
@@ -217,12 +223,21 @@ export async function generateWorld() {
                 return Number.isFinite(v) ? v : 0.7;
             })()
         };
-        // ★ A2：用统一协调器收口 IP 身份（type / ip_name / 描述 / 上传文本 三路信号 → world.canon）。
+        // ★ docs/58：solo 模式由 AI 设计主角，回填 world.hero（供展示/注入/完成度清单）。
+        // 群像剧（ensemble）world.hero 保持空——无固定单一主角。
+        if (pov === "solo" && generated && generated.initial_state) {
+            const is0 = generated.initial_state;
+            const name0 = is0.name ? is0.name + "：" : "";
+            const bg0 = is0.background ? is0.background : "";
+            world.hero = (name0 + bg0).trim() || "";
+            hero = world.hero;
+        }
+        // ★ A2：用统一协调器收口 IP 身份（ip_name / 描述 / 上传文本 三路信号 → world.canon）。
         // 冲突仅在 #4 的 UI 提示；这里先记录，绝不阻断建世界。
+        // ★ docs/58：resolveCanonContext 已移除 type 依赖（只看 ipName）。
         ensureWorldCanon(world);
         world.canon.key_divergences = keyDivergences; // ★ A2 #4：用户声明的关键偏离，优先级高于生成的一致性包
         const canonResolved = resolveCanonContext({
-            type,
             ipName,
             desc,
             sourceFileContent: S.sourceFileContent
@@ -252,7 +267,7 @@ export async function generateWorld() {
         S.debugLog.worldCreations.push({
             time: new Date().toISOString(),
             worldName: name,
-            worldType: type,
+            pov,
             ipName: ipName || null,
             plotFreedom: plotFreedom,
             loreSnippets: world.lore_kb ? world.lore_kb.snippets.length : 0,
@@ -262,9 +277,12 @@ export async function generateWorld() {
 
         document.getElementById("worldName").value = "";
         document.getElementById("worldDesc").value = "";
-        document.getElementById("heroDesc").value = "";
-        document.getElementById("ipName").value = "";
-        document.getElementById("narrativeStyle").value = "";
+        if (document.getElementById("heroDesc")) document.getElementById("heroDesc").value = "";
+        if (document.getElementById("ipName")) document.getElementById("ipName").value = "";
+        if (document.getElementById("narrativeStyle")) document.getElementById("narrativeStyle").value = "";
+        // ★ docs/58：叙事视角重置回默认「单人主角」
+        document.querySelectorAll("input[name='povMode']").forEach((r) => { r.checked = (r.value === "solo"); });
+        document.querySelectorAll("#povGroup .radio-option").forEach((o) => o.classList.toggle("selected", o.dataset.value === "solo"));
         document.getElementById("customPrefix").value = "";
         // 重置特殊要求开关
         document.querySelectorAll("#customPrefixGroup .radio-option").forEach((o, i) => {
@@ -1282,7 +1300,7 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
     // ★ docs/54：每回合刷新「结局追踪器」面板数据（无 ending 规则的世界内部显示空提示）
     renderEndingTracker();
 
-    // ★ A2 / IP#6 生成后世界观合规扫描（受 ip_scan 模块门禁；warn 模式：标黄 + 提示条，不阻断回合）
+    // ★ A2 / IP#6 生成后世界观约束扫描（受 ip_scan 模块门禁；warn 模式：标黄 + 提示条，不阻断回合）
     // 选项场景一致性修复（docs/18）：把玩家选项文本也并入扫描范围。
     // 自由度≥4 时 getBannedConceptRules() 返回空 → 天然免扫（与项目「高自由度放宽」一致）。
     if (isModuleEnabled(S.currentWorld, "ip_scan")) {

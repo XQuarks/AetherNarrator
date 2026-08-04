@@ -51,11 +51,14 @@ test("resolveCanonContext：用户填 HP，但文本是克苏鲁 → ip_mismatch
     assert.deepEqual(r.conflicts[0].detected, ["克苏鲁"]);
 });
 
-test("resolveCanonContext：选 ip 但留空名 + 上传文本带 HP → 用检测到的单一 IP 补足", () => {
-    const r = resolveCanonContext({ type: "ip", ipName: "", desc: "", sourceFileContent: "霍格沃茨特快列车驶向学校" });
-    assert.equal(r.mode, "ip_adaptation");
-    assert.equal(r.ip_name, "哈利波特");
+test("resolveCanonContext：★ docs/58 留空参考作品 + 上传文本带 HP → 不再自动补足，归原创（只认明确填写的参考作品）", () => {
+    const r = resolveCanonContext({ ipName: "", desc: "", sourceFileContent: "霍格沃茨特快列车驶向学校" });
+    assert.equal(r.mode, "original");
+    assert.equal(r.ip_name, null);
     assert.equal(r.source, "uploaded_text");
+    // detected 仍用于冲突提示，但单一 IP 不会触发 ambiguous 冲突
+    assert.deepEqual(r.detected, ["哈利波特"]);
+    assert.deepEqual(r.conflicts, []);
 });
 
 test("resolveCanonContext：原创 + 文本同时带两个 IP → ambiguous_ip 冲突，ip_name 留空", () => {

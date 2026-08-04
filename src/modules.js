@@ -56,11 +56,11 @@ export const MODULE_REGISTRY = [
     { id: "map", name: "地图系统", desc: "地点与地图探索（占位，未实现）", defaultEnabled: false },
     { id: "schedule", name: "日程系统", desc: "日程与章节化回溯（占位，未实现）", defaultEnabled: false },
 
-    // —— IP 一致性（IP#6 生成后硬扫描；黎总 2026-07-30 拍板：填了作品名才默认开）——
-    // defaultEnabled 为函数：世界填了 ip_name（作品来源名）→ 默认开；纯原创没填 → 默认关。
-    { id: "ip_scan", name: "IP/世界观合规扫描", desc: "生成后扫描叙事，标黄违禁概念并提示（不阻断）",
+    // —— IP 一致性（IP#6 生成后约束；黎总 2026-07-30 拍板：填了作品名才默认开；2026-08-04 更名「IP 世界观约束」）——
+    // defaultEnabled 为函数：世界填了 ip_name（参考的世界/作品来源名）→ 默认开；纯原创没填 → 默认关。
+    { id: "ip_scan", name: "IP 世界观约束", desc: "生成后扫描叙事，标黄偏离世界观设定的概念并提示（不阻断）",
         defaultEnabled: (world) => !!(world && (world.ip_name || (world.canon && world.canon.ip_name))),
-        promptFragment: () => "【IP/世界观合规扫描】本世界启用了生成后合规扫描，请勿在叙事中引入与设定冲突的违禁概念（如世界观禁律所列）。" }
+        promptFragment: () => "【IP 世界观约束】本世界启用了世界观约束，请勿在叙事中引入与设定冲突的概念（如世界观禁律所列）。" }
 ];
 
 // defaultEnabled 解析：支持「布尔」或「(world) => boolean」两种形式。
