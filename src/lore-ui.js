@@ -1184,7 +1184,13 @@ export function openLoreReview(mode = "save", focusId = null) {
     const title = document.getElementById("loreReviewModalTitle");
     if (title) title.textContent = mode === "world" ? "默认知识库" : "当前存档知识库（Obsidian 风）";
     // ★ 步骤二：时间体系已作为卡片直接渲染在初览面板顶部（renderTimeConfigSection）；world 模式可编辑，save 模式只读锁定
-    if (!S.activeLoreKB) S.activeLoreKB = { ip: "", snippets: [] };
+    // ★ 修复：activeLoreKB 缺失/无条目时回退当前世界的默认知识库（生成后初览等场景，
+    // 调用方未设 activeLoreKB 时弹窗会显示空知识库，造成"关掉重开又有内容"的错觉）。
+    if (!S.activeLoreKB || !Array.isArray(S.activeLoreKB.snippets)) {
+        S.activeLoreKB = (S.currentWorld && S.currentWorld.lore_kb)
+            ? deepClone(S.currentWorld.lore_kb)
+            : { ip: (S.currentWorld && S.currentWorld.name) || "", snippets: [] };
+    }
     if (!Array.isArray(S.activeLoreKB.snippets)) S.activeLoreKB.snippets = [];
     S._loreEdit = deepClone(S.activeLoreKB.snippets); // 深拷贝到缓冲，取消不影响原数据
     if (focusId) {

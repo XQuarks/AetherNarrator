@@ -357,9 +357,14 @@ export async function generateWorld() {
         clearSourceFile();
         closeModal("createWorldModal");
         showToast("世界生成成功！可先审阅知识库再开玩。", "success");
-        // ★ B3：生成后自动弹出知识库初览，让玩家审阅/修正 AI 生成的 lore
+        // ★ B3：生成后自动弹出知识库初览，让玩家审阅/修正 AI 生成的 lore。
+        // 修复 1：必须同步 S.activeLoreKB（openLoreReview 读它，缺省会显示空知识库）。
+        // 修复 2：用 world 模式（保存只写回世界、不创建存档）——原默认 save 模式会在玩家
+        // 尚未开始游玩时 createOrUpdateSave 建出"默认模板状态+空历史"的坏存档，
+        // 之后「继续游戏」进入会因空历史直接渲染初始选项、不显示开局剧情。
         S.currentWorld = world;
-        openLoreReview();
+        S.activeLoreKB = deepClone(world.lore_kb || { ip: name, snippets: [] });
+        openLoreReview("world");
     } catch (e) {
         let errorMsg = e.message;
         if (errorMsg.includes("Failed to fetch") || errorMsg.includes("NetworkError") || errorMsg.includes("failed to fetch")) {
