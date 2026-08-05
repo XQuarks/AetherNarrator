@@ -78,6 +78,21 @@ test("extractStructuredFromMessage：既无 tool_calls 也无 content → 抛错
     assert.throws(() => extractStructuredFromMessage({}, "t"));
 });
 
+// ---------- 2.5 思考模式兜底：正文空、思考过程在 reasoning_content ----------
+test("extractStructuredFromMessage：content 空但 reasoning_content 含 JSON → 兜底解析", () => {
+    const msg = { content: "", reasoning_content: '{"narrative":"x","choices":[]}' };
+    assert.deepStrictEqual(extractStructuredFromMessage(msg, "t"), { narrative: "x", choices: [] });
+});
+
+test("extractStructuredFromMessage：content 空且 reasoning_content 非 JSON → 报错注明疑似思考模式", () => {
+    const msg = { content: "", reasoning_content: "让我想想…… 嗯 就这样吧" };
+    assert.throws(() => extractStructuredFromMessage(msg, "t"), /疑似思考模式/);
+});
+
+test("extractStructuredFromMessage：content 与 reasoning_content 均空 → 原样报错", () => {
+    assert.throws(() => extractStructuredFromMessage({ content: "" }, "t"), /无 tool_calls 且无 content/);
+});
+
 // ---------- 3. 流式收尾取参：累积 arguments 文本 ----------
 test("extractStructuredFromArgs：合法 JSON 直接解析", () => {
     assert.deepStrictEqual(extractStructuredFromArgs('{"a":1}', "t"), { a: 1 });

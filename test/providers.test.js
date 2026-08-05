@@ -91,11 +91,34 @@ test("普通模型 + tool → 发 tools 并强制 tool_choice", () => {
     assert.equal(body.tools[0].function.name, "generate_world");
     assert.deepEqual(body.tool_choice, { type: "function", function: { name: "generate_world" } });
     assert.ok(!("response_format" in body), "工具模式不再叠 json_object");
+    assert.ok(!("thinking" in body), "非 DeepSeek 工具调用不带 thinking 字段");
+});
+
+test("DeepSeek 工具调用直接禁用思考（一次成功，避免先 400 再重试）", () => {
+    const tool = { name: "generate_world", description: "d", parameters: { type: "object" } };
+    const body = PROVIDERS.deepseek.buildBody("deepseek-v4-flash", [{ role: "user", content: "hi" }], { tool });
+    assert.deepEqual(body.thinking, { type: "disabled" }, "工具调用必须禁用思考（v4-flash 官方 API 思考模式不支持 tool_choice）");
+    assert.equal(body.tools[0].function.name, "generate_world", "工具照常发送");
+    assert.deepEqual(body.tool_choice, { type: "function", function: { name: "generate_world" } });
+    assert.ok(!("response_format" in body), "工具模式不再叠 json_object");
 });
 
 test("plainJson 显式强制 → 纯文本输出（供 tool_choice 冲突兜底重试）", () => {
     const body = PROVIDERS.deepseek.buildBody("deepseek-v4-flash", [], { plainJson: true });
     assert.ok(!("tools" in body) && !("tool_choice" in body) && !("response_format" in body));
+});
+
+test("DeepSeek plainJson 降级时禁用思考（防思考模式正文 content 为空）", () => {
+    const body = PROVIDERS.deepseek.buildBody("deepseek-v4-flash", [], { plainJson: true });
+    assert.deepEqual(body.thinking, { type: "disabled" }, "纯文本降级必须禁用思考");
+    // 思考型模型名 + plainJson → 同样禁用思考
+    const r1 = PROVIDERS.deepseek.buildBody("deepseek-r1", [], { plainJson: true });
+    assert.deepEqual(r1.thinking, { type: "disabled" });
+});
+
+test("非 DeepSeek plainJson 不带 thinking 字段（避免未知参数 400）", () => {
+    const body = PROVIDERS.qwen.buildBody("qwen-max", [], { plainJson: true });
+    assert.ok(!("thinking" in body), "qwen 不发送 DeepSeek 专属 thinking 字段");
 });
 
 test("isToolChoiceConflictError 判定 API 400 思考模式冲突", () => {

@@ -59,8 +59,10 @@ export const PROVIDERS = {
         defaultBaseUrl: "https://api.deepseek.com",
         defaultModel: "deepseek-v4-flash",
         detect: (baseUrl) => /deepseek/.test(baseUrl),
-        // 普通模型不带 thinking；仅 reasoner 类需要禁用思考
-        buildBody: (model, messages, opts = {}) => buildChatBody(model, messages, opts, /reasoner/.test(model) ? { thinking: { type: "disabled" } } : {}),
+        // 普通模型不带 thinking；但 DeepSeek 官方 API 的思考模式不支持强制 tool_choice
+        // （HTTP 400 "Thinking mode does not support this tool_choice"）且正文 content 可能为空，
+        // 故工具调用（tool）或纯文本降级（plainJson）或 reasoner 类一律禁用思考，一次成功不靠重试。
+        buildBody: (model, messages, opts = {}) => buildChatBody(model, messages, opts, (opts.tool || opts.plainJson || /reasoner/.test(model)) ? { thinking: { type: "disabled" } } : {}),
         // DeepSeek 专属缓存字段
         parseUsage: (usage = {}) => {
             const hit = usage.prompt_cache_hit_tokens || 0;

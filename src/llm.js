@@ -503,7 +503,14 @@ export function extractStructuredFromMessage(msg, label) {
     }
     const content = msg && msg.content;
     if (content) return parseResponse(content);
-    throw new Error("AI 未返回结构化参数（无 tool_calls 且无 content）：" + label);
+    // ★ 思考模式兜底：正文 content 为空、思考过程在 reasoning_content（思考型模型未禁用思考时），
+    // 尝试从 reasoning_content 提取 JSON；提取不到再报错（注明疑似思考模式，便于排查）。
+    const thinking = msg && (msg.reasoning_content || msg.reasoning);
+    if (thinking) {
+        try { return parseResponse(thinking); }
+        catch (_) { /* 思考过程非 JSON → 抛清晰错误 */ }
+    }
+    throw new Error("AI 未返回结构化参数（无 tool_calls 且无 content）：" + label + (thinking ? "（疑似思考模式响应，正文为空）" : ""));
 }
 
 // 流式收尾：fullArgs 是累积的 tool_calls arguments 文本；解析失败用 parseResponse 修复兜底
