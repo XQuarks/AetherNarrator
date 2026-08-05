@@ -2,7 +2,7 @@
 // AetherNarrator · storage.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { STORAGE_KEYS, ensureWorldCanon, applyConsistencyPack, ensureWorldCharacters } from "./store.js";
+import { STORAGE_KEYS, ensureWorldCanon, applyConsistencyPack, ensureWorldCharacters, defaultWorldRuntime } from "./store.js";
 import { deepClone, defaultWorldSchema } from "./utils.js";
 import { closeModal, showToast, notifyError } from "./render.js";
 import { parseStoredArray, parseStoredObject } from "./migrations.js";
@@ -12,6 +12,7 @@ import { EMBED_MODEL, EMBED_DIM } from "./rag.js";
 import { mergeWorldPack } from "./world-transfer.js";
 import { sanitizeModules } from "./modules.js"; // ★ C1：旧世界迁移 / 读档兜底，确保 world.modules 含全部注册表模块
 import { createCthulhuWorld, createUrbanLegendWorld, createDualWorld } from "./new-worlds.js";
+import { invalidateSystemPromptCache } from "./prompt.js"; // ★ 数据管理：清缓存时同步失效 prompt 缓存
 
 export async function loadConfig() {
     const parsed = parseStoredObject(await idbGet(STORAGE_KEYS.config), {});
@@ -184,11 +185,49 @@ export async function saveApiConfig() {
     showToast("API 配置已保存", "success");
 }
 
-// 删除世界时，清除该世界对应的当前运行态（主状态/历史/聊天）；fire-and-forget
+// 删除世界时，清除该世界对应的当前运行态（主状态/历史/聊天/摘要）；fire-and-forget
+// ★ 数据管理：4 个缓存键必须全清（saveState 写入 state/history/chatHistory/chatSummary），
+// 原实现漏删 chatSummary，删除世界后旧会话摘要仍残留缓存，导致新世界读到旧内容。
 export function clearCurrentRunState() {
     idbDel(STORAGE_KEYS.state).catch(() => {});
     idbDel(STORAGE_KEYS.history).catch(() => {});
     idbDel(STORAGE_KEYS.chatHistory).catch(() => {});
+    idbDel(STORAGE_KEYS.chatSummary).catch(() => {});
+}
+
+// ★ 数据管理：重置当前运行缓存 + 内存会话态（含 prompt 缓存），保留世界与存档。
+// 解决"新世界进入显示旧世界内容"类数据残留问题。
+export function resetRunCache() {
+    clearCurrentRunState();
+    S.gameState = null;
+    S.conversationHistory = [];
+    S.chatHistory = [];
+    S.chatSummary = [];
+    S.currentSession = { epoch: 0, worldId: null, saveId: null };
+    S.activeBehaviorRecords = [];
+    S.aiEnhanced = false;
+    S.activeLoreKB = null;
+    S.playerNotes = "";
+    S.worldRuntime = defaultWorldRuntime();
+    invalidateSystemPromptCache();
+}
+
+// ★ 数据管理：删除全部存档（不可逆），世界列表与知识库保留
+export async function wipeAllSaves() {
+    S.saves = [];
+    await saveSaves();
+}
+
+// ★ 数据管理：完全重置——清空全部 IndexedDB 键 + localStorage 偏好（aigame_*），回出厂状态。
+// 调用方（UI）随后应刷新页面重新初始化。
+export async function wipeAllData() {
+    for (const k of Object.values(STORAGE_KEYS)) await idbDel(k);
+    const prefKeys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf("aigame_") === 0) prefKeys.push(k);
+    }
+    for (const k of prefKeys) localStorage.removeItem(k);
 }
 
 // 导入世界包（字符串或已解析对象）：合并进现有 worlds 并持久化。

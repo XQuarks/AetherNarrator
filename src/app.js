@@ -7,7 +7,7 @@ import { warmupEmbeddingWorker } from "./rag.js";
 import { deepClone, logError } from "./utils.js";
 import { installGlobalErrorGuard } from "./error-guard.js";
 import { applyFontSize, applyTheme, changeFontSize, toggleTheme, changeNarrativePacing, changeNarrativeLength, changeReadingSpeed, updateNarrativePacingButtons, updateNarrativeLengthButtons, updateReadingSpeedButtons } from "./theme.js";
-import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset } from "./storage.js";
+import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset, resetRunCache, wipeAllSaves, wipeAllData } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, renderSaveList, renderWorldList, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, selectTagPref, onCustomTagInput, collectStylePrefs, showToast, renderEventPanel, showModal, openSaveMenu, openWorldSaveChooser, showEndingTracker } from "./render.js";
@@ -149,6 +149,10 @@ const ACTIONS = {
     exportDebugLog: () => exportDebugLog(),
     // 设置界面：清除向量索引缓存（两次点击确认，禁用原生 confirm）
     clearAnnCache: (el) => handleClearAnnCache(el),
+    // 设置界面·数据管理：清除游戏缓存 / 删除全部存档 / 完全重置（两次点击确认）
+    clearRunCache: (el) => handleDataManage(el, "cache"),
+    wipeAllSaves: (el) => handleDataManage(el, "saves"),
+    resetAllData: (el) => handleDataManage(el, "all"),
     goHome: () => goHome(),
     submitInput: () => submitInput(),
     hideStatusPanel: () => hideStatusPanel(),
@@ -427,6 +431,54 @@ async function handleClearAnnCache(el) {
         el.textContent = "清除索引缓存";
         el.disabled = false;
     }
+}
+
+// 设置界面「数据管理」：两次点击确认（禁用原生 confirm；第一次点变「确认？再次点击」，4 秒后自动复位）
+// 三档：cache=清除游戏缓存（保留世界/存档） / saves=删除全部存档 / all=完全重置（回出厂）
+const DM_ACTIONS = {
+    cache: {
+        run: async () => { resetRunCache(); showToast("已清除游戏缓存（世界与存档保留）", "success"); },
+        label: "清除游戏缓存"
+    },
+    saves: {
+        run: async () => { await wipeAllSaves(); showToast("已删除全部存档", "success"); renderSaveList(); renderWorldList(); },
+        label: "删除全部存档"
+    },
+    all: {
+        run: async () => { await wipeAllData(); showToast("已重置全部数据，即将刷新…", "success"); setTimeout(() => location.reload(), 800); },
+        label: "完全重置"
+    }
+};
+let _dmPendingKind = null;
+let _dmTimer = null;
+function handleDataManage(el, kind) {
+    if (!el) return;
+    const cfg = DM_ACTIONS[kind];
+    if (!cfg) return;
+    if (_dmPendingKind !== kind) {
+        _dmPendingKind = kind;
+        const original = el.textContent;
+        el.dataset.dmOriginal = original;
+        el.textContent = "确认？再次点击";
+        el.classList.add("danger");
+        _dmTimer = setTimeout(() => {
+            _dmPendingKind = null;
+            el.textContent = el.dataset.dmOriginal || cfg.label;
+            el.classList.remove("danger");
+        }, 4000);
+        return;
+    }
+    clearTimeout(_dmTimer);
+    _dmPendingKind = null;
+    const original = el.dataset.dmOriginal || cfg.label;
+    el.textContent = "处理中…";
+    el.disabled = true;
+    el.classList.remove("danger");
+    (async () => {
+        try { await cfg.run(); }
+        catch (e) { logError("dataManage", e); showToast("操作失败：" + ((e && e.message) || e), "error"); }
+        finally { el.textContent = original; el.disabled = false; }
+    })();
 }
 
 // ★ 事件系统：打开支线事件面板（门禁：events 模块未启用则提示并返回）

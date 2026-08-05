@@ -160,6 +160,33 @@
                 </div>
             </div>
         </div>
+        <!-- 数据管理（两次点击确认，禁用原生 confirm） -->
+        <div class="st-section">
+            <div class="st-section-title">数 据 管 理</div>
+            <div class="st-group">
+                <div class="st-row">
+                    <div class="st-row-head">
+                        <span class="st-row-title">清除游戏缓存</span>
+                        <button class="st-action-btn" data-action="clearRunCache">清除</button>
+                    </div>
+                    <div class="st-row-hint">清空当前会话的临时运行数据（含可能残留的旧世界内容）。世界与存档都保留，清除后重新进入世界即可。</div>
+                </div>
+                <div class="st-row">
+                    <div class="st-row-head">
+                        <span class="st-row-title">删除全部存档</span>
+                        <button class="st-action-btn" data-action="wipeAllSaves">删除</button>
+                    </div>
+                    <div class="st-row-hint">删除所有世界的全部存档槽位，世界列表与知识库保留。此操作不可撤销。</div>
+                </div>
+                <div class="st-row">
+                    <div class="st-row-head">
+                        <span class="st-row-title">完全重置</span>
+                        <button class="st-action-btn" data-action="resetAllData">重置</button>
+                    </div>
+                    <div class="st-row-hint">删除所有世界、存档、缓存与设置，回到首次打开状态。此操作不可撤销，会刷新页面。</div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
