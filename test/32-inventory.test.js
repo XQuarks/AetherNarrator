@@ -107,3 +107,21 @@ test("formatStateChanges：关键物品失去带 [关键] 标记", () => {
     const lines = formatStateChanges(entry, null);
     assert.ok(lines.some(l => l.includes("失去") && l.includes("[关键]") && l.includes("符文钥匙")), "应出现「失去 [关键] 符文钥匙」");
 });
+
+// ★ 回归：AI 生成世界缺 attributes/relationships/skills 字段时，applyStateChanges 写入不炸
+test("applyStateChanges：gameState 无 attributes/relationships/skills → 自动兜底并写入成功", () => {
+    setupWorld();
+    S.currentWorld.modules = { skills: { enabled: true } }; // skills 写入有模块门禁，测试显式开启
+    // 模拟 AI 生成世界缺字段：显式删掉这三个对象
+    delete S.gameState.attributes;
+    delete S.gameState.relationships;
+    delete S.gameState.skills;
+    applyStateChanges({
+        attributes: { courage: "勇气可嘉" },
+        relationships: { "马可波罗": "排位队友" },
+        skills: { "射手": "走位风骚" }
+    });
+    assert.equal(S.gameState.attributes.courage, "勇气可嘉", "attributes 应被兜底并写入");
+    assert.equal(S.gameState.relationships["马可波罗"], "排位队友", "relationships 应被兜底并写入");
+    assert.equal(S.gameState.skills["射手"], "走位风骚", "skills 应被兜底并写入");
+});

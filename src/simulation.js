@@ -62,6 +62,12 @@ export function normalizeSimulationState(state) {
     // ★ 修复：确保 inventory 为数组（AI 生成的世界 initial_state 可能缺该字段，
     // 缺省时 highlightItems 等渲染会读 undefined.length 抛异常 → "程序出现异常"）
     out.inventory = Array.isArray(out.inventory) ? out.inventory : [];
+    // ★ 修复：确保 attributes/relationships/skills 为对象（AI 世界可能缺这些字段，
+    // 缺省时 applyStateChanges 的 s.attributes[k]=v 等写入会抛 "Cannot set properties of undefined"）
+    const asObj = (v) => (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+    out.attributes = asObj(out.attributes);
+    out.relationships = asObj(out.relationships);
+    out.skills = asObj(out.skills);
     // ★ docs/54：结局图鉴（旧存档兜底，不破坏已有字段）
     out.unlockedEndings = Array.isArray(out.unlockedEndings) ? out.unlockedEndings : [];
     return out;

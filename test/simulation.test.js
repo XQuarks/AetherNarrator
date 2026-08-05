@@ -47,3 +47,14 @@ test("normalizeSimulationState 兜底缺失的 inventory 为数组（AI 世界�
     const b = normalizeSimulationState({ inventory: [{ item_id: "sword", name: "剑" }] });
     assert.equal(b.inventory.length, 1, "已有 inventory 原样保留");
 });
+
+test("normalizeSimulationState 兜底缺失的 attributes/relationships/skills 为对象", () => {
+    const a = normalizeSimulationState({ current_location: "某地" });
+    assert.deepEqual(a.attributes, {}, "缺 attributes 补空对象");
+    assert.deepEqual(a.relationships, {}, "缺 relationships 补空对象");
+    assert.deepEqual(a.skills, {}, "缺 skills 补空对象");
+    const b = normalizeSimulationState({ attributes: { courage: "有" }, relationships: { "甲": "友" }, skills: { "剑术": "入门" } });
+    assert.equal(b.attributes.courage, "有", "已有 attributes 原样保留");
+    assert.equal(b.relationships["甲"], "友", "已有 relationships 原样保留");
+    assert.equal(b.skills["剑术"], "入门", "已有 skills 原样保留");
+});

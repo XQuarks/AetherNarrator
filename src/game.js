@@ -739,6 +739,14 @@ export function applyStateChanges(changes) {
     let backup = null;
     try {
     const s = S.gameState;
+    // ★ 修复：AI 生成世界可能缺 attributes/relationships/skills 字段，
+    // 下方 s.attributes[k]=v 等写入前兜底为对象，否则抛 "Cannot set properties of undefined"
+    if (s) {
+        const asObj = (v) => (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+        s.attributes = asObj(s.attributes);
+        s.relationships = asObj(s.relationships);
+        s.skills = asObj(s.skills);
+    }
     validateStateShape(changes);   // #7 完善：异常状态类型告警
 
     // A4：先在副本上按结构化规则过滤，调用方响应对象保持不变。
