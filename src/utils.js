@@ -14,12 +14,16 @@ export function deepClone(obj) {
 // 绝不擅自弹 toast（避免把"有意静默降级"变成烦人弹窗）。
 export function logError(scope, err) {
     const summary = (err && err.message) ? err.message : String(err);
+    // ★ 记录堆栈（前 6 行）：导出调试日志时可精确定位出错代码位置（原来只记一行消息）
+    const stack = (err && err.stack && typeof err.stack === "string")
+        ? err.stack.split("\n").slice(0, 6).join("\n")
+        : "";
     console.warn(`[${scope}]`, err);
     try {
         if (S && S.debugLog) {
             S.debugLog.chunkErrors = S.debugLog.chunkErrors || [];
             if (S.debugLog.chunkErrors.length < 300) {
-                S.debugLog.chunkErrors.push({ t: new Date().toISOString(), scope, msg: summary });
+                S.debugLog.chunkErrors.push({ t: new Date().toISOString(), scope, msg: summary, stack });
             }
         }
     } catch (_) { /* 写缓冲失败不应再抛错 */ }
