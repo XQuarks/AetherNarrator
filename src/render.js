@@ -11,7 +11,7 @@ import { isModuleEnabled, MODULE_REGISTRY } from "./modules.js"; // ★ C1：状
 import { abortCurrentRequest } from "./turn-lifecycle.js";
 import { formatStateChanges } from "./prompt.js";
 // ★ W2-Style：创建向导编辑器逻辑（模块导航 / 风格模板库 / 模块开关 / 世界书入口）
-import { selectCwModule, resetCreateWizard, initCreateWizardDOM } from "./wizard-editor.js";
+import { gotoWizardStep, resetCreateWizard, initCreateWizardDOM, syncPovHighlight } from "./wizard-editor.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
 import { evaluateEndingStatus, ENDING_KINDS } from "./worldview.js"; // ★ docs/54：结局状态评估
 import { saveWorlds } from "./storage.js";
@@ -108,19 +108,23 @@ export function showSettingsScreen() {
     updateSettingsValues();
 }
 
-// ★ W2-Style：创建向导改为编辑器式长页（模块导航见 wizard-editor.js）
+// ★ docs/62：创建向导改为 6 步分步向导（步骤导航见 wizard-editor.js）
 export function showCreateWorldModal() {
-    initCreateWizardDOM();   // 渲染风格模板库 + 模块开关
+    initCreateWizardDOM();   // 渲染步骤条 + 风格模板库 + 模块开关
     resetCreateWorldForm();
-    selectCwModule("basic"); // 默认进入「基本信息」模块
+    gotoWizardStep(0); // 默认回到第 1 步「世界设定」
     showModal("createWorldModal");
 }
 
 // 打开创建弹窗时完整重置表单（含各选项回到默认）
 function resetCreateWorldForm() {
-    const clearIds = ["worldName", "ipName", "worldDesc", "customPrefix", "worldPrefix"];
+    const clearIds = ["worldName", "ipName", "worldDesc", "keyDivergences", "customPrefix", "worldPrefix"];
     clearIds.forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
-    // ★ docs/58：worldType 元素已移除（类型概念删除）；ipName 始终可选，无需类型联动
+    // ★ 叙事视角重置回默认「单人主角」（radio 勾选 + 高亮类一并复位）
+    document.querySelectorAll("input[name='povMode']").forEach((r) => { r.checked = (r.value === "solo"); });
+    syncPovHighlight();
+    // ★ 「已上传源文件」提示按实际上传状态显隐
+    refreshIpNameRequirement();
     // 两个特殊要求默认：不添加
     ["customPrefixGroup", "worldPrefixGroup"].forEach(gid => {
         document.querySelectorAll("#" + gid + " .radio-option").forEach((o, i) => o.classList.toggle("selected", i === 0));
@@ -150,9 +154,8 @@ function resetCreateWorldForm() {
     updateWorldTempLabel();
     // ★ W2-Style：重置编辑器（模板选择 / 叙事文风 / 结构化标签 / 模块开关 / 时间偏好）
     resetCreateWizard();
-    // 收起高级折叠
-    const adv = document.querySelector("#createWorldModal details.advanced-details");
-    if (adv) adv.open = false;
+    // 收起全部高级折叠（基本信息·关键偏离 / 叙事风格·结构化标签 / 生成设置·高级选项）
+    document.querySelectorAll("#createWorldModal details.advanced-details").forEach(d => { d.open = false; });
 }
 
 // ★ docs/58：onWorldTypeChange（原类型下拉联动）已移除——类型下拉不再存在，ipName 始终可选。
@@ -162,18 +165,12 @@ export function isSourceFileUploaded() {
     return !!(S.sourceFileContent && S.sourceFileContent.length > 0);
 }
 
-// ★ docs/58：参考的世界（作品名）始终可选——无需类型联动。保留函数以兼容上传完成/移除文件的调用方，
-// 但现在固定标记为「选填」（不再有必填场景）。
+// ★ docs/58：参考的世界（作品名）始终可选——无需类型联动。
+// 本函数现在只负责一件事：「已上传源文件，也可不填作品名」提示按实际上传状态显隐
+// （上传/移除源文件、打开创建弹窗时调用）。
 export function refreshIpNameRequirement() {
-    const field = document.getElementById("ipNameField");
-    if (!field) return;
-    const tag = document.getElementById("ipNameReqTag");
-    if (tag) {
-        tag.textContent = "选填";
-        tag.className = "opt-tag";
-    }
     const optHint = document.getElementById("ipNameOptHint");
-    if (optHint) optHint.style.display = "";
+    if (optHint) optHint.style.display = isSourceFileUploaded() ? "" : "none";
 }
 
 // ★ W2-Style：叙事风格改用模板库（见 wizard-editor.js 的 selectStyleTemplate），

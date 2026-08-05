@@ -1,7 +1,7 @@
-// 创建向导（docs/58 重构后）可视化核验脚本
+// 创建向导（docs/62 分步向导重构后）可视化核验脚本
 // 用法：node tools/verify-create-wizard.mjs  [BASE_URL]
 // 通过真实点击 [data-action="showCreateWorldModal"] 按钮打开弹窗，
-// 断言：旧字段(世界类型/主角设定/世界观区块/类型编辑弹窗)已移除，新字段(参考作品/ipName/worldDesc/pov 单选)就位。
+// 断言：旧字段(世界类型/主角设定/类型编辑弹窗)已移除；6 步向导骨架（步骤条/pane/底部导航）就位。
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -61,9 +61,14 @@ const r = await page.evaluate(() => {
     povSolo: !!q('input[name="povMode"][value="solo"]'),
     povEnsemble: !!q('input[name="povMode"][value="ensemble"]'),
     hasWorldTypeEditModal: !!q("#worldTypeEditModal"),
-    navItems: all("#createWorldModal .cw-nav-item").map(b => b.textContent.trim()),
+    stepNodes: all("#wzStepsBar .wz-step-node").map(b => (b.querySelector(".wz-step-name") || {}).textContent || ""),
+    oldNavItems: all("#createWorldModal .cw-nav-item").length,
     worldSectionExists: !!q('[data-module="world"]'),
-    basicActive: q('[data-module="basic"]') ? q('[data-module="basic"]').classList.contains("active") : false,
+    step0Active: q('#createWorldModal .wz-pane[data-step="0"]') ? q('#createWorldModal .wz-pane[data-step="0"]').classList.contains("active") : false,
+    otherPanesHidden: all("#createWorldModal .wz-pane").slice(1).every(p => !p.classList.contains("active")),
+    nextVisible: q("#wzNextBtn") ? q("#wzNextBtn").style.display !== "none" : false,
+    genHidden: q("#generateWorldBtn") ? q("#generateWorldBtn").style.display === "none" : true,
+    cancelVisible: q("#wzCancelBtn") ? q("#wzCancelBtn").style.display !== "none" : false,
     refHint: !!q("#ipNameOptHint")
   };
 });
@@ -81,12 +86,17 @@ const expect = {
   povEnsemble: true,
   hasWorldTypeEditModal: false,
   worldSectionExists: false,
-  basicActive: true,
+  step0Active: true,
+  otherPanesHidden: true,
+  nextVisible: true,
+  genHidden: true,
+  cancelVisible: true,
+  oldNavItems: 0,
   refHint: true,
-  navItemsLen: 5
+  stepNodesLen: 6
 };
-const navOk = Array.isArray(r.navItems) && r.navItems.length === expect.navItemsLen &&
-  ["基本信息", "叙事风格", "玩法模块", "时间系统", "生成设置"].every(n => r.navItems.includes(n));
+const stepsOk = Array.isArray(r.stepNodes) && r.stepNodes.length === expect.stepNodesLen &&
+  ["世界设定", "叙事风格", "叙事视角", "玩法时间", "角色资源", "确认生成"].every(n => r.stepNodes.includes(n));
 
 const results = [
   ["弹窗通过按钮真实打开", r.modalOpen === expect.modalOpen],
@@ -98,13 +108,18 @@ const results = [
   ["pov 单选：群像剧 存在", r.povEnsemble === expect.povEnsemble],
   ["旧『类型编辑弹窗』已移除", r.hasWorldTypeEditModal === expect.hasWorldTypeEditModal],
   ["旧『世界观』独立模块已合并", r.worldSectionExists === expect.worldSectionExists],
-  ["默认进入『基本信息』模块", r.basicActive === expect.basicActive],
+  ["旧左侧页签导航已移除", r.oldNavItems === expect.oldNavItems],
+  ["默认激活第 1 步（世界设定）", r.step0Active === expect.step0Active],
+  ["其余步骤页默认隐藏", r.otherPanesHidden === expect.otherPanesHidden],
+  ["底部初始显示「下一步」", r.nextVisible === expect.nextVisible],
+  ["「确认生成」初始隐藏", r.genHidden === expect.genHidden],
+  ["第 1 步显示「取消」", r.cancelVisible === expect.cancelVisible],
   ["参考作品可选提示存在", r.refHint === expect.refHint],
-  ["导航为 5 项(基本信息/叙事风格/玩法模块/时间系统/生成设置)", navOk]
+  ["步骤条为 6 步（世界设定/叙事风格/叙事视角/玩法时间/角色资源/确认生成）", stepsOk]
 ];
 
 let ok = true;
-console.log("=== docs/58 创建向导可视化核验 (" + BASE + ") ===");
+console.log("=== docs/62 创建向导分步向导核验 (" + BASE + ") ===");
 for (const [name, pass] of results) {
   console.log((pass ? "✓ " : "✗ ") + name);
   if (!pass) ok = false;

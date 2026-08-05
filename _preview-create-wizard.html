@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>创建世界 · 分步向导预览（demo，非真实代码）</title>
+<style>
+/* ===== 变量：与 styles.css 同款（暗夜金棕 / 日间青纸墨色） ===== */
+:root {
+    --bg: #191510;
+    --bg-gradient: radial-gradient(ellipse at 50% -10%, #28221A 0%, #211B14 38%, #15110C 100%);
+    --bg-panel: #26221B;
+    --bg-secondary: #26221B;
+    --card: rgba(217, 207, 192, 0.05);
+    --card-hover: rgba(217, 207, 192, 0.09);
+    --card-border: rgba(217, 207, 192, 0.12);
+    --card-border-hover: rgba(217, 207, 192, 0.20);
+    --text: #D9CFC0;
+    --text-secondary: rgba(217, 207, 192, 0.62);
+    --text-muted: rgba(217, 207, 192, 0.42);
+    --primary: #C9A87C;
+    --primary-light: #D8BC9A;
+    --accent-rgb: 201, 168, 124;
+    --success: #7BAA92;
+    --danger: #C56B5E;
+    --warning: #C9A455;
+    --border: rgba(217, 207, 192, 0.14);
+    --btn-primary-text: #1A160F;
+    --glow: rgba(201, 168, 124, 0.35);
+    --radius-l: 12px;
+    --shadow-modal: 0 4px 16px rgba(0,0,0,0.28);
+    --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, Georgia, serif;
+    --sans: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+}
+[data-theme="light"] {
+    --bg: #E8EFEC;
+    --bg-gradient: radial-gradient(ellipse at 50% -10%, #F2F6F3 0%, #E9EFEB 42%, #DEE7E2 100%);
+    --bg-panel: #F1F5F2;
+    --bg-secondary: #EDF2EF;
+    --card: #F4F7F5;
+    --card-hover: #EDF2EF;
+    --card-border: #C4D2CB;
+    --card-border-hover: #9FB4AB;
+    --text: #2E3A38;
+    --text-secondary: #5C6E6A;
+    --text-muted: #93A39E;
+    --primary: #3C6063;
+    --primary-light: #5C8488;
+    --accent-rgb: 60, 96, 99;
+    --success: #4F8A6E;
+    --danger: #A85A4A;
+    --warning: #9A7A38;
+    --border: #C4D2CB;
+    --btn-primary-text: #F4F7F5;
+    --glow: rgba(60, 96, 99, 0.28);
+    --shadow-modal: 0 2px 16px rgba(60,96,99,0.15);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: var(--sans);
+    background: var(--bg);
+    background-image: var(--bg-gradient);
+    background-attachment: fixed;
+    color: var(--text);
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+}
+/* ===== 演示顶条（真实产品无此物） ===== */
+.demo-bar {
+    position: fixed; top: 10px; right: 14px; z-index: 99;
+    display: flex; gap: 8px; align-items: center;
+    font-size: 12px; color: var(--text-muted);
+}
+.demo-bar button {
+    border: 1px solid var(--border); background: var(--card);
+    color: var(--text-secondary); border-radius: 999px;
+    padding: 4px 12px; cursor: pointer; font-size: 12px;
+}
+.demo-note {
+    position: fixed; top: 10px; left: 14px; z-index: 99;
+    font-size: 12px; color: var(--text-muted);
+    background: var(--card); border: 1px dashed var(--border);
+    padding: 4px 10px; border-radius: 999px;
+}
+
+/* ===== 弹窗壳 ===== */
+.wz-modal {
+    width: 860px; max-width: 96vw;
+    height: 640px; max-height: 92vh;
+    background: var(--bg-panel);
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    box-shadow: var(--shadow-modal);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+}
+
+/* ===== 头部：标题 + 关闭 ===== */
+.wz-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 26px 0;
+}
+.wz-title { font-family: var(--serif); font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+.wz-close {
+    border: none; background: transparent; color: var(--text-muted);
+    font-size: 22px; cursor: pointer; line-height: 1; padding: 4px 8px; border-radius: 8px;
+}
+.wz-close:hover { color: var(--text); background: var(--card-hover); }
+
+/* ===== 步骤条 ===== */
+.wz-steps {
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 16px 40px 18px; gap: 0;
+}
+.wz-step-node { display: flex; flex-direction: column; align-items: center; gap: 7px; cursor: default; position: relative; min-width: 76px; }
+.wz-step-node.clickable { cursor: pointer; }
+.wz-dot {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+    border: 2px solid var(--border); color: var(--text-muted);
+    background: var(--bg-panel); transition: all .25s ease; z-index: 1;
+}
+.wz-step-node.done .wz-dot {
+    background: var(--primary); border-color: var(--primary); color: var(--btn-primary-text);
+}
+.wz-step-node.active .wz-dot {
+    border-color: var(--primary); color: var(--primary);
+    box-shadow: 0 0 0 5px rgba(var(--accent-rgb), 0.14), 0 0 14px var(--glow);
+}
+.wz-step-name { font-size: 12px; color: var(--text-muted); white-space: nowrap; transition: color .25s; }
+.wz-step-node.active .wz-step-name { color: var(--text); font-weight: 600; }
+.wz-step-node.done .wz-step-name { color: var(--text-secondary); }
+.wz-line { flex: 1; height: 2px; background: var(--border); margin-top: 14px; min-width: 20px; transition: background .25s; }
+.wz-line.done { background: var(--primary); }
+
+/* ===== 内容区 ===== */
+.wz-body { flex: 1; overflow-y: auto; padding: 6px 40px 20px; }
+.wz-pane { display: none; }
+.wz-pane.active { display: block; animation: paneIn .28s ease; }
+@keyframes paneIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.wz-pane-title { font-family: var(--serif); font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.wz-pane-sub { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 22px; }
+.wz-pane-sub em { color: var(--primary); font-style: normal; }
+
+/* ===== 表单控件 ===== */
+.f-group { margin-bottom: 20px; }
+.f-label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.req { color: var(--danger); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.opt { color: var(--text-muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.f-input, .f-textarea {
+    width: 100%; background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 10px; color: var(--text); font-size: 14px; font-family: var(--sans);
+    padding: 11px 14px; transition: border-color .2s, box-shadow .2s;
+}
+.f-input:focus, .f-textarea:focus {
+    outline: none; border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15);
+}
+.f-input::placeholder, .f-textarea::placeholder { color: var(--text-muted); }
+.f-input.hero { font-size: 17px; padding: 14px 16px; font-family: var(--serif); }
+.f-textarea { min-height: 110px; resize: vertical; line-height: 1.6; }
+.f-hint { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
+
+/* 上传卡片 */
+.upload-card {
+    border: 1.5px dashed var(--card-border); border-radius: 12px;
+    padding: 18px; text-align: center; cursor: pointer;
+    color: var(--text-secondary); font-size: 13px;
+    transition: border-color .2s, background .2s;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.upload-card:hover { border-color: var(--primary); background: var(--card-hover); }
+.upload-card .up-icon { font-size: 20px; }
+
+/* 折叠高级区 */
+.adv { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+.adv summary {
+    padding: 11px 14px; cursor: pointer; font-size: 13px; color: var(--text-secondary);
+    list-style: none; display: flex; align-items: center; gap: 8px; user-select: none;
+}
+.adv summary::before { content: "▸"; color: var(--primary); transition: transform .2s; }
+.adv[open] summary::before { transform: rotate(90deg); }
+.adv summary:hover { color: var(--text); }
+.adv-body { padding: 4px 14px 14px; }
+
+/* 模板卡网格 */
+.tpl-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+.tpl-card {
+    border: 1px solid var(--card-border); background: var(--card); border-radius: 12px;
+    padding: 13px 12px; cursor: pointer; transition: all .2s; position: relative;
+}
+.tpl-card:hover { border-color: var(--card-border-hover); transform: translateY(-2px); }
+.tpl-card.selected { border-color: var(--primary); background: rgba(var(--accent-rgb), 0.10); box-shadow: 0 0 0 1px var(--primary); }
+.tpl-card.selected::after {
+    content: "✓"; position: absolute; top: 8px; right: 10px;
+    color: var(--primary); font-weight: 700; font-size: 13px;
+}
+.tpl-name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.tpl-tag { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+
+/* 单选大卡 */
+.choice-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.choice-card {
+    border: 1px solid var(--card-border); background: var(--card); border-radius: 12px;
+    padding: 16px; cursor: pointer; transition: all .2s;
+}
+.choice-card:hover { border-color: var(--card-border-hover); }
+.choice-card.selected { border-color: var(--primary); background: rgba(var(--accent-rgb), 0.10); box-shadow: 0 0 0 1px var(--primary); }
+.choice-title { font-size: 15px; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.choice-desc { font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; }
+
+/* 滑块 */
+.slider-wrap { background: var(--card); border: 1px solid var(--card-border); border-radius: 12px; padding: 16px; }
+.slider-current { text-align: center; font-size: 14px; font-weight: 600; color: var(--primary); margin-bottom: 12px; }
+input[type="range"] { width: 100%; accent-color: var(--primary); cursor: pointer; }
+.slider-ends { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-muted); margin-top: 8px; }
+
+/* 模块开关网格 */
+.mod-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mod-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    border: 1px solid var(--card-border); background: var(--card);
+    border-radius: 10px; padding: 11px 13px;
+}
+.mod-item.locked { opacity: .55; }
+.mod-name { font-size: 13px; font-weight: 600; }
+.mod-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.mod-lock { font-size: 11px; color: var(--warning); }
+.switch {
+    width: 38px; height: 22px; border-radius: 999px; flex: none;
+    background: rgba(var(--accent-rgb), 0.22); border: none; cursor: pointer; position: relative;
+    transition: background .2s;
+}
+.switch::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--text-secondary); transition: all .2s;
+}
+.switch.on { background: var(--primary); }
+.switch.on::after { left: 19px; background: var(--btn-primary-text); }
+
+/* 预设容器卡 */
+.preset-card {
+    border: 1px solid var(--card-border); background: var(--card); border-radius: 12px;
+    margin-bottom: 10px; overflow: hidden;
+}
+.preset-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 16px; cursor: pointer; user-select: none;
+}
+.preset-head:hover { background: var(--card-hover); }
+.preset-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.preset-count { font-size: 11px; color: var(--text-muted); }
+.preset-ai {
+    border: 1px solid var(--primary); color: var(--primary); background: transparent;
+    font-size: 12px; border-radius: 999px; padding: 4px 12px; cursor: pointer;
+}
+.preset-ai:hover { background: rgba(var(--accent-rgb), 0.12); }
+
+/* 汇总卡 */
+.sum-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.sum-item { border: 1px solid var(--card-border); background: var(--card); border-radius: 10px; padding: 12px 14px; }
+.sum-k { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.sum-v { font-size: 13.5px; font-weight: 600; line-height: 1.5; }
+.sum-v.empty { color: var(--text-muted); font-weight: 400; }
+.sum-edit { float: right; font-size: 11px; color: var(--primary); cursor: pointer; border: none; background: none; }
+.sum-edit:hover { text-decoration: underline; }
+
+/* 校验条 */
+.val-ok {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid rgba(123, 170, 146, 0.4); background: rgba(123, 170, 146, 0.08);
+    color: var(--success); border-radius: 10px; padding: 11px 14px; font-size: 13px;
+}
+
+/* ===== 底部导航 ===== */
+.wz-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 26px; border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+.wz-foot-left, .wz-foot-right { display: flex; gap: 10px; align-items: center; }
+.btn {
+    border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+    padding: 10px 22px; transition: all .2s; border: 1px solid transparent;
+}
+.btn-ghost { background: transparent; color: var(--text-secondary); border-color: var(--border); }
+.btn-ghost:hover { color: var(--text); border-color: var(--card-border-hover); background: var(--card-hover); }
+.btn-ghost:disabled { opacity: .35; cursor: default; }
+.btn-skip { background: transparent; border: none; color: var(--text-muted); font-size: 13px; cursor: pointer; padding: 10px 8px; }
+.btn-skip:hover { color: var(--text-secondary); }
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary), var(--primary-light));
+    color: var(--btn-primary-text); border: none;
+    box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.35);
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.45); }
+
+@media (max-width: 720px) {
+    .wz-body { padding: 6px 20px 16px; }
+    .wz-steps { padding: 12px 12px 14px; }
+    .wz-step-name { display: none; }
+    .wz-step-node.active .wz-step-name { display: block; position: absolute; top: 36px; }
+    .tpl-grid, .mod-grid, .sum-grid, .choice-row { grid-template-columns: 1fr; }
+    .tpl-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="demo-note">UI 预览 demo · 非真实代码</div>
+<div class="demo-bar">
+    <span>主题：</span>
+    <button id="themeBtn">切换明/暗</button>
+</div>
+
+<div class="wz-modal">
+    <div class="wz-header">
+        <div class="wz-title">创建新世界</div>
+        <button class="wz-close" title="关闭">×</button>
+    </div>
+
+    <!-- 步骤条 -->
+    <div class="wz-steps" id="stepsBar"></div>
+
+    <!-- 内容区 -->
+    <div class="wz-body">
+
+        <!-- 第 1 步：世界设定 -->
+        <section class="wz-pane" data-pane="0">
+            <div class="wz-pane-title">这是一个怎样的世界？</div>
+            <p class="wz-pane-sub">只需要 <em>名称</em> 和 <em>世界观描述</em> 两项就能创建，其余都是可选加分项。</p>
+            <div class="f-group">
+                <label class="f-label">世界名称<span class="req">必填</span></label>
+                <input class="f-input hero" placeholder="例如：剑来、霍格沃茨的日常、原创仙侠">
+            </div>
+            <div class="f-group">
+                <label class="f-label">参考作品<span class="opt">可选</span></label>
+                <input class="f-input" placeholder="例如：哈利波特、三体、红楼梦……留空即完全原创">
+                <div class="f-hint">填了参考作品，AI 会结合原著生成，并在游玩时做「世界观约束」扫描。</div>
+            </div>
+            <div class="f-group">
+                <div class="upload-card"><span class="up-icon">📄</span><span>上传小说 / 原著源文件（TXT · DOCX · EPUB），AI 以原文为准生成世界观</span></div>
+            </div>
+            <div class="f-group">
+                <label class="f-label">世界观描述<span class="req">必填</span></label>
+                <textarea class="f-textarea" placeholder="描述这个世界的规则、力量体系、主要势力、地点、人物关系……越详细，AI 越贴合你的想象。"></textarea>
+                <div class="f-hint">描述与上传源文件至少有一项即可。</div>
+            </div>
+            <details class="adv">
+                <summary>高级：关键偏离（改动原作设定时填写）</summary>
+                <div class="adv-body">
+                    <textarea class="f-textarea" style="min-height:70px" placeholder="例如：时间线改到 2025 年 / 主角替换为原创角色 / 伏地魔已被击败……"></textarea>
+                </div>
+            </details>
+        </section>
+
+        <!-- 第 2 步：叙事风格 -->
+        <section class="wz-pane" data-pane="1">
+            <div class="wz-pane-title">故事读起来是什么味道？</div>
+            <p class="wz-pane-sub">从模板一键套用，或完全自己写。不选就用<em>均衡通用</em>风格，随时可跳过。</p>
+            <div class="f-group">
+                <div class="tpl-grid" id="tplGrid"></div>
+                <div class="f-hint">已选：<b id="tplCurrent" style="color:var(--primary)">未选择（使用默认风格）</b></div>
+            </div>
+            <div class="f-group">
+                <label class="f-label">叙事文风<span class="opt">可选，AI 严格遵循</span></label>
+                <textarea class="f-textarea" placeholder="套用模板自动填入，可随意改写；也可留空交给 AI。"></textarea>
+            </div>
+            <div class="f-group">
+                <label class="f-label">AI 创造性</label>
+                <div class="slider-wrap">
+                    <div class="slider-current">0.7 — 均衡模式</div>
+                    <input type="range" min="0" max="10" value="7">
+                    <div class="slider-ends"><span>严谨一致</span><span>自由发散</span></div>
+                </div>
+            </div>
+            <details class="adv">
+                <summary>高级：结构化标签（题材 / 主题 / 口味 / 视角）</summary>
+                <div class="adv-body">
+                    <div class="f-hint">（此处为现有标签芯片区，样式不变，仅收入折叠）</div>
+                </div>
+            </details>
+        </section>
+
+        <!-- 第 3 步：叙事视角 -->
+        <section class="wz-pane" data-pane="2">
+            <div class="wz-pane-title">你以什么身份进入故事？</div>
+            <p class="wz-pane-sub">两个轻量选择，都有默认值，可直接<em>跳过</em>。</p>
+            <div class="f-group">
+                <label class="f-label">叙事视角</label>
+                <div class="choice-row">
+                    <div class="choice-card selected">
+                        <div class="choice-title">🧍 单人主角</div>
+                        <div class="choice-desc">AI 按世界观设计主角身份 / 背景 / 能力，你扮演该主角推进剧情。</div>
+                    </div>
+                    <div class="choice-card">
+                        <div class="choice-title">👥 群像剧</div>
+                        <div class="choice-desc">戏份均衡的多角色群像，无唯一主角，你以参与者视角推进。</div>
+                    </div>
+                </div>
+            </div>
+            <div class="f-group">
+                <label class="f-label">剧情自由度</label>
+                <div class="slider-wrap">
+                    <div class="slider-current">适中发散 — 在世界观内适度创新</div>
+                    <input type="range" min="1" max="5" value="3">
+                    <div class="slider-ends"><span>严格遵循原著</span><span>完全自由创作</span></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 第 4 步：玩法与时间 -->
+        <section class="wz-pane" data-pane="3">
+            <div class="wz-pane-title">这个世界有哪些玩法系统？</div>
+            <p class="wz-pane-sub">默认配置适合大多数世界，可直接<em>跳过</em>；创建后也能在设置里随时改。</p>
+            <div class="f-group">
+                <div class="mod-grid" id="modGrid"></div>
+            </div>
+            <div class="f-group">
+                <label class="f-label">时间推进方式</label>
+                <div class="slider-wrap" style="padding:12px 16px">
+                    <select class="f-input" style="cursor:pointer">
+                        <option>自动（由 AI 按世界观决定，不锁定）</option>
+                        <option>按「第 N 天」</option>
+                        <option>公历月日 + 星期</option>
+                        <option>农历月日</option>
+                        <option>自定义历法</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+
+        <!-- 第 5 步：角色与资源 -->
+        <section class="wz-pane" data-pane="4">
+            <div class="wz-pane-title">要预置角色和资源吗？</div>
+            <p class="wz-pane-sub">整步<em>可跳过</em>——留空的部分由 AI 建世界时自动补齐；你填过的会成为权威设定。</p>
+            <div id="presetList"></div>
+        </section>
+
+        <!-- 第 6 步：确认生成 -->
+        <section class="wz-pane" data-pane="5">
+            <div class="wz-pane-title">确认一下，然后开工</div>
+            <p class="wz-pane-sub">下面是本次世界的配置摘要，点「修改」可跳回对应步骤。</p>
+            <div class="sum-grid">
+                <div class="sum-item"><div class="sum-k">世界名称 <button class="sum-edit">修改</button></div><div class="sum-v">雾都诡事</div></div>
+                <div class="sum-item"><div class="sum-k">参考作品</div><div class="sum-v empty">完全原创</div></div>
+                <div class="sum-item"><div class="sum-k">叙事风格</div><div class="sum-v">悬疑怪谈 · 温度 0.7</div></div>
+                <div class="sum-item"><div class="sum-k">视角 / 自由度</div><div class="sum-v">单人主角 · 适中发散</div></div>
+                <div class="sum-item"><div class="sum-k">玩法模块</div><div class="sum-v">默认 14 项全开</div></div>
+                <div class="sum-item"><div class="sum-k">时间系统</div><div class="sum-v">自动（不锁定）</div></div>
+                <div class="sum-item"><div class="sum-k">角色与资源预设</div><div class="sum-v empty">未预置，由 AI 补齐</div></div>
+                <div class="sum-item"><div class="sum-k">特殊要求</div><div class="sum-v empty">无</div></div>
+            </div>
+            <details class="adv">
+                <summary>高级：特殊要求（附加到 AI Prompt）</summary>
+                <div class="adv-body">
+                    <div class="f-hint">（此处为现有「世界观生成 / 对话」两组特殊要求，样式不变，仅收入折叠）</div>
+                </div>
+            </details>
+            <div class="val-ok">✓ 配置校验通过，可以生成</div>
+        </section>
+    </div>
+
+    <!-- 底部导航 -->
+    <div class="wz-footer">
+        <div class="wz-foot-left">
+            <button class="btn btn-ghost" id="prevBtn">← 上一步</button>
+        </div>
+        <div class="wz-foot-right">
+            <button class="btn-skip" id="skipBtn">此步可跳过 →</button>
+            <button class="btn btn-primary" id="nextBtn">下一步 →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const STEPS = [
+    { name: "世界设定", skippable: false },
+    { name: "叙事风格", skippable: true },
+    { name: "叙事视角", skippable: true },
+    { name: "玩法时间", skippable: true },
+    { name: "角色资源", skippable: true },
+    { name: "确认生成", skippable: false },
+];
+let cur = 0;
+const done = new Set();
+
+const stepsBar = document.getElementById("stepsBar");
+function renderSteps() {
+    stepsBar.innerHTML = "";
+    STEPS.forEach((s, i) => {
+        const node = document.createElement("div");
+        node.className = "wz-step-node" + (i === cur ? " active" : "") + (done.has(i) ? " done" : "") + ((done.has(i) || i < cur) ? " clickable" : "");
+        node.innerHTML = `<div class="wz-dot">${done.has(i) && i !== cur ? "✓" : i + 1}</div><div class="wz-step-name">${s.name}</div>`;
+        if (done.has(i) || i < cur) node.onclick = () => { cur = i; render(); };
+        stepsBar.appendChild(node);
+        if (i < STEPS.length - 1) {
+            const line = document.createElement("div");
+            line.className = "wz-line" + (done.has(i) ? " done" : "");
+            stepsBar.appendChild(line);
+        }
+    });
+}
+function render() {
+    document.querySelectorAll(".wz-pane").forEach(p => p.classList.toggle("active", +p.dataset.pane === cur));
+    document.getElementById("prevBtn").disabled = cur === 0;
+    const last = cur === STEPS.length - 1;
+    document.getElementById("nextBtn").textContent = last ? "✦ 确认生成" : "下一步 →";
+    document.getElementById("skipBtn").style.display = STEPS[cur].skippable ? "" : "none";
+    renderSteps();
+}
+document.getElementById("nextBtn").onclick = () => { done.add(cur); if (cur < STEPS.length - 1) { cur++; render(); } };
+document.getElementById("prevBtn").onclick = () => { if (cur > 0) { cur--; render(); } };
+document.getElementById("skipBtn").onclick = () => { done.add(cur); if (cur < STEPS.length - 1) { cur++; render(); } };
+
+/* 模板卡（示意 8 个） */
+const TPLS = [
+    ["武侠江湖", "刀光剑影 · 快意恩仇"], ["仙侠问道", "缥缈出尘 · 问道长生"],
+    ["悬疑怪谈", "诡谲压抑 · 细思极恐"], ["赛博朋克", "霓虹冷雨 · 高科技低生活"],
+    ["西幻史诗", "剑与魔法 · 宏大叙事"], ["都市爽文", "节奏明快 · 打脸逆袭"],
+    ["克苏鲁", "不可名状 · 理智崩坏"], ["治愈日常", "温暖细腻 · 岁月静好"],
+];
+const tplGrid = document.getElementById("tplGrid");
+TPLS.forEach(([n, t]) => {
+    const c = document.createElement("div");
+    c.className = "tpl-card";
+    c.innerHTML = `<div class="tpl-name">${n}</div><div class="tpl-tag">${t}</div>`;
+    c.onclick = () => {
+        document.querySelectorAll(".tpl-card").forEach(x => x.classList.remove("selected"));
+        c.classList.add("selected");
+        document.getElementById("tplCurrent").textContent = n;
+    };
+    tplGrid.appendChild(c);
+});
+
+/* 模块开关（示意） */
+const MODS = [
+    ["时间系统", "纪元 / 历法 / 时间推进", true, false],
+    ["事件卡与支线", "随机事件 · 支线体力", true, false],
+    ["人物卡", "NPC 结构化档案", true, false],
+    ["背包物品", "物品获取与使用", true, false],
+    ["羁绊好感度", "NPC 关系数值", true, false],
+    ["知识库", "世界观约束与防剧透", true, true],
+    ["玩家变量", "体力 / 金钱等数值", false, false],
+    ["技能体系", "能力成长", false, false],
+];
+const modGrid = document.getElementById("modGrid");
+MODS.forEach(([n, d, on, lock]) => {
+    const el = document.createElement("div");
+    el.className = "mod-item" + (lock ? " locked" : "");
+    el.innerHTML = `<div><div class="mod-name">${n}</div><div class="mod-desc">${d}</div></div>` +
+        (lock ? `<span class="mod-lock">核心 · 常开</span>` : `<button class="switch ${on ? "on" : ""}" onclick="this.classList.toggle('on')"></button>`);
+    modGrid.appendChild(el);
+});
+
+/* 预设容器（示意） */
+const PRESETS = ["人物卡", "玩家变量", "背包物品", "技能体系", "目标", "支线事件"];
+const presetList = document.getElementById("presetList");
+PRESETS.forEach(n => {
+    const el = document.createElement("div");
+    el.className = "preset-card";
+    el.innerHTML = `<div class="preset-head"><div class="preset-title">▸ ${n} <span class="preset-count">未预置</span></div><button class="preset-ai">✦ AI 生成</button></div>`;
+    presetList.appendChild(el);
+});
+
+/* 主题切换 */
+document.getElementById("themeBtn").onclick = () => {
+    document.documentElement.toggleAttribute("data-theme-light");
+    const light = document.documentElement.hasAttribute("data-theme-light");
+    if (light) document.documentElement.setAttribute("data-theme", "light");
+    else document.documentElement.removeAttribute("data-theme");
+};
+
+render();
+</script>
+</body>
+</html>

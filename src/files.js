@@ -171,7 +171,7 @@ export function clearSourceFile(e) {
     const text = document.getElementById("fileUploadText");
     const input = document.getElementById("sourceFile");
     area.classList.remove("has-file");
-    text.innerHTML = `点击上传 TXT / DOCX 文件`;
+    text.innerHTML = `点击上传 TXT / DOCX / EPUB 文件`;
     // 文件上传区点击已在初始化时通过事件委托统一绑定
     input.value = "";
     refreshIpNameRequirement(); // ★ 移除文件后：作品名称恢复为必填

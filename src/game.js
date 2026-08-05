@@ -13,7 +13,9 @@ import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebui
 import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative, generateConsistencyPack, predictBranches, aiGenerateDaily } from "./llm.js";
 import { checkDeathBanner, closeModal, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, renderEndingTracker, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry, collectStylePrefs } from "./render.js";
 // ★ W2-Style：读取创建向导的 style_preset / 模块开关 / 时间偏好
-import { getStylePresetFromWizard, getWizardModuleSettings, getWizardTimePreset } from "./wizard-editor.js";
+import { getStylePresetFromWizard, getWizardModuleSettings, getWizardTimePreset, getWizardTimeConfig, buildTimeConfigPrompt, syncPovHighlight } from "./wizard-editor.js";
+// ★ docs/60：读取创建向导里玩家预设的叙事结构化容器
+import { getWizardContainers, validateWizardContainers, renderValidationPanel } from "./wizard-containers.js"; // ★ docs/60：创建向导容器；★ docs/61：关联校验
 import { serializeStylePreset } from "./style-presets.js";
 import { filterStateChangesByWorldview, findWorldviewViolations, isEnhancementContextCurrent, shouldRunAIEnhancements, evaluateRules, recordWorldviewNag, appendUniqueEnding } from "./worldview.js";
 import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
@@ -109,6 +111,47 @@ function warnIfTimeCorrected(rawGen) {
     }
 }
 
+// ★ docs/60：把玩家在创建向导预设的容器摘要成 AI 约束提示，让 AI 在建世界时尊重并补全空白（不改写玩家已填内容）
+export function buildContainerConstraintPrompt(wc) {
+    const d = wc.data;
+    const parts = [];
+    if (d.characters && d.characters.length) {
+        parts.push("【玩家预设角色】" + d.characters.map(c => (c.role === "protagonist" ? "主角" : "NPC") + "：" + (c.name || "未命名") + (c.identity ? "（" + c.identity + "）" : "")).join("；"));
+    }
+    if (d.variable_schema && d.variable_schema.length) {
+        parts.push("【玩家预设变量】" + d.variable_schema.map(v => v.name + "(" + v.id + ")").join("、"));
+    }
+    if (d.inventory && d.inventory.length) {
+        parts.push("【玩家预设开局物品】" + d.inventory.map(v => v.name).join("、"));
+    }
+    if (d.skills && Object.keys(d.skills).length) {
+        parts.push("【玩家预设技能】" + Object.keys(d.skills).join("、"));
+    }
+    if (d.goals && d.goals.length) {
+        parts.push("【玩家预设目标】" + d.goals.map(g => g.name).join("、"));
+    }
+    if (d.sideEvents && d.sideEvents.length) {
+        parts.push("【玩家预设支线】" + d.sideEvents.map(s => s.title).join("、"));
+    }
+    if (!parts.length) return "";
+    return "【玩家已在创建向导中预设以下内容，请严格尊重其设定并保持一致性，仅在空白或缺失处补全，不要改写玩家已填内容：】\n" + parts.join("\n");
+}
+
+// ★ docs/60：玩家预设容器 = 权威（不被 AI 覆盖）；未配容器走 AI 兜底（initial_state 已由 generated 提供）
+export function applyWizardContainers(world, wc) {
+    if (!world) return;
+    const d = wc.data;
+    if (!world.initial_state || typeof world.initial_state !== "object") world.initial_state = {};
+    if (wc.locked.has("characters")) world.characters = d.characters;
+    if (wc.locked.has("variables")) world.variable_schema = d.variable_schema;
+    if (wc.locked.has("inventory")) world.initial_state.inventory = d.inventory;
+    if (wc.locked.has("skills")) world.initial_state.skills = d.skills;        // 运行时为对象映射
+    if (wc.locked.has("goals")) world.initial_state.goals = d.goals;
+    world.initial_state.preset_side_events = d.sideEvents || [];              // 预置支线池（运行时按需注入）
+    if (!world.modules || typeof world.modules !== "object") world.modules = {};
+    wc.enableModules.forEach(m => { world.modules[m] = { enabled: true }; }); // 填了容器 → 开对应模块
+}
+
 export async function generateWorld() {
     const name = document.getElementById("worldName").value.trim();
     const desc = document.getElementById("worldDesc").value.trim();
@@ -132,9 +175,14 @@ export async function generateWorld() {
     // ★ W2-Style：时间系统偏好作为生成提示并入 worldPrefix（沿用既有「世界观生成前缀」通道）
     const timePref = getWizardTimePreset();
     const timeHint = timePref.hint || "";
+    const timeConstraint = buildTimeConfigPrompt(); // ★ docs/59：玩家锁定的时间体系 → 结构化硬约束注入 prompt
     const worldPrefixRaw = (worldPrefixEnabled && worldPrefixEnabled.value === "on") ? document.getElementById("worldPrefix").value.trim() : "";
-    const worldPrefix = (worldPrefixRaw + (timeHint ? "\n" + timeHint : "")).trim();
+    let worldPrefix = (worldPrefixRaw + (timeHint ? "\n" + timeHint : "") + (timeConstraint ? "\n" + timeConstraint : "")).trim();
     const keyDivergences = document.getElementById("keyDivergences") ? document.getElementById("keyDivergences").value.trim() : "";
+    // ★ docs/60：收集玩家在创建向导里预设的容器；作为 AI 硬约束注入，AI 据此完善/补全空白
+    const wizardContainers = getWizardContainers();
+    const containerConstraint = buildContainerConstraintPrompt(wizardContainers);
+    if (containerConstraint) worldPrefix = (worldPrefix + "\n" + containerConstraint).trim();
 
     // ★ docs/58：校验规则——世界名称必填；世界观「描述」或「上传源文件」至少填一项。
     if (!name) {
@@ -143,6 +191,13 @@ export async function generateWorld() {
     }
     if (!desc && !isSourceFileUploaded()) {
         showToast("请填写世界观描述，或上传小说源文件（二者至少一项）", "error");
+        return;
+    }
+    // ★ docs/61：容器间关联校验 —— 存在 error 级问题则拦截生成（如填了好感但羁绊模块未开、群像剧设主角卡）
+    const wv = validateWizardContainers();
+    if (wv.errors.length) {
+        renderValidationPanel();
+        showToast("⚠ " + wv.errors[0].msg, "error", 5000);
         return;
     }
 
@@ -223,6 +278,11 @@ export async function generateWorld() {
                 return Number.isFinite(v) ? v : 0.7;
             })()
         };
+        // ★ docs/60：玩家预设容器写入世界（玩家=权威，未配=AI 兜底）；并联动开启对应模块
+        applyWizardContainers(world, wizardContainers);
+        // ★ docs/59：玩家在向导锁定的时间体系 → 覆盖 AI 生成的 time_config（仅覆盖该子对象，不动其它 schema）
+        const wizardTimeConfig = getWizardTimeConfig();
+        if (wizardTimeConfig) world.schema.time_config = wizardTimeConfig;
         // ★ docs/58：solo 模式由 AI 设计主角，回填 world.hero（供展示/注入/完成度清单）。
         // 群像剧（ensemble）world.hero 保持空——无固定单一主角。
         if (pov === "solo" && generated && generated.initial_state) {
@@ -280,9 +340,11 @@ export async function generateWorld() {
         if (document.getElementById("heroDesc")) document.getElementById("heroDesc").value = "";
         if (document.getElementById("ipName")) document.getElementById("ipName").value = "";
         if (document.getElementById("narrativeStyle")) document.getElementById("narrativeStyle").value = "";
-        // ★ docs/58：叙事视角重置回默认「单人主角」
+        // ★ docs/58：叙事视角重置回默认「单人主角」（radio + 高亮类同步复位）
         document.querySelectorAll("input[name='povMode']").forEach((r) => { r.checked = (r.value === "solo"); });
-        document.querySelectorAll("#povGroup .radio-option").forEach((o) => o.classList.toggle("selected", o.dataset.value === "solo"));
+        syncPovHighlight();
+        const kdEl = document.getElementById("keyDivergences");
+        if (kdEl) kdEl.value = "";
         document.getElementById("customPrefix").value = "";
         // 重置特殊要求开关
         document.querySelectorAll("#customPrefixGroup .radio-option").forEach((o, i) => {

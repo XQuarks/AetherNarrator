@@ -1142,7 +1142,14 @@ export function parseCharacters(text) {
             current_state: typeof c.current_state === "string" ? c.current_state.trim() : "",
             voice: typeof c.voice === "string" ? c.voice.trim() : "",
             untouchable: typeof c.untouchable === "string" ? c.untouchable.trim() : "",
-            notes: typeof c.notes === "string" ? c.notes.trim() : ""
+            notes: typeof c.notes === "string" ? c.notes.trim() : "",
+            // ★ B4：解析初始好感度与关系标签（之前被丢弃，导致 AI 设不了好感初值）
+            affinity: (typeof c.affinity === "number" && isFinite(c.affinity))
+                ? Math.max(-100, Math.min(100, c.affinity))
+                : (parseFloat(c.affinity) || 0),
+            rel_tags: Array.isArray(c.rel_tags)
+                ? c.rel_tags.map(t => String(t).trim()).filter(Boolean)
+                : (typeof c.rel_tags === "string" ? c.rel_tags.split(/[，,]/).map(t => t.trim()).filter(Boolean) : [])
         });
     }
     return out.slice(0, 12);
@@ -1160,21 +1167,31 @@ const CHARACTER_SYSTEM_PROMPT = `你是文字游戏角色设计师。根据用�
   "motivation": "核心目标/动机",
   "relationship": "（NPC）与主角关系",
   "attitude": "（NPC）对主角态度",
+  "affinity": -100 到 100 的整数（NPC 对主角的初始好感，主角留 0）,
+  "rel_tags": ["关系标签", "如 亦敌亦友"]（NPC 专属，可空数组）,
   "current_state": "（NPC）当前状态/所在",
   "voice": "（NPC）声音标签/说话方式",
   "untouchable": "不可触碰设定（红线）",
   "notes": "自由备注"
 }
-要求：主角 1 张；NPC 2-5 张；字段用中文简洁填写；无内容填空字符串。`;
+要求：主角 1 张；NPC 2-5 张；字段用中文简洁填写；无内容填空字符串或空数组。若提供了玩家已填的骨架，请尊重并补全其空白字段，不要改动玩家已填的姓名/身份等内容。`;
 
 // ★ B1：建世界/编辑时由 AI 依据世界观草拟角色卡。无 API / mock / 失败 均安全返回空数组，绝不阻断。
-export async function generateCharacters(world) {
+// existing：玩家在向导里已填的骨架（完善模式），传入后 AI 据此补全空白。
+export async function generateCharacters(world, existing = null) {
     const w = world || S.currentWorld;
     if (!w) return [];
     const desc = (w.desc || "").slice(0, 4000);
     const hero = (w.hero || "").slice(0, 1000);
     const ipLine = w.ip_name ? `\n【已知 IP / 改编来源】：${w.ip_name}` : "";
-    const userContent = `【世界观描述】\n${desc}\n\n【主角设定】\n${hero}${ipLine}\n\n请只输出角色卡 JSON 数组：`;
+    let userContent = `【世界观描述】\n${desc}\n\n【主角设定】\n${hero}${ipLine}\n\n请只输出角色卡 JSON 数组：`;
+    if (Array.isArray(existing) && existing.length) {
+        userContent += `\n\n【玩家已填骨架（请尊重并补全空白字段，勿改已填内容）】\n` +
+            JSON.stringify(existing.map(c => ({
+                name: c.name, identity: c.identity, role: c.role,
+                affinity: c.affinity, rel_tags: c.rel_tags, notes: c.notes
+            })), null, 2);
+    }
     try {
         const obj = await callStructured(
             [
@@ -1189,6 +1206,122 @@ export async function generateCharacters(world) {
         logError("characterCard", e);
         return [];
     }
+}
+
+// ============================================================
+// ★ docs/60：其余容器的 AI 生成器（建世界向导「AI 从零生成 / 完善」复用）
+// 统一约定：传最小 world 上下文 { name, desc, ip_name }；existing 为玩家骨架（完善模式）。
+// 无 API / mock / 失败 均安全返回空数组，绝不阻断建世界。
+// ============================================================
+function wcContextLine(w) {
+    const desc = (w && w.desc || "").slice(0, 3000);
+    const ipLine = (w && w.ip_name) ? `\n【已知 IP / 改编来源】：${w.ip_name}` : "";
+    return `【世界观】${desc}${ipLine}`;
+}
+function wcExistingLine(existing, label) {
+    if (!Array.isArray(existing) || !existing.length) return "";
+    return `\n\n【玩家已填骨架（请尊重并补全空白字段，勿改已填内容）】\n` + JSON.stringify(existing, null, 2) + `\n（返回的 ${label} 可与骨架同名合并）`;
+}
+
+// ---- 玩家变量 ----
+export async function generateVariables(world, existing = null) {
+    const w = world || S.currentWorld;
+    if (!w) return [];
+    const sys = `你是文字游戏系统设计师。依据世界观，设计玩家变量（数值/文本/开关），如理智、金钱、声望、体力等。
+只输出 JSON 数组，元素：{"id":"英文唯一键","name":"展示名","type":"number|text|toggle","default":<值>,"min":<数可空>,"max":<数可空>,"unit":"单位可空","desc":"注入AI的说明"}。id 须英文无空格；字段用中文简洁。`;
+    const user = wcContextLine(w) + "\n\n请输出玩家变量 JSON 数组：" + wcExistingLine(existing, "variables");
+    try {
+        const obj = await callStructured([{ role: "system", content: sys }, { role: "user", content: user }],
+            "player_variables", { maxTokens: 1200, temperature: 0.5, mockFn: () => [] });
+        const arr = Array.isArray(obj) ? obj : [];
+        return arr.slice(0, 20).map(v => ({
+            id: String(v.id || "").trim(),
+            name: String(v.name || "").trim(),
+            type: v.type === "text" || v.type === "toggle" ? v.type : "number",
+            default: v.type === "toggle" ? (v.default === true) : (Number.isFinite(Number(v.default)) ? Number(v.default) : 0),
+            min: Number.isFinite(Number(v.min)) ? Number(v.min) : undefined,
+            max: Number.isFinite(Number(v.max)) ? Number(v.max) : undefined,
+            unit: v.unit ? String(v.unit) : "",
+            desc: v.desc ? String(v.desc) : ""
+        })).filter(v => v.id && v.name);
+    } catch (e) { logError("genVariables", e); return []; }
+}
+
+// ---- 初始背包物品 ----
+export async function generateInventory(world, existing = null) {
+    const w = world || S.currentWorld;
+    if (!w) return [];
+    const sys = `你是文字游戏道具设计师。依据世界观，设计开局初始物品。
+只输出 JSON 数组，元素：{"item_id":"英文唯一键","name":"展示名","count":<整数>,"category":"武器|装备|消耗品|线索|书籍|货币|其他","is_key":<布尔>,"tags":["解锁标签"]}。字段用中文简洁。`;
+    const user = wcContextLine(w) + "\n\n请输出初始物品 JSON 数组：" + wcExistingLine(existing, "items");
+    try {
+        const obj = await callStructured([{ role: "system", content: sys }, { role: "user", content: user }],
+            "initial_items", { maxTokens: 1200, temperature: 0.5, mockFn: () => [] });
+        const arr = Array.isArray(obj) ? obj : [];
+        const CATS = ["武器", "装备", "消耗品", "线索", "书籍", "货币", "其他"];
+        return arr.slice(0, 30).map(v => ({
+            item_id: String(v.item_id || "").trim(),
+            name: String(v.name || "").trim(),
+            count: Number.isFinite(Number(v.count)) ? Math.max(0, Number(v.count)) : 1,
+            category: CATS.includes(v.category) ? v.category : "其他",
+            is_key: !!v.is_key,
+            tags: Array.isArray(v.tags) ? v.tags.map(t => String(t).trim()).filter(Boolean) : []
+        })).filter(v => v.item_id && v.name);
+    } catch (e) { logError("genInventory", e); return []; }
+}
+
+// ---- 技能 / 功法 ----
+export async function generateSkills(world, existing = null) {
+    const w = world || S.currentWorld;
+    if (!w) return [];
+    const sys = `你是文字游戏技能设计师。依据世界观，设计可习得/成长的技能或功法。
+只输出 JSON 数组，元素：{"name":"技能名","desc":"一句话描述/效果"}。字段用中文简洁。`;
+    const user = wcContextLine(w) + "\n\n请输出技能 JSON 数组：" + wcExistingLine(existing, "skills");
+    try {
+        const obj = await callStructured([{ role: "system", content: sys }, { role: "user", content: user }],
+            "skills_list", { maxTokens: 1200, temperature: 0.6, mockFn: () => [] });
+        const arr = Array.isArray(obj) ? obj : [];
+        return arr.slice(0, 30).map(v => ({ name: String(v.name || "").trim(), desc: String(v.desc || "").trim() }))
+            .filter(v => v.name);
+    } catch (e) { logError("genSkills", e); return []; }
+}
+
+// ---- 目标 ----
+export async function generateGoals(world, existing = null) {
+    const w = world || S.currentWorld;
+    if (!w) return [];
+    const sys = `你是文字游戏任务设计师。依据世界观，设计玩家可追踪的目标。
+只输出 JSON 数组，元素：{"name":"目标名","type":"主线|支线|隐藏|日常|其他","deadline":"期限自由文本(可空，如 第30天/新年)"}。字段用中文简洁。`;
+    const user = wcContextLine(w) + "\n\n请输出目标 JSON 数组：" + wcExistingLine(existing, "goals");
+    try {
+        const obj = await callStructured([{ role: "system", content: sys }, { role: "user", content: user }],
+            "goals_list", { maxTokens: 1000, temperature: 0.5, mockFn: () => [] });
+        const arr = Array.isArray(obj) ? obj : [];
+        const TYPES = ["主线", "支线", "隐藏", "日常", "其他"];
+        return arr.slice(0, 20).map(v => ({ name: String(v.name || "").trim(), type: TYPES.includes(v.type) ? v.type : "其他", deadline: v.deadline ? String(v.deadline) : "" }))
+            .filter(v => v.name);
+    } catch (e) { logError("genGoals", e); return []; }
+}
+
+// ---- 预置支线事件 ----
+export async function generateSideEvents(world, existing = null) {
+    const w = world || S.currentWorld;
+    if (!w) return [];
+    const sys = `你是文字游戏支线设计师。依据世界观，设计开局即存在的可选支线事件池。
+只输出 JSON 数组，元素：{"title":"支线标题","desc":"一句话描述","cost_stamina":<整数体力消耗>,"cost_time":"时间消耗(如 半天/1天)","tag":"类型标签(如 社交/探索)"}。字段用中文简洁。`;
+    const user = wcContextLine(w) + "\n\n请输出预置支线 JSON 数组：" + wcExistingLine(existing, "side events");
+    try {
+        const obj = await callStructured([{ role: "system", content: sys }, { role: "user", content: user }],
+            "side_events_list", { maxTokens: 1200, temperature: 0.6, mockFn: () => [] });
+        const arr = Array.isArray(obj) ? obj : [];
+        return arr.slice(0, 20).map(v => ({
+            title: String(v.title || "").trim(),
+            desc: String(v.desc || "").trim(),
+            cost_stamina: Number.isFinite(Number(v.cost_stamina)) ? Math.max(0, Number(v.cost_stamina)) : 20,
+            cost_time: v.cost_time ? String(v.cost_time) : "",
+            tag: v.tag ? String(v.tag) : ""
+        })).filter(v => v.title);
+    } catch (e) { logError("genSideEvents", e); return []; }
 }
 
 // AI 灵活世界观裁判：判断刚生成的内容是否超出世界观。

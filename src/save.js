@@ -55,6 +55,12 @@ export async function startGame(opts = {}) {
     S.gameState.variables = syncVariablesToSchema(S.currentWorld, S.gameState.variables);
     // ★ B4：新游戏从世界定义初始化好感度 map（characters + initial_state.relationships 二者纳入）
     S.gameState.bonds = initBondsFromWorld(S.currentWorld);
+    // ★ docs/60：预置支线事件池 → 开局即注入可选支线（AI 每轮也会额外临时生成支线）
+    if (S.currentWorld.initial_state && Array.isArray(S.currentWorld.initial_state.preset_side_events)) {
+        S.pendingSideEvents = deepClone(S.currentWorld.initial_state.preset_side_events);
+    } else {
+        S.pendingSideEvents = [];
+    }
 
     // ★ B7：从世界出厂默认深拷贝知识库为当前存档副本（后续编辑只改副本）
     S.activeLoreKB = S.currentWorld.lore_kb ? deepClone(S.currentWorld.lore_kb) : null;

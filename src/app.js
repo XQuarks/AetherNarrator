@@ -11,7 +11,7 @@ import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset }
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, renderSaveList, renderWorldList, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, selectTagPref, onCustomTagInput, collectStylePrefs, showToast, renderEventPanel, showModal, openSaveMenu, openWorldSaveChooser, showEndingTracker } from "./render.js";
-import { selectCwModule, selectStyleTemplate, openWorldBookFromWizard, updateNarrativeStyleCount } from "./wizard-editor.js";
+import { wizardNextStep, wizardPrevStep, wizardSkipStep, gotoWizardStep, selectStyleTemplate, updateNarrativeStyleCount, toggleStyleGridExpand } from "./wizard-editor.js";
 import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, removeBannedSentence, ignoreBannedTerm, regenerateTurn, startPrivateChat, endPrivateChat, requestDaily, commitChannelAction, addContactChannelRow, removeContactChannelRow } from "./game.js";
 import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame, createOrUpdateSave, saveAsNewSave } from "./save.js";
 import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
@@ -197,10 +197,13 @@ const ACTIONS = {
     // ★ docs/58：世界类型下拉已移除，onWorldTypeChange 不再存在
     onProviderChange: (el) => applyProviderPreset(el.value),
     handleFileSelect: (el, e) => handleFileSelect(e),
-    // ★ W2-Style：创建向导编辑器
-    selectCwModule: (el) => selectCwModule(el.dataset.module),
+    // ★ docs/62：创建向导分步导航（上一步/下一步/跳过/步骤条回跳）
+    wizardNextStep: () => wizardNextStep(),
+    wizardPrevStep: () => wizardPrevStep(),
+    wizardSkipStep: () => wizardSkipStep(),
+    wizardGotoStep: (el) => gotoWizardStep(parseInt(el.dataset.step, 10)),
     selectStyleTemplate: (el) => selectStyleTemplate(el.dataset.preset),
-    openWorldBookFromWizard: () => openWorldBookFromWizard(),
+    toggleStyleGridExpand: () => toggleStyleGridExpand(),
     onNarrativeStyleInput: () => updateNarrativeStyleCount(),
     selectTagPref: (el) => selectTagPref(el),
     onCustomTagInput: (el) => onCustomTagInput(el),

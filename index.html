@@ -83,6 +83,11 @@
             <div class="title">选项</div>
             <div class="sub">API、存档与世界管理</div>
         </div>
+        <div class="spacer"></div>
+        <button class="icon-btn" data-action="toggleTheme" title="切换日间/夜间模式">
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
     </header>
     <div class="list-content settings-content">
         <!-- 显示 -->
@@ -183,6 +188,11 @@
             <div class="title">选择世界</div>
             <div class="sub" id="worldListSub"></div>
         </div>
+        <div class="spacer"></div>
+        <button class="icon-btn" data-action="toggleTheme" title="切换日间/夜间模式">
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
     </header>
     <div class="section-head"><h2>快速入口</h2></div>
     <div class="world-actions-grid">
@@ -206,6 +216,11 @@
             <div class="title">读取存档</div>
             <div class="sub" id="saveListSub">继续你的旅程</div>
         </div>
+        <div class="spacer"></div>
+        <button class="icon-btn" data-action="toggleTheme" title="切换日间/夜间模式">
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
     </header>
     <div class="list-content" id="saveListContent"></div>
 </div>
@@ -406,19 +421,13 @@
             <h2 id="createWorldModalTitle">创建新世界</h2>
             <button class="modal-close" data-action="closeModal" data-modal="createWorldModal">×</button>
         </div>
-        <div class="cw-editor">
-            <nav class="cw-nav">
-                <button type="button" class="cw-nav-item active" data-action="selectCwModule" data-module="basic">基本信息</button>
-                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="style">叙事风格</button>
-                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="modules">玩法模块</button>
-                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="time">时间系统</button>
-                <button type="button" class="cw-nav-item" data-action="selectCwModule" data-module="gen">生成设置</button>
-            </nav>
-            <div class="cw-content">
-                <!-- 模块 1：基本信息 -->
-                <section class="cw-module active" data-module="basic">
-                    <p class="cw-step-title">基本信息</p>
-                    <p class="cw-step-hint">先给世界起名，可填写参考作品、上传原著，再描述世界观设定。</p>
+        <!-- ★ docs/62：顶部步骤条（wizard-editor.js renderWizardStepsBar 渲染；已到达的步骤可点击回跳） -->
+        <div class="wz-stepsbar" id="wzStepsBar"></div>
+        <div class="cw-content wz-content">
+                <!-- 第 1 步：世界设定（名称 / 参考作品 / 源文件 / 世界观描述；本步为必填步） -->
+                <section class="wz-pane active" data-step="0">
+                    <p class="cw-step-title">这是一个怎样的世界？</p>
+                    <p class="cw-step-hint">只需「世界名称」和「世界观描述」两项即可创建，其余均为可选加分项。</p>
                     <div class="form-group">
                         <label>世界名称 <span class="req-tag">必填</span></label>
                         <input type="text" id="worldName" placeholder="例如：剑来、哈利波特、原创仙侠">
@@ -428,7 +437,7 @@
                             <label>参考的世界（作品名，可选）</label>
                             <input type="text" id="ipName" placeholder="例如：剑来、哈利波特、三体、红楼梦...">
                             <div class="hint">填了参考作品，AI 会结合对该作品的了解生成，并在游玩时启用「世界观约束」扫描（标黄偏离设定的概念）。留空即为完全原创。</div>
-                            <div class="hint opt-hint" id="ipNameOptHint" style="color:var(--primary);">已上传源文件，也可不填作品名——AI 将以你上传的原文为准生成世界观。</div>
+                            <div class="hint opt-hint" id="ipNameOptHint" style="display:none;color:var(--primary);">已上传源文件，也可不填作品名——AI 将以你上传的原文为准生成世界观。</div>
                         </div>
                     </div>
                     <div class="conditional-field show" id="ipUploadField">
@@ -446,45 +455,23 @@
                         <textarea id="worldDesc" placeholder="描述这个世界的规则、力量体系、主要势力、地点、人物关系等..." style="min-height:120px;"></textarea>
                         <div class="hint">填写描述，或上方上传源文件，二者至少一项；描述越详细，AI 生成越贴合预期。</div>
                     </div>
-                    <div class="form-group">
-                        <label>关键偏离（可选，优先级最高）</label>
-                        <textarea id="keyDivergences" placeholder="如果你改动了原作的关键设定，可在此声明，例如：时间线改到2025年 / 主角替换为原创角色 / 伏地魔已被击败..." style="min-height:80px;"></textarea>
-                        <div class="hint">基于已有作品但做了关键性修改时填写。此声明高于 AI 自动生成的一致性包，确保剧情始终跟随你的版本。</div>
-                    </div>
-                    <div class="form-group">
-                        <label>叙事视角</label>
-                        <div class="radio-group" id="povGroup">
-                            <label class="radio-option selected">
-                                <input type="radio" name="povMode" value="solo" checked>
-                                <div class="radio-indicator"></div>
-                                <div><div class="radio-label">单人主角</div><div class="radio-desc">由 AI 按世界观自动设计主角身份 / 背景 / 能力，你扮演该主角</div></div>
-                            </label>
-                            <label class="radio-option">
-                                <input type="radio" name="povMode" value="ensemble">
-                                <div class="radio-indicator"></div>
-                                <div><div class="radio-label">群像剧（无唯一主角）</div><div class="radio-desc">设计戏份均衡的多角色群像，你以参与者视角推进剧情</div></div>
-                            </label>
+                    <details class="advanced-details">
+                        <summary>高级设定（关键偏离，可选）</summary>
+                        <div class="form-group">
+                            <label>关键偏离（可选，优先级最高）</label>
+                            <textarea id="keyDivergences" placeholder="如果你改动了原作的关键设定，可在此声明，例如：时间线改到2025年 / 主角替换为原创角色 / 伏地魔已被击败..." style="min-height:80px;"></textarea>
+                            <div class="hint">基于已有作品但做了关键性修改时填写。此声明高于 AI 自动生成的一致性包，确保剧情始终跟随你的版本。</div>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label>剧情自由度</label>
-                        <div class="range-slider-wrapper">
-                            <input type="range" id="plotFreedom" min="1" max="5" value="3" data-action="updatePlotFreedomLabel" data-event="input">
-                            <div class="range-current" id="plotFreedomLabel">适中发散 — 在原著世界观内适度创新</div>
-                            <div class="range-labels">
-                                <span>严格遵循原著</span>
-                                <span>完全自由创作</span>
-                            </div>
-                        </div>
-                    </div>
+                    </details>
                 </section>
-                <!-- 模块 2：叙事风格 -->
-                <section class="cw-module" data-module="style">
-                    <p class="cw-step-title">叙事风格</p>
-                    <p class="cw-step-hint">从下方模板一键套用，或完全自由书写。套用模板会自动填写文风与推荐温度，之后仍可改写。</p>
+                <!-- 第 2 步：叙事风格（模板库 / 文风 / 温度；可跳过） -->
+                <section class="wz-pane" data-step="1">
+                    <p class="cw-step-title">故事读起来是什么味道？</p>
+                    <p class="cw-step-hint">从下方模板一键套用，或完全自由书写。不选就用默认均衡风格，可直接跳过本步。套用模板会自动填写文风与推荐温度，之后仍可改写。</p>
                     <div class="form-group">
                         <label>风格模板库</label>
-                        <div class="style-template-grid" id="styleTemplateGrid"></div>
+                        <div class="style-template-grid collapsed" id="styleTemplateGrid"></div>
+                        <button type="button" class="style-grid-toggle" id="styleGridToggle" data-action="toggleStyleGridExpand">展开全部模板 ▾</button>
                         <div class="hint">当前风格：<span id="styleCurrentTag" class="style-current-tag">未选择</span></div>
                     </div>
                     <div class="form-group">
@@ -492,8 +479,9 @@
                         <textarea id="narrativeStyle" placeholder="描述你想要的世界叙事风格，例如：冷峻克制、江湖气息浓厚、对话简练不拖沓、注重氛围与细节描写……&#10;（从上方模板套用后会自动填入，可随意增删改写）" style="min-height:200px;" data-action="onNarrativeStyleInput" data-event="input"></textarea>
                         <div class="char-count" id="narrativeStyleCount">0 字</div>
                     </div>
-                    <div class="form-group">
-                        <label>结构化标签（帮 AI 更贴合你的期待，可选）</label>
+                    <details class="advanced-details" id="styleTagsDetails">
+                        <summary>结构化标签（帮 AI 更贴合你的期待，可选）</summary>
+                        <div class="form-group">
                         <div class="pref-block">
                             <div class="pref-label">题材</div>
                             <div class="tag-row" data-pref="genre">
@@ -554,6 +542,7 @@
                             </div>
                         </div>
                     </div>
+                    </details>
                     <div class="form-group">
                         <label>AI 创造性（温度）</label>
                         <div class="range-slider-wrapper">
@@ -567,35 +556,79 @@
                         <div class="hint">控制生成剧情的随机度。越低越稳定连贯，越高越自由发散。套用模板时已预填推荐值，可手动调整。</div>
                     </div>
                 </section>
-                <!-- 模块 4：玩法模块 -->
-                <section class="cw-module" data-module="modules">
-                    <p class="cw-step-title">玩法模块</p>
-                    <p class="cw-step-hint">勾选本世界启用的系统（核心模块始终开启）。也可在游玩后于设置页调整。</p>
-                    <div class="module-toggles" id="moduleToggles"></div>
-                </section>
-                <!-- 模块 5：时间系统 -->
-                <section class="cw-module" data-module="time">
-                    <p class="cw-step-title">时间系统</p>
-                    <p class="cw-step-hint">AI 会根据世界观自动生成时间系统；这里只做偏好提示（不影响其它设置）。</p>
+                <!-- 第 3 步：叙事视角与自由度（默认值即可，可跳过） -->
+                <section class="wz-pane" data-step="2">
+                    <p class="cw-step-title">你以什么身份进入故事？</p>
+                    <p class="cw-step-hint">两个轻量选择，都有默认值，可直接跳过本步。</p>
                     <div class="form-group">
-                        <label>时间推进偏好</label>
-                        <select id="timePreset" class="lore-inp lore-sel">
-                            <option value="auto">自动（由 AI 按世界观决定）</option>
-                            <option value="none">不显示时间</option>
-                            <option value="day">按「第 N 天」</option>
-                            <option value="gregorian">公历月日 + 星期</option>
-                            <option value="lunar">农历月日</option>
-                            <option value="custom">自定义历法（纪元 + 自定义月日）</option>
-                        </select>
-                        <div class="hint">生成后若想精修，可在世界详情的时间系统编辑器里细化（年份 / 历法 / 流速等）。</div>
+                        <label>叙事视角</label>
+                        <div class="radio-group" id="povGroup">
+                            <label class="radio-option selected">
+                                <input type="radio" name="povMode" value="solo" checked>
+                                <div class="radio-indicator"></div>
+                                <div><div class="radio-label">单人主角</div><div class="radio-desc">由 AI 按世界观自动设计主角身份 / 背景 / 能力，你扮演该主角</div></div>
+                            </label>
+                            <label class="radio-option">
+                                <input type="radio" name="povMode" value="ensemble">
+                                <div class="radio-indicator"></div>
+                                <div><div class="radio-label">群像剧（无唯一主角）</div><div class="radio-desc">设计戏份均衡的多角色群像，你以参与者视角推进剧情</div></div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>剧情自由度</label>
+                        <div class="range-slider-wrapper">
+                            <input type="range" id="plotFreedom" min="1" max="5" value="3" data-action="updatePlotFreedomLabel" data-event="input">
+                            <div class="range-current" id="plotFreedomLabel">适中发散 — 在原著世界观内适度创新</div>
+                            <div class="range-labels">
+                                <span>严格遵循原著</span>
+                                <span>完全自由创作</span>
+                            </div>
+                        </div>
                     </div>
                 </section>
-                <!-- 模块 6：生成设置 -->
-                <section class="cw-module" data-module="gen">
-                    <p class="cw-step-title">生成设置</p>
-                    <p class="cw-step-hint">特殊要求可让 AI 在生成时遵循额外指令（可选）。</p>
+                <!-- 第 4 步：玩法与时间（模块开关 + 时间推进偏好；默认值适合大多数世界，可跳过） -->
+                <section class="wz-pane" data-step="3">
+                    <p class="cw-step-title">这个世界要开启哪些玩法系统？</p>
+                    <p class="cw-step-hint">勾选本世界启用的系统（核心模块始终开启），并选择时间推进偏好。默认配置适合大多数世界，可直接跳过；也可在游玩后于设置页调整。</p>
+                    <div class="module-toggles" id="moduleToggles"></div>
+                    <div class="cw-sub-divider">时间系统</div>
+                    <p class="cw-step-hint">开启「时间系统」模块后，可在此完整配置时间体系（纪元 / 历法 / 流速 / 穿越策略 / 截止事件等）；玩家配置为权威，AI 据此推进剧情，不再自行设计。</p>
+                    <!-- ★ docs/61：时间系统模块门禁 —— 未开启「时间系统」模块时隐藏编辑、显示占位 -->
+                    <div class="cw-gate-placeholder" id="timePresetGate" style="display:none;">🔒 未开启「时间系统」玩法模块。在上方勾选后，即可设置时间推进偏好。</div>
+                    <div id="timePresetField">
+                        <div class="form-group">
+                            <label>时间推进偏好（快捷预设）</label>
+                            <select id="timePreset" class="lore-inp lore-sel">
+                                <option value="auto">自动（由 AI 按世界观决定，不锁定）</option>
+                                <option value="day">按「第 N 天」</option>
+                                <option value="gregorian">公历月日 + 星期</option>
+                                <option value="lunar">农历月日</option>
+                                <option value="custom">自定义历法（纪元 + 自定义月日）</option>
+                            </select>
+                            <div class="hint">选具体历法即锁定时间体系；选「自动」则不锁定，交由 AI 决定。下方可进一步细化。</div>
+                        </div>
+                        <div id="wzTimeEditor"></div>
+                    </div>
+                </section>
+                <!-- 第 5 步：角色与资源预设（B1 人物卡 + B4 羁绊 + B2 变量 + B3 背包 + 技能/目标/支线；整步可跳过） -->
+                <section class="wz-pane" data-step="4">
+                    <p class="cw-step-title">要预置角色和资源吗？</p>
+                    <p class="cw-step-hint">整步可跳过——留空的部分由 AI 建世界时自动补齐；你填过的会成为世界的权威设定。可手填，也可点各卡片的「AI 生成」（依据第 1 步的世界观描述，未配置 API 时安全跳过）。条目默认折叠，点击标题行展开编辑。</p>
+                    <div id="wc_container_characters" class="wc-container-mount"></div>
+                    <div id="wc_container_variables" class="wc-container-mount"></div>
+                    <div id="wc_container_inventory" class="wc-container-mount"></div>
+                    <div id="wc_container_skills" class="wc-container-mount"></div>
+                    <div id="wc_container_goals" class="wc-container-mount"></div>
+                    <div id="wc_container_sideEvents" class="wc-container-mount"></div>
+                </section>
+                <!-- 第 6 步：确认生成（配置摘要 + 特殊要求 + 校验面板；error 级问题会拦截生成） -->
+                <section class="wz-pane" data-step="5">
+                    <p class="cw-step-title">确认一下，然后开工</p>
+                    <p class="cw-step-hint">下面是本次世界的配置摘要（进入本步时实时生成），点「修改」可跳回对应步骤调整。</p>
+                    <div class="wz-sum-grid" id="wzSummary"></div>
                     <details class="advanced-details">
-                        <summary>高级选项（特殊要求）</summary>
+                        <summary>高级选项（特殊要求，可选）</summary>
                         <div class="form-group">
                             <label>特殊要求（世界观生成，可选）</label>
                             <div class="radio-group" id="worldPrefixGroup">
@@ -633,12 +666,21 @@
                             </div>
                         </div>
                     </details>
+                    <!-- ★ docs/61：容器间关联校验面板（实时刷新；有 error 级问题时拦截生成；docs/62 起内嵌于确认步） -->
+                    <div id="wizardValidationPanel" class="wizard-validation-panel"></div>
                 </section>
             </div>
-        </div>
-        <div class="modal-footer cw-footer">
-            <button class="btn secondary" data-action="closeModal" data-modal="createWorldModal">取消</button>
-            <button class="btn primary" data-action="generateWorld" id="generateWorldBtn">确认生成</button>
+        <!-- ★ docs/62：向导导航 footer（第 1 步显示取消；末步显示确认生成） -->
+        <div class="modal-footer cw-footer wz-footer">
+            <div class="wz-foot-left">
+                <button class="btn secondary" data-action="closeModal" data-modal="createWorldModal" id="wzCancelBtn">取消</button>
+                <button class="btn secondary" id="wzPrevBtn" data-action="wizardPrevStep" style="display:none;">← 上一步</button>
+            </div>
+            <div class="wz-foot-right">
+                <button class="wz-skip-btn" id="wzSkipBtn" data-action="wizardSkipStep" style="display:none;">此步可跳过 →</button>
+                <button class="btn primary" id="wzNextBtn" data-action="wizardNextStep">下一步 →</button>
+                <button class="btn primary" data-action="generateWorld" id="generateWorldBtn" style="display:none;">✦ 确认生成</button>
+            </div>
         </div>
     </div>
 </div>
