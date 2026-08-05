@@ -5,10 +5,27 @@
 // 本文件是叶子模块，不依赖其他 src 模块，避免循环依赖。
 // ============================================================
 
+// ★ 思考型/推理型模型识别（reasoner 类除外：DeepSeek 已用 thinking: disabled 让 reasoner 走工具路径）。
+// 命中的模型名不接受"强制 tool_choice"（API 报 "Thinking mode does not support this tool_choice"），
+// 因此在 buildChatBody 里退回纯文本输出，靠调用方 content 兜底解析。
+// 词边界用分隔符（开头/结尾或 . _ -），避免误伤 gpt-4o、qwen2.5 这类普通模型名。
+export function isThinkingModel(model = "") {
+    return /(?:^|[._-])(?:r1|think|thinking|o1|o3)(?:[._-]|$)/i.test(model);
+}
+
+// ★ tool_choice 冲突判定：API 400 且报"思考模式不支持强制工具选择" → 调用方可退纯文本重试。
+// 纯字符串判定，不触 DOM，可在 Node 单测。
+export function isToolChoiceConflictError(e) {
+    const msg = (e && e.message) || "";
+    return /HTTP 400/.test(msg) && /tool_choice|thinking mode/i.test(msg);
+}
+
 // 共享请求体构造：
 // - 默认 response_format: { type: "json_object" }（向后兼容旧调用）
 // - 传入 opts.tool 时改为 function calling：发 tools + 强制 tool_choice，不再用 json_object
 //   （Phase 5 工具调用约束：让模型直接返回已解析的结构化参数）
+// - 思考型模型（或 opts.plainJson 显式要求）→ 纯文本：不发 tools/tool_choice，
+//   也不发 response_format（reasoner 不支持 json_object），靠 content 兜底解析。
 function buildChatBody(model, messages, opts = {}, extra = {}) {
     const base = {
         model,
@@ -17,13 +34,15 @@ function buildChatBody(model, messages, opts = {}, extra = {}) {
         max_tokens: opts.maxTokens || 8192,
         ...extra
     };
-    if (opts.tool) {
+    const plainJson = opts.plainJson === true || (opts.tool && isThinkingModel(model));
+    if (opts.tool && !plainJson) {
         return {
             ...base,
             tools: [{ type: "function", function: { name: opts.tool.name, description: opts.tool.description, parameters: opts.tool.parameters } }],
             tool_choice: { type: "function", function: { name: opts.tool.name } }
         };
     }
+    if (plainJson) return base;
     return { ...base, response_format: { type: "json_object" } };
 }
 

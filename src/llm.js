@@ -8,7 +8,7 @@ import { getNextPeriod, getTemperature, getTimeConfig } from "./theme.js";
 import { advanceCalendarTime, formatCalendarDate } from "./calendar.js";
 import { summarizeFactsFromChanges } from "./rag.js";
 import { buildSystemPrompt, buildLoreHardBreakpoint, buildCharactersBreakpoint, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, buildPlayerNote, getPositionedLore } from "./prompt.js";
-import { getProvider, readApiInputs, getChunkConcurrency } from "./providers.js";
+import { getProvider, readApiInputs, getChunkConcurrency, isToolChoiceConflictError } from "./providers.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
 import { buildLoreRevisionDiff } from "./lore-revision.js";
 import { selectPromotionCandidates } from "./promotion.js"; // ★ B6：记忆晋升候选筛选
@@ -690,6 +690,18 @@ export async function callStructured(messages, toolName, opts = {}) {
             ? await callLLMStreaming(url, apiKey, model, body, onPartial, provider)
             : await callLLMNonStreaming(url, apiKey, model, body, provider);
     } catch (e) {
+        // ★ 思考型模型兜底：强制 tool_choice 被 API 拒绝（HTTP 400 "Thinking mode does not support this tool_choice"）时，
+        // 去掉 tools/tool_choice 退纯文本 JSON 重试一次（非流式整包拿文本，content 兜底解析）。
+        // 已确认的 reasoner 路径（DeepSeek thinking: disabled）不会走到这里；正常模型一次成功、不触发重试。
+        if (isToolChoiceConflictError(e)) {
+            logError("toolChoiceFallback", e);
+            const plainBody = provider.buildBody(model, messages, {
+                temperature: temperature != null ? temperature : getTemperature(),
+                maxTokens: maxTokens || 8192,
+                plainJson: true
+            });
+            return await callLLMNonStreaming(url, apiKey, model, plainBody, provider);
+        }
         const isParse = /JSON 解析失败/.test((e && e.message) || "");
         const isAbort = e && e.name === "AbortError";
         if (useStream && !isParse && !isAbort) {
