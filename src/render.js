@@ -1154,7 +1154,8 @@ function renderTimelineSwitch(views) {
 }
 
 export function highlightItems(text) {
-    if (!S.gameState || !S.gameState.inventory.length) return text;
+    // ★ 修复：inventory 可能缺失（AI 生成世界 initial_state 无该字段），读 length 前必须判数组
+    if (!S.gameState || !Array.isArray(S.gameState.inventory) || !S.gameState.inventory.length) return text;
     const names = S.gameState.inventory.map(i => i.name).filter(n => n);
     if (!names.length) return text;
     // 按名称长度降序，避免短名先替换导致长名无法匹配

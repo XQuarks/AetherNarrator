@@ -10,7 +10,7 @@ import assert from "node:assert";
 
 import { S } from "../src/store.js";
 import { MODULE_REGISTRY, defaultModules, isModuleEnabled } from "../src/modules.js";
-import { highlightBanned, renderNarrative, renderScanWarnBar } from "../src/render.js";
+import { highlightBanned, highlightItems, renderNarrative, renderScanWarnBar } from "../src/render.js";
 import { removeSentenceWithTerm } from "../src/utils.js";
 import { computeIpScanHits } from "../src/game.js";
 import { getBannedConceptRules } from "../src/store.js";
@@ -52,6 +52,21 @@ test("ip_scan 受 isModuleEnabled 门禁（核心模块不受影响）", () => {
     // 关掉后扫描应被门禁挡住（game.js 的 A2 块依赖此判断）
     w.modules = { ip_scan: { enabled: false } };
     assert.strictEqual(isModuleEnabled(w, "ip_scan"), false);
+});
+
+// ----------------------------------------------------------
+// 1.5 highlightItems：gameState 缺 inventory 时不炸（AI 世界缺字段回归）
+// ----------------------------------------------------------
+test("highlightItems：gameState 无 inventory 字段时不炸（返回原文本）", () => {
+    resetState(); // S.gameState = { ignoredBanned: [] }，无 inventory（真实 AI 世界可能缺该字段）
+    assert.strictEqual(highlightItems("你走进大厅。"), "你走进大厅。", "缺 inventory 时原样返回，不读 undefined.length");
+});
+
+test("highlightItems：有 inventory 时正常高亮物品名", () => {
+    resetState();
+    S.gameState.inventory = [{ name: "魔杖" }];
+    const out = highlightItems("你握着魔杖，走进大厅。");
+    assert.ok(out.includes("item-highlight"), "有 inventory 时应正常高亮");
 });
 
 // ----------------------------------------------------------

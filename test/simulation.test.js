@@ -40,3 +40,10 @@ test("世界摘要突出活跃事件、NPC 和临近目标", () => {
     assert.match(summary, /夜宴/);
     assert.match(summary, /赴宴/);
 });
+
+test("normalizeSimulationState 兜底缺失的 inventory 为数组（AI 世界缺字段不炸渲染）", () => {
+    const a = normalizeSimulationState({ current_location: "某地" });
+    assert.deepEqual(a.inventory, [], "缺 inventory 时补默认空背包");
+    const b = normalizeSimulationState({ inventory: [{ item_id: "sword", name: "剑" }] });
+    assert.equal(b.inventory.length, 1, "已有 inventory 原样保留");
+});
