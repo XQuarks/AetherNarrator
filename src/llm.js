@@ -3,7 +3,7 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_LABELS, getActiveConditionTags, normalizeTimeConfig, getEnabledVariables, getWorldLoreKB } from "./store.js";
-import { buildApiUrl, defaultWorldSchema, getWorldSchema, parseResponse, sleep, tryRepairJSON, runPool, chunkText, mergeLoreSnippets, deepClone, buildCriticTimeContext, detectTimeConflict, formatConflictMessage, logError } from "./utils.js";
+import { buildApiUrl, defaultWorldSchema, extractFirstBalancedJsonObject, getWorldSchema, parseResponse, sleep, tryRepairJSON, runPool, chunkText, mergeLoreSnippets, deepClone, buildCriticTimeContext, detectTimeConflict, formatConflictMessage, logError } from "./utils.js";
 import { getNextPeriod, getTemperature, getTimeConfig } from "./theme.js";
 import { advanceCalendarTime, formatCalendarDate } from "./calendar.js";
 import { summarizeFactsFromChanges } from "./rag.js";
@@ -517,6 +517,10 @@ export function extractStructuredFromMessage(msg, label) {
 export function extractStructuredFromArgs(fullArgs, label) {
     if (fullArgs && fullArgs.trim()) {
         try { return JSON.parse(fullArgs); } catch (_) { /* 截断/畸形 → parseResponse 修复 */ }
+        // ★ docs/65：DeepSeek tool_calls 流式偶发重复传完整 arguments（而非增量），fullArgs 累积成
+        // "{...}{...}{...}" 重复 JSON，JSON.parse 失败。回退：按花括号平衡提取第一个完整对象。
+        const firstObj = extractFirstBalancedJsonObject(fullArgs);
+        if (firstObj && typeof firstObj === "object") return firstObj;
         try { return parseResponse(fullArgs); } catch (_) { /* 继续 */ }
     }
     throw new Error("AI 返回的 JSON 解析失败：" + (label || "") + " " + (fullArgs || "").slice(0, 200));

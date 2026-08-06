@@ -311,11 +311,15 @@ export function renderWorldList() {
         const delay = i * 0.07;
         const hasSave = saveMap.has(w.id);
         const firstChar = (w.name || "?")[0];
+        // ★ docs/64：知识库空时在卡片显示醒目徽标，提醒创作者补抽
+        const loreCount = (w.lore_kb && Array.isArray(w.lore_kb.snippets)) ? w.lore_kb.snippets.length : 0;
+        const loreWarn = loreCount === 0 ? '<span class="wc-badge wc-badge-warn" title="AI 生成时未产出知识库条目，RAG 将无锚点">⚠ 知识库为空</span>' : "";
         return `
         <article class="world-card${isNew ? " new-world" : ""}" data-action="showWorldDetail" data-id="${w.id}" tabindex="0" style="animation: fadeSlideIn 0.4s ease-out ${delay}s both;">
             <div class="wc-cover">
                 <span class="wc-glyph">${escapeHtml(firstChar)}</span>
                 ${w.ip_name ? `<span class="wc-badge wc-badge-ref">参考：${escapeHtml(w.ip_name)}</span>` : ""}
+                ${loreWarn}
             </div>
             <div class="wc-body">
                 <div class="wc-title">${escapeHtml(w.name)}${isNew ? '<span class="new-badge">新</span>' : ""}</div>
@@ -536,8 +540,11 @@ export function showWorldDetail(worldId) {
         </div>
         <div class="detail-tab-content" data-detail-tab-content="lore">
             <div class="stat-grid"><div class="stat-card"><div class="stat-num">${loreCount}</div><div class="stat-label">知识库条目</div></div></div>
-            ${cats.length ? `<div class="cat-bar">${catBar}</div><div class="cat-legend">${catLegend}</div>` : `<p class="muted">暂无分类数据</p>`}
-            <button class="btn secondary" data-action="editWorldLore" data-id="${id}">编辑知识库</button>
+            ${cats.length
+                ? `<div class="cat-bar">${catBar}</div><div class="cat-legend">${catLegend}</div>`
+                : `<div class="lore-empty-warn">⚠ AI 生成时未产出知识库条目。游戏内 RAG 检索将无锚点，叙事容易偏离设定。</div>`}
+            ${loreCount === 0 ? '<button class="btn primary" data-action="editWorldLore" data-id="' + id + '">📚 立即补充知识库</button>' : ""}
+            ${loreCount > 0 ? `<button class="btn secondary" data-action="editWorldLore" data-id="${id}">编辑知识库</button>` : ""}
         </div>
         <div class="detail-tab-content" data-detail-tab-content="rules">
             ${rules.length ? ruleNames + `<button class="btn secondary" data-action="openRuleEditor" data-id="${id}">编辑规则</button>` : `<p class="muted">该世界还没有规则。</p><button class="btn secondary" data-action="openRuleEditor" data-id="${id}">编辑规则</button>`}
@@ -804,6 +811,9 @@ export function renderStatusPanel(tab) {
 
     switch (tab) {
         case "profile":
+            // ★ 兜底：AI 生成的 initial_state 可能缺 progression/attributes（生成质量 bug），缺字段时显示"—"而非抛错
+            const prog = s.progression || {};
+            const attrs = s.attributes || {};
             container.innerHTML = `
                 <div class="status-section">
                     <div class="status-section-title">基本信息</div>
@@ -817,16 +827,16 @@ export function renderStatusPanel(tab) {
                 <div class="status-section">
                     <div class="status-section-title">属性</div>
                     <div class="status-card">
-                        ${Object.entries(s.attributes).map(([k, v]) => renderTextAttribute(getAttributeLabel(k), v)).join("")}
+                        ${Object.entries(attrs).map(([k, v]) => renderTextAttribute(getAttributeLabel(k), v)).join("") || '<div class="muted">暂无属性数据</div>'}
                     </div>
                 </div>
                 <div class="status-section">
                     <div class="status-section-title">${escapeHtml(schema.progression_label || "进度")}</div>
                     <div class="status-card">
-                        <div class="row"><span class="label">${escapeHtml(schema.progression_path_label || "路线")}</span><span class="value">${escapeHtml(s.progression.path)}</span></div>
-                        <div class="row"><span class="label">${escapeHtml(schema.progression_label || "等级")}</span><span class="value">${escapeHtml(s.progression.rank)}</span></div>
-                        <div class="row"><span class="label">进度</span><span class="value">${s.progression.progress}</span></div>
-                        <div class="stat-bar"><div style="width:${Math.min(s.progression.progress, 100)}%"></div></div>
+                        <div class="row"><span class="label">${escapeHtml(schema.progression_path_label || "路线")}</span><span class="value">${escapeHtml(prog.path || "—")}</span></div>
+                        <div class="row"><span class="label">${escapeHtml(schema.progression_label || "等级")}</span><span class="value">${escapeHtml(prog.rank || "—")}</span></div>
+                        <div class="row"><span class="label">进度</span><span class="value">${prog.progress != null ? prog.progress : "—"}</span></div>
+                        <div class="stat-bar"><div style="width:${Math.min(prog.progress || 0, 100)}%"></div></div>
                     </div>
                 </div>
             `;

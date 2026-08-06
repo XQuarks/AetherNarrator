@@ -3,7 +3,7 @@
 // ============================================================
 import { S } from "./store.js";
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts, ensureWorldCanon, resolveCanonContext, applyConsistencyPack, computeVariableUpdates, computeBondUpdates, applyLoreDelta } from "./store.js";
-import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape, logError, removeSentenceWithTerm } from "./utils.js";
+import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, extractNarrativeText, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape, logError, removeSentenceWithTerm } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
 import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartDate, applySyncRules, calendarDayIndex } from "./calendar.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
@@ -22,6 +22,7 @@ import { createMemoryPack, mergeMemoryPack } from "./memory-transfer.js";
 import { createWorldPack } from "./world-transfer.js";
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { runWorldCritic } from "./critic.js"; // ★ Phase 3：审稿人
+import { backfillLoreIfShort } from "./lore-bootstrap.js"; // ★ docs/64：知识库补抽兜底
 import { advanceWorldTime, collectDueDeadlines, hydrateWorldTime } from "./time-engine.js";
 import { sanitizeModules, isModuleEnabled } from "./modules.js"; // ★ C1：保存模块设置时归一 + 逻辑门禁
 import { evaluateGate, collectCommFlags, PRIVATE_STAMINA_COST, DAILY_STAMINA_COST } from "./comm-gate.js"; // ★ docs/53：门禁引擎
@@ -318,6 +319,16 @@ export async function generateWorld() {
             applyConsistencyPack(world, pack);
         } catch (e) {
             logError("consistencyPack", e);
+        }
+        // ★ docs/64：知识库补抽兜底——若 AI 生成时 lore 偷空（< 6 条），自动基于 desc+ipName 补抽一次；
+        //   失败时安全跳过（不阻断建世界），仅记录到 debugLog，便于 UI 兜底徽标。
+        try {
+            const bf = await backfillLoreIfShort(world);
+            if (bf && bf.backfilled) {
+                showToast(`已为「${name}」补抽知识库 +${bf.added} 条（共 ${bf.total} 条）`, "success", 3000);
+            }
+        } catch (e) {
+            logError("loreBackfill", e);
         }
         S.worlds.unshift(world);
         saveWorlds();
@@ -1420,7 +1431,7 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
         }
     }).catch(e => logError("worldviewJudge", e));
 
-    pendingEntry.narrative = resp.narrative || "（无叙事）";
+    pendingEntry.narrative = extractNarrativeText(resp.narrative) || "（无叙事）";
     pendingEntry.retrieved = retrieved.map(s => s.title);
     pendingEntry.period = S.gameState.current_date.period;
     pendingEntry.day = stepOf(S.gameState.current_date);
@@ -1540,7 +1551,7 @@ export async function processTurn(input) {
         const isWarning = isNonStoryResponse(resp.narrative);
         if (isWarning) {
             // ⚠️ 非故事内容：不应用状态变更、不写入知识库、不影响记忆
-            pendingEntry.narrative = resp.narrative || "（无内容）";
+            pendingEntry.narrative = extractNarrativeText(resp.narrative) || "（无内容）";
             pendingEntry.retrieved = retrieved.map(s => s.title);
             pendingEntry.key_facts = [];
             pendingEntry.isWarning = true;

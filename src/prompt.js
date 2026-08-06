@@ -3,7 +3,7 @@
 // ============================================================
 import { S, getVariableSchema, getEnabledVariables, getWorldLoreKB } from "./store.js";
 import { CHAT_ANCHOR_MSGS, CHAT_RECENT_MSGS, LORE_FULL_THRESHOLD, MAX_CHAT_MESSAGES, SYSTEM_ROLES, DEFAULT_BANNED_CONCEPTS, getBannedConcepts } from "./store.js";
-import { dedupeStrings, getWorldSchema, resolveOpeningTokens } from "./utils.js";
+import { dedupeStrings, extractNarrativeText, getWorldSchema, resolveOpeningTokens } from "./utils.js";
 import { getTimeConfig, formatWorldTime, getPeriodLabel, stepOf } from "./theme.js";
 import { formatCalendarDate } from "./calendar.js";
 import { getProvider } from "./providers.js";
@@ -63,9 +63,21 @@ export function buildWorldGenerationPrompt(name, desc, hero, ipName, sourceConte
         : "";
 
     const effectiveLoreMin = (loreCountMin != null) ? loreCountMin : (sourceContent ? 12 : 8);
-    const lengthLimitSection = sourceContent
-        ? `\n- 知识库至少生成 ${effectiveLoreMin} 条，每条 100-300 字，确保覆盖源文件中的关键设定。`
-        : `\n- 知识库至少生成 ${effectiveLoreMin} 条，每条 100-300 字。`;
+    // ★ docs/64：硬约束——必须产出 8~15 条知识库（不再用"至少"软措辞），强制分类覆盖与字段完整，
+    // 并要求 AI 在输出末尾附 _meta 自检块，便于前端在生成失败时给可见提示。
+    const loreHardSection = `
+【知识库硬约束·必读】
+- 必须生成 ${effectiveLoreMin}~15 条 lore_snippets（不是"至少"——是"必须"在该区间）。
+- 每条 lore 字段必须齐全且非空：\`id\`（英文短码）/ \`title\`（≤30字）/ \`category\`（见下分类白名单）/ \`content\`（100~300字，描述该条目）/ \`activation_keys\`（≥2 个检索关键词）。
+- category 必须从以下白名单中选且覆盖全部 4 类：【地点 / 人物 / 事件 / 物品】；其余可酌情在【势力 / 冲突 / 规则】中选 1~2 类。四类缺一视作生成失败。
+- 分类配额建议：地点 3~4、人物 2~4、事件 2~3、物品 2~3，共 8~15 条；如信息不足可向"规则"扩充。
+${sourceContent ? "- 优先从源文件抽取关键设定（人物/地点/事件/规则），避免空泛条目。" : "- 即便没有源文件，也必须从世界观描述与参考作品（如有）中推断并产出符合分类覆盖的条目——禁止以「信息不足」为由偷空 snippets。"}
+- 在最终 JSON 末尾追加 \`_meta\` 自检块（前端会读取用于告警），示例：
+  \`\`\`
+  "_meta": { "lore_count": 12, "categories": ["地点","人物","事件","物品","势力"], "has_initial_state_name": true, "has_opening": true, "issues": [] }
+  \`\`\`
+  若硬约束有任何一项未达成，将 issues 填为对应描述（如 \`"lore_count 不足 8"\`），便于前端判定是否触发补抽。
+`;
 
     const prefixSection = worldPrefix ? worldPrefix + "\n\n" : "";
     return prefixSection + `你是专业的文字游戏世界观设计师。请根据以下信息，为一个 AI 文字游戏生成完整的世界配置。
@@ -139,7 +151,7 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
    - 冲突（至少 2 条）：世界的核心矛盾与张力，谁和谁对立，为什么，玩家可能被卷入哪一方。示例：金玉良缘vs木石前盟、家族利益vs个人情感、正邪之争。
    - 事件（至少 2 条）：可触发的事件，每条需在 content 中写清触发条件（时间+地点+可能的前置条件）与事件内容、后果；并额外补充结构化 trigger 字段，格式：{ day?: 数字, dayMin?: 数字, dayMax?: 数字, periods?: ["morning"/"forenoon"/"afternoon"/"evening"/"night" 其一或数组], location?: "地点标题", npc?: "NPC名", relNot?: "冷淡", prereq?: "前置事件标题" }。引擎会据此在条件满足时自动推进事件，无需 AI 自行记忆。
    - 人物片段中需附带该角色的**日常行程**（什么时间在什么地方）；若该角色在剧情不同阶段出现于不同地点（如迁居、行踪变化），请在其 timeline 中按时间先后标注（order 从1递增，summary 不得出现"第X章"字样）
-   ${lengthLimitSection}
+   ${loreHardSection}
 
 4. system_prompt: 用于游戏运行时的 System Prompt 字符串，要包含世界观硬约束、叙事风格、输出格式说明。
 
@@ -1196,8 +1208,9 @@ export function getRecentKeyFacts(count) {
 export function pushChatTurn(userContent, parsed) {
     S.chatHistory.push({ role: "user", content: userContent });
     // assistant 存精简 JSON：仅保留 narrative + state_changes
+    // ★ docs/65：narrative 字段防御——AI 或流式累积偶发把整个 JSON 字串塞进 narrative，存入前先剥壳
     const slim = {
-        narrative: parsed.narrative || "",
+        narrative: extractNarrativeText(parsed.narrative) || "",
         state_changes: parsed.state_changes || {}
     };
     S.chatHistory.push({ role: "assistant", content: JSON.stringify(slim) });

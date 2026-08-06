@@ -558,6 +558,49 @@ export function parseResponse(content) {
     }
 }
 
+// ★ docs/65：narrative 字段防御——AI 或流式累积偶发把整个 tool_calls arguments 的 JSON 字串
+//   塞进 narrative 字段（用户看到 "{"text":"...","action":"...","state_changes":{...}}"）。此函数检测
+//   raw 是否是嵌套 JSON 字串，若是则提取其中的 .narrative 子字段；否则原样返回。
+export function extractNarrativeText(raw) {
+    if (raw == null) return "";
+    if (typeof raw !== "string") return String(raw);
+    const trimmed = raw.trim();
+    // 快速门：必须以 { 开头且包含 "narrative" 关键字（避免误伤正常包含 { 的中文文本）
+    if (!trimmed.startsWith("{") || !/["']narrative["']\s*:/.test(trimmed)) return raw;
+    // 尝试解析：先用整段 parse（最常见 AI 输出 = 完整 JSON 字串）；失败则用括号平衡提取第一个完整对象
+    let obj = null;
+    try { obj = JSON.parse(trimmed); } catch (_) { obj = extractFirstBalancedJsonObject(trimmed); }
+    if (!obj || typeof obj !== "object") return raw;
+    if (typeof obj.narrative === "string" && obj.narrative.trim()) return obj.narrative;
+    return raw;
+}
+
+// 在一段文本中找到第一个完整的 { ... } JSON 对象（按花括号平衡匹配，处理嵌套）。
+//   用于 extractNarrativeText / llm.js 修复 DeepSeek 重复流式 arguments。
+export function extractFirstBalancedJsonObject(text) {
+    if (typeof text !== "string") return null;
+    const start = text.indexOf("{");
+    if (start < 0) return null;
+    let depth = 0, inStr = false, esc = false, quote = "";
+    for (let i = start; i < text.length; i++) {
+        const ch = text[i];
+        if (inStr) {
+            if (esc) { esc = false; continue; }
+            if (ch === "\\") { esc = true; continue; }
+            if (ch === quote) { inStr = false; quote = ""; }
+            continue;
+        }
+        if (ch === '"' || ch === "'") { inStr = true; quote = ch; continue; }
+        if (ch === "{") { depth++; continue; }
+        if (ch === "}") { depth--; if (depth === 0) return safeJsonParse(text.slice(start, i + 1)); }
+    }
+    return null;
+}
+
+function safeJsonParse(s) {
+    try { return JSON.parse(s); } catch (_) { return null; }
+}
+
 // ★ 氛围提示（atmosphere）净化：仅接受非空字符串，压缩空白并限长。
 //   用于 LLM 每轮可选输出的环境变化/危机预警短句（docs/ui-redesign）。
 //   非法值（null/数字/空串/空白）一律归一为 null，保证旧存档与异常响应安全。

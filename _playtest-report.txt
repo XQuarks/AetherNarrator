@@ -1,0 +1,76 @@
+=== AetherNarrator 真实 API 实操走查报告 ===
+时间：2026/8/6 14:06:32
+API: https://api.deepseek.com / 模型 deepseek-v4-flash
+
+LLM 调用 13 次：成功 13，失败 0，平均 0.0s/次
+  #1 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #2 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #3 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #4 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #5 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #6 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #7 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #8 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #9 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #10 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #11 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #12 HTTP 200 ? https://api.deepseek.com/chat/completions
+  #13 HTTP 200 ? https://api.deepseek.com/chat/completions
+
+捕获问题 4 条：
+  ⚠ [console.error] The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.
+  ⚠ [console.error] Failed to load resource: the server responded with a status of 404 (Not Found)
+  ⚠ [生成质量] WQ5 初始状态存在 不达标：含 （缺姓名/背景）
+  ⚠ [生成质量] WQ9 知识库 ≥5 条且每条 id/标题/内容有效 不达标：0 条
+
+走查结果：40/44 项通过
+  ✓ 首页渲染正确（以太叙事）  以太叙事 · AetherNarrator / 按钮 1 个
+  ✓ API 弹窗打开且输入框可见
+  ✓ API 配置已保存并回填
+  ✓ 名称+描述后可进入第 2 步  实际步骤 1
+  ✓ 叙事风格模板可点击套用
+  ✓ 进入末步「确认生成」  实际步骤 5
+  ✓ AI 生成世界完成  耗时 20.5s
+  ✓ 新世界出现在世界列表  w1785996193291
+  ✓ 生成验收 WQ1 世界 ID 有效
+  ✓ 生成验收 WQ2 名称/描述非空
+  ✓ 生成验收 WQ3 pov 取值合法
+  ✓ 生成验收 WQ4 时间配置完整
+  ✗ 生成验收 WQ5 初始状态存在  ✗ 含 （缺姓名/背景）
+  ✓ 生成验收 WQ6 开场白 ≥100 字
+  ✓ 生成验收 WQ7 初始选项 2~6 项且每项有文本
+  ✓ 生成验收 WQ8 系统提示词 ≥100 字
+  ✗ 生成验收 WQ9 知识库 ≥5 条且每条 id/标题/内容有效  ✗ 0 条
+  ✓ 生成验收 WQ10 风格预设生效
+  ✓ 生成验收 WQ11 玩法模块对象存在
+  ✓ 生成验收 WQ12 人物卡数组结构合法
+  ✓ 详情页签「知识库」渲染非空  条目数 0 · 0知识库条目 暂无分类数据 编辑知识库
+  ✓ 详情页签「时间体系」渲染非空  纪元— 历法single 起始日期— 时间体系的编辑入口在「知识库 → 时间体系」页签中。
+  ✓ 详情页签「角色」渲染非空  该世界还没有角色卡。 编辑角色
+  ✓ 详情页签「变量」渲染非空  该世界还没有玩家变量（默认无数字压力，可选添加）。 编辑变量
+  ✓ 详情页签「物品」渲染非空  该世界开局没有初始物品（默认空背包，物品由剧情动态授予）。 编辑物品
+  ✓ 详情页签「模块开关」渲染非空  开启 / 关闭本世界启用的系统。关闭后对应界面与机制将停用，AI 也不会自行引入相关机制。 知识库 世界观设定库（规则/
+  ✗ 知识库条目数与底层数据一致  UI 0 / 数据 -1
+  ✗ 知识库编辑器条目树渲染  条目 0 个
+  ✓ 开局叙事正常渲染
+  ✓ 回合 1：AI 回复完成且内容正常  耗时 9.6s · 回复 517 字
+  ✓ 回合 2：AI 回复完成且内容正常  耗时 24.3s · 回复 1805 字
+  ✓ 回合 3：AI 回复完成且内容正常  耗时 8.7s · 回复 440 字
+  ✓ 回合 4：AI 回复完成且内容正常  耗时 21.1s · 回复 1219 字
+  ✓ 回合 5：AI 回复完成且内容正常  耗时 11.2s · 回复 550 字
+  ✓ 回合 6：AI 回复完成且内容正常  耗时 17.7s · 回复 479 字
+  ✓ 回合 7：AI 回复完成且内容正常  耗时 17.8s · 回复 427 字
+  ✓ 回合 8：AI 回复完成且内容正常  耗时 17.8s · 回复 492 字
+  ✓ 回合 9：AI 回复完成且内容正常  耗时 17.0s · 回复 455 字
+  ✓ 回合 10：AI 回复完成且内容正常  耗时 22.7s · 回复 1739 字
+  ✓ 时间系统在游玩中推进（回合3 vs 回合7）  「第1天 · 早晨」 → 「第1天 · 夜晚」
+  ✓ 角色状态面板渲染非空  200 字
+  ✓ 存档成功（IndexedDB 存档条目）  存档 1 个
+  ✓ 读档后回到游戏并恢复对话历史  对话条目 11（读档前 11）
+  ✓ 读档后能继续对话（会话记忆未断）  新条目 +1 · 回复 437 字
+
+失败项：
+  ✗ 生成验收 WQ5 初始状态存在  ✗ 含 （缺姓名/背景）
+  ✗ 生成验收 WQ9 知识库 ≥5 条且每条 id/标题/内容有效  ✗ 0 条
+  ✗ 知识库条目数与底层数据一致
+  ✗ 知识库编辑器条目树渲染
