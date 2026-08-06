@@ -124,6 +124,52 @@
                 </div>
             </div>
         </div>
+        <!-- 高亮 -->
+        <div class="st-section">
+            <div class="st-section-title">高 亮</div>
+            <div class="st-group">
+                <div class="st-row">
+                    <div class="st-row-head">
+                        <span class="st-row-title">人物名字高亮</span>
+                        <label class="switch">
+                            <input type="checkbox" id="hlNames" data-action="toggleHlNames" data-event="change">
+                            <span class="switch-knob"></span>
+                        </label>
+                    </div>
+                    <div class="st-row-hint">剧情中出现的角色姓名自动加粗标色（取自人物卡，单字名不参与以免误伤）。</div>
+                </div>
+                <div class="st-row">
+                    <div class="st-row-head">
+                        <span class="st-row-title">背包物品高亮</span>
+                        <label class="switch">
+                            <input type="checkbox" id="hlItems" data-action="toggleHlItems" data-event="change">
+                            <span class="switch-knob"></span>
+                        </label>
+                    </div>
+                    <div class="st-row-hint">剧情中出现的背包物品名显示为高亮胶囊（原有功能，此开关统一管理）。</div>
+                </div>
+                <div class="st-row">
+                    <div class="st-row-head">
+                        <span class="st-row-title">人物对白高亮</span>
+                        <label class="switch">
+                            <input type="checkbox" id="hlDialogue" data-action="toggleHlDialogue" data-event="change">
+                            <span class="switch-knob"></span>
+                        </label>
+                    </div>
+                    <div class="st-row-hint">引号（“…”或「…」）内的对白以斜体主题色显示。</div>
+                </div>
+                <div class="st-row">
+                    <div class="st-row-head">
+                        <span class="st-row-title">AI 重点标记（进阶）</span>
+                        <label class="switch">
+                            <input type="checkbox" id="hlAiMarks" data-action="toggleHlAiMarks" data-event="change">
+                            <span class="switch-knob"></span>
+                        </label>
+                    </div>
+                    <div class="st-row-hint">AI 会用 **加粗** 标关键人名/线索、==高亮== 标重要悬念。关闭后标记符号原样显示。开启时对 AI 生成的提示词会附带一条标记约定。</div>
+                </div>
+            </div>
+        </div>
         <!-- 知识库 -->
         <div class="st-section">
             <div class="st-section-title">知 识 库</div>

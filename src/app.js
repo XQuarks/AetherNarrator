@@ -6,7 +6,7 @@ import { STORAGE_KEYS } from "./store.js";
 import { warmupEmbeddingWorker } from "./rag.js";
 import { deepClone, logError } from "./utils.js";
 import { installGlobalErrorGuard } from "./error-guard.js";
-import { applyFontSize, applyTheme, changeFontSize, toggleTheme, changeNarrativePacing, changeNarrativeLength, changeReadingSpeed, updateNarrativePacingButtons, updateNarrativeLengthButtons, updateReadingSpeedButtons } from "./theme.js";
+import { applyFontSize, applyTheme, changeFontSize, toggleTheme, changeNarrativePacing, changeNarrativeLength, changeReadingSpeed, updateNarrativePacingButtons, updateNarrativeLengthButtons, updateReadingSpeedButtons, toggleHlNames, toggleHlItems, toggleHlDialogue, toggleHlAiMarks } from "./theme.js";
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset, resetRunCache, wipeAllSaves, wipeAllData } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
@@ -278,6 +278,11 @@ const ACTIONS = {
     confirmLoreRevision: () => confirmLoreRevision(),
     rejectLoreRevision: () => rejectLoreRevision(),
     toggleLoreRequireConfirm: (el) => toggleLoreRequireConfirm(el),
+    // ★ docs/63：剧情文本高亮开关（设置面板「高亮」分区）
+    toggleHlNames: (el) => { toggleHlNames(el); showToast("人物名字高亮已" + (S.highlightNames ? "开启" : "关闭"), "success", 2500); },
+    toggleHlItems: (el) => { toggleHlItems(el); showToast("背包物品高亮已" + (S.highlightItems ? "开启" : "关闭"), "success", 2500); },
+    toggleHlDialogue: (el) => { toggleHlDialogue(el); showToast("人物对白高亮已" + (S.highlightDialogue ? "开启" : "关闭"), "success", 2500); },
+    toggleHlAiMarks: (el) => { toggleHlAiMarks(el); showToast("AI 重点标记已" + (S.highlightAiMarks ? "开启" : "关闭"), "success", 2500); },
     toggleAIEnhanced: () => toggleAIEnhanced(),
     // ★ Phase 3：AI 审稿人（criticModal）
     triggerWorldCritic: () => triggerWorldCritic(S.currentWorld && S.currentWorld.id),

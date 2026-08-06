@@ -51,6 +51,11 @@ export const S = {
   narrativePacing: _lsGet("aigame_pacing", "standard"),   // compact / standard / relaxed
   narrativeLength: _lsGet("aigame_narrlen", "standard"),  // short / standard / long
   readingSpeed: _lsGet("aigame_readspeed", "standard"),  // slow / standard / fast / instant
+  // ★ docs/63：剧情文本高亮开关（设置面板「高亮」分区；渲染时现算，不改存档结构）
+  highlightNames: _lsGet("aigame_hl_names", "true") !== "false",      // A：人物名字高亮（B1 人物卡词典）
+  highlightItems: _lsGet("aigame_hl_items", "true") !== "false",      // A：背包物品高亮（既有行为，默认开）
+  highlightDialogue: _lsGet("aigame_hl_dialogue", "true") !== "false", // C：人物对白（引号）高亮
+  highlightAiMarks: _lsGet("aigame_hl_ai", "true") !== "false",       // B：AI 标记解析（**加粗** / ==高亮==，进阶开关）
   // ★ 事件系统：当前待展示的支线事件候选（AI 每回合返回）与本次进入的支线消耗标记（一次性消费）
   pendingSideEvents: [],
   enteringSideEvent: null,

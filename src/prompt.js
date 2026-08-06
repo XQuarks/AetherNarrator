@@ -333,6 +333,12 @@ export function buildSystemPrompt() {
     // ★ B4：关系 / 好感度驱动选项行为指令（常驻、世界无关、不破前缀缓存）
     systemPrompt += "\n\n" + buildBondHint();
 
+    // ★ docs/63：文本标记约定（显示优化；进阶开关关闭时不注入，AI 无感）。
+    // 运行时注入 → 新旧世界都生效；关闭开关后不再注入，且渲染层不再解析标记符号。
+    if (S.highlightAiMarks !== false) {
+        systemPrompt += "\n\n# 文本标记约定（显示优化）\n\n用于剧情文本的高亮显示，请遵守：\n- 关键人名、重要物品、重要线索可用 **加粗** 标记；极重要的悬念或提示可用 ==高亮== 标记；\n- 人物对白请用 “…” 或 「…」 引号包裹；\n- 仅限叙事文本（narrative）内使用，克制为每段 1~3 处，只标真正重要的内容，不要整段加粗。";
+    }
+
     // ★ 时间线单向进度指令（仅当知识库存在带 timeline 的条目时注入，避免污染无时间线的世界）
     const hasTimeline = allSnippets.some(s => Array.isArray(s.timeline) && s.timeline.length);
     if (hasTimeline) {

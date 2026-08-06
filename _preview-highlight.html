@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>剧情文本高亮预览 · docs/63</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+    /* 预览页布局（独立，不进真实代码） */
+    body {
+        padding: 26px 20px 80px;
+        max-width: 760px;
+        margin: 0 auto;
+        background: var(--bg, #191510);
+        color: var(--text, #D9CFC0);
+        font-family: var(--sans, system-ui, sans-serif);
+    }
+    h1 { font-size: 19px; letter-spacing: .06em; margin-bottom: 4px; font-family: var(--serif, serif); }
+    .sub { font-size: 12px; color: var(--text-muted, rgba(217,207,192,.42)); margin-bottom: 6px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; color: var(--text-secondary, rgba(217,207,192,.62)); margin: 8px 0 20px; }
+    .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+    .controls {
+        display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center;
+        padding: 14px 18px; margin-bottom: 26px;
+        border: 1px solid var(--card-border, rgba(217,207,192,.12));
+        border-radius: 12px; background: var(--card, rgba(217,207,192,.05));
+    }
+    .ctl { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none; }
+    .theme-btn {
+        padding: 7px 16px; font-size: 12px; cursor: pointer;
+        border-radius: 999px; border: 1px solid var(--card-border, rgba(217,207,192,.12));
+        background: transparent; color: var(--text-secondary, rgba(217,207,192,.62));
+        font-family: var(--sans, sans-serif);
+    }
+    .theme-btn:hover { border-color: var(--primary, #C9A87C); color: var(--primary, #C9A87C); }
+    .sample { margin-bottom: 22px; }
+    .sample-head { font-size: 12px; color: var(--text-muted, rgba(217,207,192,.42)); margin-bottom: 6px; letter-spacing: .06em; }
+    .log-entry { margin-bottom: 0; }
+    .log-entry .narrative {
+        line-height: 1.85; font-size: 15.5px; letter-spacing: .01em; color: var(--text, #D9CFC0);
+    }
+</style>
+</head>
+<body>
+
+<h1>剧情文本高亮预览</h1>
+<div class="sub">docs/63 · A 人名 / B AI 标记（进阶）/ C 对白 · 渲染管线真实输出（renderNarrative）</div>
+
+<div class="legend">
+    <span><span class="dot" style="background:var(--primary, #C9A87C);"></span>人名 · 加粗主题色</span>
+    <span><span class="dot" style="background:rgba(var(--accent-rgb, 201,168,124), .35);"></span>物品 · 胶囊</span>
+    <span><span class="dot" style="background:rgba(var(--accent-rgb, 201,168,124), .5);"></span>对白 · 斜体</span>
+    <span><span class="dot" style="background:rgba(var(--accent-rgb, 201,168,124), .55);"></span>AI 标记 ==高亮==</span>
+    <span><span class="dot" style="background:#C9B458;"></span>违禁词 · 黄底（IP#6 示例）</span>
+</div>
+
+<div class="controls">
+    <button class="theme-btn" id="themeBtn">切换主题（当前：夜间）</button>
+    <label class="ctl">人物名字 <label class="switch"><input type="checkbox" id="swNames" checked><span class="switch-knob"></span></label></label>
+    <label class="ctl">背包物品 <label class="switch"><input type="checkbox" id="swItems" checked><span class="switch-knob"></span></label></label>
+    <label class="ctl">人物对白 <label class="switch"><input type="checkbox" id="swDialogue" checked><span class="switch-knob"></span></label></label>
+    <label class="ctl">AI 标记 <label class="switch"><input type="checkbox" id="swAiMarks" checked><span class="switch-knob"></span></label></label>
+</div>
+
+<div id="story"></div>
+
+<script type="module">
+import { S } from "./src/store.js";
+import { renderNarrative } from "./src/render.js";
+
+// 模拟一个世界：人物卡 + 背包（与真实数据形状一致）
+S.currentWorld = {
+    characters: [
+        { id: "c1", name: "赫敏", role: "npc" },
+        { id: "c2", name: "罗恩", role: "npc" },
+        { id: "c3", name: "哈利", role: "protagonist" }
+    ]
+};
+S.gameState = { inventory: [{ name: "魔杖" }, { name: "隐身斗篷" }] };
+S.highlightNames = true;
+S.highlightItems = true;
+S.highlightDialogue = true;
+S.highlightAiMarks = true;
+
+const SAMPLES = [
+    { label: "① 综合：人名 + 物品 + 对白 + AI 标记", text: "你推开古堡大门，赫敏握着魔杖说：“别怕，真相就在眼前。”她补充道：**记住，隐身斗篷只救一时。**", banned: null },
+    { label: "② 人名（来自 B1 人物卡）", text: "赫敏与罗恩正在争论，哈利默默听着，没有插话。", banned: null },
+    { label: "③ 对白（引号识别，弯引号 / 直角引号）", text: "他低声道：“今晚就走。”她笑着回应：「你确定？」", banned: null },
+    { label: "④ AI 标记（**加粗** 关键线索 / ==高亮== 悬念）", text: "这是**关键线索**，而==真相==就藏在密室里。", banned: null },
+    { label: "⑤ 违禁词标黄（IP#6 叠加，示例含 AI 标记）", text: "他拿出==手机==拨号。赫敏皱眉道：“这不属于这个世界。”", banned: ["手机"] }
+];
+
+function renderAll() {
+    document.getElementById("story").innerHTML = SAMPLES.map(s =>
+        '<div class="sample"><div class="sample-head">' + s.label + '</div>' +
+        '<div class="log-entry"><div class="narrative">' + renderNarrative(s.text, false, s.banned) + '</div></div></div>'
+    ).join("");
+}
+renderAll();
+
+// 开关实时切换（等价于设置面板 data-action）
+document.getElementById("swNames").addEventListener("change", e => { S.highlightNames = e.target.checked; renderAll(); });
+document.getElementById("swItems").addEventListener("change", e => { S.highlightItems = e.target.checked; renderAll(); });
+document.getElementById("swDialogue").addEventListener("change", e => { S.highlightDialogue = e.target.checked; renderAll(); });
+document.getElementById("swAiMarks").addEventListener("change", e => { S.highlightAiMarks = e.target.checked; renderAll(); });
+
+// 主题切换
+let dark = true;
+document.getElementById("themeBtn").addEventListener("click", () => {
+    dark = !dark;
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    document.getElementById("themeBtn").textContent = "切换主题（当前：" + (dark ? "夜间" : "日间") + "）";
+});
+</script>
+</body>
+</html>

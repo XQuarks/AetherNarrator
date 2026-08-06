@@ -102,6 +102,9 @@ function updateSettingsValues() {
     updateFontSizeButtons();
     const lrc = document.getElementById("loreRequireConfirm");
     if (lrc) lrc.checked = S.loreRequireConfirm;
+    // ★ docs/63：高亮开关状态同步
+    const hlSync = [["hlNames", S.highlightNames], ["hlItems", S.highlightItems], ["hlDialogue", S.highlightDialogue], ["hlAiMarks", S.highlightAiMarks]];
+    hlSync.forEach(([id, val]) => { const el = document.getElementById(id); if (el) el.checked = !!val; });
 }
 export function showSettingsScreen() {
     showScreen("settingsScreen");
@@ -1158,14 +1161,81 @@ export function highlightItems(text) {
     if (!S.gameState || !Array.isArray(S.gameState.inventory) || !S.gameState.inventory.length) return text;
     const names = S.gameState.inventory.map(i => i.name).filter(n => n);
     if (!names.length) return text;
-    // 按名称长度降序，避免短名先替换导致长名无法匹配
-    names.sort((a, b) => b.length - a.length);
-    let html = escapeHtml(text);
-    for (const name of names) {
-        const regex = new RegExp(escapeRegExp(escapeHtml(name)), "g"); // 先 HTML 转义以匹配已转义文本，再转义正则元字符
-        html = html.replace(regex, `<span class="item-highlight">${escapeHtml(name)}</span>`);
-    }
-    return html;
+    // ★ docs/63：改走 highlightTerms（防嵌套的多词交替实现），对外行为不变（纯文本入参、内部转义）
+    return highlightTerms(escapeHtml(text), names, "item-highlight");
+}
+
+// ============================================================
+// ★ docs/63：剧情文本高亮（人名 / 对白 / AI 标记）
+// 安全约定：highlightTerms / dialogueOnEscaped / aiMarksOnEscaped 的入参
+// 必须是「已转义」的 HTML（escapeHtml 之后），只产出白名单 span/strong，
+// 不引入原始 HTML，无注入面。
+// ============================================================
+
+// 取当前世界的角色名表（B1 人物卡；过滤空名与单字名——单字名易误伤正文普通字）
+function charNames() {
+    const chars = (S.currentWorld && Array.isArray(S.currentWorld.characters)) ? S.currentWorld.characters : [];
+    return chars
+        .map(c => (c && typeof c.name === "string" ? c.name.trim() : ""))
+        .filter(n => n.length >= 2);
+}
+
+// 多词高亮核心：在已转义 HTML 上做白名单 span 替换。
+// - 多词交替正则 + 单次 replace：同一词表内长词优先、天然不嵌套（替代旧循环 replace 的嵌套 bug）；
+// - 按标签切分并跟踪 span 深度：已包裹在 span 内的文本不再被后续词表套层 → 跨词表也不嵌套。
+export function highlightTerms(escapedHtml, terms, cls) {
+    if (!escapedHtml || !Array.isArray(terms) || !terms.length) return escapedHtml;
+    const uniq = [...new Set(terms.map(String).filter(Boolean))];
+    if (!uniq.length) return escapedHtml;
+    uniq.sort((a, b) => b.length - a.length); // 长词优先，避免短词先匹配吃掉长词
+    const re = new RegExp("(" + uniq.map(t => escapeRegExp(escapeHtml(t))).join("|") + ")", "g");
+    let depth = 0;
+    return escapedHtml.split(/(<[^>]+>)/g).map(seg => {
+        if (seg.startsWith("<")) {
+            if (/^<\/?span\b/i.test(seg)) depth += (/^<\/span/i.test(seg) ? -1 : 1);
+            return seg;
+        }
+        if (depth > 0) return seg; // 已在上一词表生成的 span 内，跳过防嵌套
+        return seg.replace(re, m => `<span class="${cls}">${m}</span>`);
+    }).join("");
+}
+
+// A：人物名字高亮（纯文本入参，内部转义；供测试/复用）
+export function highlightNames(text) {
+    const names = charNames();
+    if (!names.length) return text;
+    return highlightTerms(escapeHtml(text), names, "name-highlight");
+}
+
+// C：对白（引号内容）高亮。在已转义 HTML 上匹配引号对。
+// 注意：
+// - escapeHtml 会把 ASCII 双引号转成 &quot;，故引号需用「交替」而不是字符类
+//   （字符类里的 &quot; 会被拆成 &/q/u/o/t/; 等单字符，误伤 &lt; 等实体）；
+// - 只在非标签文本段匹配（标签属性里的 &quot; 不是对白引号），避免破坏已生成的高亮 span。
+const DIALOGUE_RE = /(“|&quot;|«|「|『)([^”»」』]{0,160}?)(”|&quot;|»|」|』)/g;
+function dialogueOnEscaped(escapedHtml) {
+    if (!escapedHtml) return escapedHtml;
+    return escapedHtml.split(/(<[^>]+>)/g).map(seg => {
+        if (seg.startsWith("<")) return seg;
+        return seg.replace(DIALOGUE_RE, '<span class="dialogue-highlight">$1$2$3</span>');
+    }).join("");
+}
+export function highlightDialogue(text) {
+    return dialogueOnEscaped(escapeHtml(text));
+}
+
+// B：AI 标记解析（**加粗** → strong.ai-emphasis；==高亮== → span.ai-mark）。
+// 开关关闭时不解析，标记符号按普通字符原样显示（无害）。
+const AI_BOLD_RE = /\*\*([^*\n]{1,120}?)\*\*/g;
+const AI_MARK_RE = /==([^=\n]{1,120}?)==/g;
+function aiMarksOnEscaped(escapedHtml) {
+    if (!escapedHtml) return escapedHtml;
+    return escapedHtml
+        .replace(AI_BOLD_RE, '<strong class="ai-emphasis">$1</strong>')
+        .replace(AI_MARK_RE, '<span class="ai-mark">$1</span>');
+}
+export function highlightAiMarks(text) {
+    return aiMarksOnEscaped(escapeHtml(text));
 }
 
 /**
@@ -1189,9 +1259,12 @@ export function highlightBanned(html, hits) {
  * 把剧情文本渲染为带段落结构的 HTML。
  * - 按空行（\n\n）拆分为独立段落 <p>，段间距由 CSS 的 `p + p` 规则控制；
  * - 段落内的单个换行保留为 <br>，避免被浏览器折叠；
- * - 物品高亮（highlightItems）在转义后生效，且高亮不会破坏已插入的 <br>。
- * - 可选 bannedHits：命中的违禁概念（IP#6），在物品高亮之后叠加黄底标黄。
- * 注意：highlightItems 内部会先 escapeHtml，\n 不会被转义，故可在其后安全替换。
+ * - ★ docs/63 高亮管道（顺序固定）：先无条件 escapeHtml（安全基座）→ 物品
+ *   （highlightTerms, item-highlight）→ 人名（name-highlight）→ 对白引号
+ *   （dialogue-highlight）→ AI 标记（双星号加粗 / 双等号高亮，ai-emphasis /
+ *   ai-mark）→ 违禁词标黄（banned-hit，IP#6 最后叠加）。各层开关在设置面板
+ *   「高亮」分区，默认全开；
+ * - 高亮不会破坏已插入的 <br>，也不会互相嵌套（highlightTerms 防嵌套）。
  */
 export function renderNarrative(text, isWarning, bannedHits) {
     if (isWarning) return escapeHtml(text || "");
@@ -1201,7 +1274,20 @@ export function renderNarrative(text, isWarning, bannedHits) {
         .filter(b => b.length);
     if (!blocks.length) return escapeHtml(text || "");
     return blocks
-        .map(b => `<p>${highlightBanned(highlightItems(b), bannedHits).replace(/\n/g, "<br>")}</p>`)
+        .map(b => {
+            // ★ docs/63：先无条件转义（安全基座），再按开关叠加各层高亮；违禁词标黄保持最后。
+            // 打字机打完后调用本函数 → 高亮与逐字动画天然兼容（打字中显示纯文本）。
+            let html = escapeHtml(b);
+            if (S.highlightItems !== false) {
+                const itemNames = (S.gameState && Array.isArray(S.gameState.inventory)) ? S.gameState.inventory.map(i => i.name).filter(n => n) : [];
+                html = highlightTerms(html, itemNames, "item-highlight");
+            }
+            if (S.highlightNames !== false) html = highlightTerms(html, charNames(), "name-highlight");
+            if (S.highlightDialogue !== false) html = dialogueOnEscaped(html);
+            if (S.highlightAiMarks !== false) html = aiMarksOnEscaped(html);
+            if (Array.isArray(bannedHits) && bannedHits.length) html = highlightBanned(html, bannedHits);
+            return `<p>${html.replace(/\n/g, "<br>")}</p>`;
+        })
         .join("");
 }
 

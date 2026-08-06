@@ -281,6 +281,16 @@ export function updateReadingSpeedButtons() {
     });
 }
 
+// ★ docs/63：剧情文本高亮开关（设置面板「高亮」分区；渲染时现算，无需改存档）
+function toggleHighlightFlag(key, storageKey, el) {
+    S[key] = !!(el && el.checked !== undefined ? el.checked : !S[key]);
+    try { localStorage.setItem(storageKey, S[key] ? "true" : "false"); } catch (e) {}
+}
+export function toggleHlNames(el) { toggleHighlightFlag("highlightNames", "aigame_hl_names", el); }
+export function toggleHlItems(el) { toggleHighlightFlag("highlightItems", "aigame_hl_items", el); }
+export function toggleHlDialogue(el) { toggleHighlightFlag("highlightDialogue", "aigame_hl_dialogue", el); }
+export function toggleHlAiMarks(el) { toggleHighlightFlag("highlightAiMarks", "aigame_hl_ai", el); }
+
 export function tempLabelText(v) {
     if (v <= 0.3) return "严谨模式（高度一致）";
     if (v <= 0.5) return "剧情模式（稳定连贯）";

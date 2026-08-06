@@ -1328,6 +1328,27 @@
             padding: 1px 4px;
             border-radius: var(--radius-s);
         }
+        /* ★ docs/63：人名加粗+主题色（不加底色，与物品胶囊区分） */
+        .log-entry .narrative .name-highlight {
+            color: var(--primary);
+            font-weight: 600;
+        }
+        /* ★ docs/63：对白斜体+主题色（引号内容） */
+        .log-entry .narrative .dialogue-highlight {
+            color: var(--primary);
+            font-style: italic;
+        }
+        /* ★ docs/63：AI 标记 **加粗**（strong 继承当前颜色） */
+        .log-entry .narrative .ai-emphasis {
+            font-weight: 600;
+        }
+        /* ★ docs/63：AI 标记 ==高亮==（主题色浅底，区别于违禁词的黄底 banned-hit） */
+        .log-entry .narrative .ai-mark {
+            background: rgba(var(--accent-rgb), 0.14);
+            padding: 1px 3px;
+            border-radius: var(--radius-s);
+            font-weight: 500;
+        }
         /* 打字机光标 */
         .log-entry .narrative.typing::after {
             content: "▋";
