@@ -110,6 +110,13 @@ export const DEFAULT_PERIOD_ORDER = ["morning", "forenoon", "afternoon", "evenin
 export const MEMORY_TYPES = ["event", "relationship", "item", "discovery", "other"];
 export const MEMORY_TYPE_LABELS = { event: "事件", relationship: "关系", item: "物品", discovery: "发现", other: "其他" };
 
+// ★ 66：记忆三分型（借鉴 WorldLines soul 长期记忆分型）
+// bucket 与 type 并存：type 描述"内容性质"，bucket 描述"记忆用途"（注入/展示分组）
+export const MEMORY_BUCKETS = ["emotional", "important_event", "learned_fact"];
+export const MEMORY_BUCKET_LABELS = {
+    emotional: "情感记忆", important_event: "重要事件", learned_fact: "学到的知识"
+};
+
 export const LINK_RELATIONS = ["causal", "related", "explains", "contains"];
 export const LINK_RELATION_LABELS = { causal: "因果", related: "相关", explains: "解释", contains: "包含" };
 

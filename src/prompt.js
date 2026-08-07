@@ -1,7 +1,7 @@
 // ============================================================
 // AetherNarrator · prompt.js（由 app.js 模块化拆分自动生成）
 // ============================================================
-import { S, getVariableSchema, getEnabledVariables, getWorldLoreKB } from "./store.js";
+import { S, getVariableSchema, getEnabledVariables, getWorldLoreKB, MEMORY_BUCKETS } from "./store.js";
 import { CHAT_ANCHOR_MSGS, CHAT_RECENT_MSGS, LORE_FULL_THRESHOLD, MAX_CHAT_MESSAGES, SYSTEM_ROLES, DEFAULT_BANNED_CONCEPTS, getBannedConcepts } from "./store.js";
 import { dedupeStrings, extractNarrativeText, getWorldSchema, resolveOpeningTokens } from "./utils.js";
 import { getTimeConfig, formatWorldTime, getPeriodLabel, stepOf } from "./theme.js";
@@ -20,7 +20,9 @@ let cachedSystemCats = new Set();
 const OPENING_SRC_CHARS = 3000;
 
 // ★ docs/58：移除 type 参数（类型概念已删除）；新增 pov 参数（solo/ensemble）控制主角/群像剧指令。
-export function buildWorldGenerationPrompt(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap = 8000, loreCountMin = null, stylePreset = null) {
+export function buildWorldGenerationPrompt(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap = 8000, loreCountMin = null, stylePreset = null, moduleSettings = null) {
+    // ★ 混淆点修复 1：地图系统模块开启 → locations 段从"可选"升级为"必须产出"（生成与开关联动）
+    const mapModuleOn = !!(moduleSettings && moduleSettings.map && moduleSettings.map.enabled);
     const plotFreedomDesc = {
         1: "严格遵循原著 — 关键剧情节点、重要事件必须按原著发生，AI 不得偏移主线。",
         2: "以原著为主 — 主线遵循原著，但在支线和日常互动上可以有限发散。",
@@ -173,6 +175,19 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
 8. lore_stage_count: 整数（可选，建议 5-8）。本世界「剧情阶段」的总数 K，用于把防剧透门禁的刻度定下来：知识库每条设定标 unlock_stage ∈ 1..K，当前进度 story_progress 也按 1..K 推进。若你判断该世界有清晰的长线剧情推进（尤其改编自长篇小说 / 全书导入），请给出一个 K，并尽量让知识库各条的 unlock_stage 均匀分布、把结局相关的关键设定落到高值（避免第一卷就剧透结局）。无长线阶段感的世界可省略此字段。
 
 9. lore_stage_labels: 字符串数组（可选，长度与 lore_stage_count 一致），作者端展示用的阶段主题名（如 ["红岸","危机","面壁","威慑","广播","归零"]），仅用于编辑界面提示，不影响运行。
+
+10. gm_truth: 对象（可选）——「GM 专属幕后真相」，格式 { entries: [ { id, title, content, unlock_stage } ] }，产出 1~4 条即可，也可以不产出（null/省略）。
+    - 这是整个世界**核心谜底的唯一存放处**（谜底、幕后黑手真实身份、结局级秘密等，通常 1~4 条就够）。
+    - 每条标 unlock_stage（1..K 整数，对应 lore_stage_count 的剧情阶段；数值越大越接近结局才揭示）。
+    - **若产出 gm_truth，建议同时给出第 8 项 lore_stage_count（K）**，并让各条 unlock_stage 落在 1..K 区间——否则剧情阶段无上限，进度推高后真相会被提前全部揭示。
+    - **严格规则**：这些真相在游玩中绝不主动出现——AI 叙事/角色/旁白都不得知晓、不得提及、不得暗示它们，直到剧情推进到对应 unlock_stage 时，引擎才会把该条揭示给叙事方作为依据。
+    - 不要把 gm_truth 里的内容写进 lore_kb.snippets（知识库是玩家可接触的设定，两者严格分开）。
+    - 若世界没有"藏到底的谜底"（如轻松日常向），直接省略此字段。
+
+11. locations: 数组（可选）——「地点连接图」，格式 [ { id, name, summary, connections, hidden, npcs_default } ]${mapModuleOn ? "，本世界已开启「地图系统」模块，**必须产出 8~20 个地点**（除非世界观明确没有空间探索感，如纯心理/意识流叙事，才可省略）" : "，产出 8~20 个地点即可，也可以省略"}。
+    - 给世界一个有空间感的地点网络：name 为地点名（**尽量与 lore_kb 中地点类条目的 title 保持一致**），summary 一句话描述，connections 为可达邻居的地点名数组（不含自己），hidden 是否隐藏地点（默认 false，隐藏地点不在地图提示可达性），npcs_default 为该地常驻 NPC 名数组（可选）。
+    - 用途：引擎把「当前所在地 + 相邻可去的连接」提示给叙事 AI，增强空间一致性；不限制 AI 移动。
+    - ${mapModuleOn ? "" : "若世界没有空间探索感（如纯心理/意识流叙事），直接省略此字段。"}
 
 # 注意
 
@@ -850,6 +865,16 @@ export function buildCompactGameState() {
         npc_activity: S.gameState.npc_activity || {},
         present_npcs: S.gameState.present_npcs || [],
         revealed_locations: S.gameState.revealed_locations || [],
+        // ★ docs/68：地点图——当前所在地的相邻可去地点（仅当世界启用了 map 模块且有 locations 图时输出；无图/关闭则省略）
+        connections_from_current: (() => {
+            if (!isModuleEnabled(S.currentWorld, "map")) return undefined;
+            const locs = (S.currentWorld && Array.isArray(S.currentWorld.locations)) ? S.currentWorld.locations : [];
+            if (!locs.length) return undefined;
+            const cur = locs.find(l => l.name === S.gameState.current_location);
+            if (!cur) return undefined;
+            const conns = (cur.connections || []).filter(n => n && n !== cur.name);
+            return conns.length ? conns.slice(0, 6) : undefined;
+        })(),
         // ★ B2：当前变量值（动态段，每轮跟随 user 消息；不在 system 静态段，避免破坏前缀缓存）
         variables: S.gameState.variables || {},
         // ★ B4：当前好感度（动态段，每轮跟随 user 消息；初始锚点在 buildCharactersContext，不破前缀缓存）
@@ -883,11 +908,18 @@ export function inferTriggerFromContent(content) {
     // 地点：若 content 中出现已知「地点」片段标题，则作为 location 兜底
     try {
         const kb = getWorldLoreKB();
+        const locNames = [];
         if (kb && kb.snippets) {
             const locs = kb.snippets.filter(s => s.category === "地点").map(s => s.title);
-            for (const loc of locs) {
-                if (loc && text.includes(loc)) { cond.location = loc; break; }
-            }
+            for (const loc of locs) { if (loc) locNames.push(loc); }
+        }
+        // ★ docs/68：地点图名称并入地点名单（与 lore 地点条目并列，增强事件地点匹配；仅 map 模块启用时）
+        if (isModuleEnabled(S.currentWorld, "map")) {
+            const mapLocs = (S.currentWorld && Array.isArray(S.currentWorld.locations)) ? S.currentWorld.locations : [];
+            for (const l of mapLocs) { if (l && l.name && !locNames.includes(l.name)) locNames.push(l.name); }
+        }
+        for (const loc of locNames) {
+            if (loc && text.includes(loc)) { cond.location = loc; break; }
         }
     } catch (e) { /* 推断失败不影响主流程 */ }
     // 无任何可推断条件：视为纯自由事件，交回 AI 自觉（不强行触发）
@@ -1015,15 +1047,10 @@ export function buildTurnUserMessage(input, retrieved) {
     }
 
     // ★ 永久记忆：注入关键事实（解决 AI 失忆问题）
-    // P1#4：把 RAG 按相关度召回的行为记录（retrieved 里的 behavior_ 片段）与"最近 5 条"去重合并，
-    // 让相关度高的旧事实也能被召回，而不是只依赖时间窗口里恰好最近的几条（此前相关度结果被丢弃）。
-    const ragFacts = (retrieved || []).filter(s => String(s.id).startsWith("behavior_")).map(s => s.content);
-    const recentFacts = dedupeStrings([...ragFacts, ...getRecentKeyFacts(5)]).slice(0, 6);
-    if (recentFacts.length) {
-        userPrompt += "# 已发生的关键事件（务必记住）\n\n";
-        recentFacts.forEach((f, i) => { userPrompt += (i + 1) + ". " + f + "\n"; });
-        userPrompt += "\n";
-    }
+    // ★ 66：记忆三分型——按「情感记忆 / 重要事件 / 学到的知识」分组注入，
+    // 检索命中（retrieved 里的 behavior_ 片段）优先，其余按 pinned+importance 补足，每段最多 maxPerBucket 条。
+    const memoryBlock = buildMemoryInjection(retrieved);
+    if (memoryBlock) userPrompt += memoryBlock;
 
     // ★ NPC 关系注入：只发送有变化或关键的关系
     if (S.gameState && S.gameState.relationships && Object.keys(S.gameState.relationships).length > 0) {
@@ -1190,6 +1217,67 @@ export function buildPlayerNote() {
     const MAX = 600;
     const clipped = note.length > MAX ? note.slice(0, MAX) + "…(已截断)" : note;
     return "【玩家笔记（你自己的备忘，请酌情纳入叙事）】\n" + clipped;
+}
+
+// ★ docs/67：GM 专属真相层——受控揭示（引擎唯一出口）。
+// 只把「已推进到 unlock_stage 阶段」的幕后真相交给叙事 AI；未到期的真相在此函数之外
+// 不存在于任何叙事 prompt 构建路径（gm_truth 为独立顶层字段，不进 lore_kb/检索/图谱）。
+// 纯函数、无 DOM 依赖，可在 Node 下单测。
+//   state：S.gameState（取 story_progress，缺省 1）；world：目标世界（缺省 S.currentWorld）。
+export function buildGmTruthReveals(state, world) {
+    const gs = state || S.gameState || {};
+    const progress = (typeof gs.story_progress === "number" && isFinite(gs.story_progress) && gs.story_progress >= 1)
+        ? Math.floor(gs.story_progress) : 1;
+    const w = world || S.currentWorld || {};
+    const entries = (w.gm_truth && Array.isArray(w.gm_truth.entries)) ? w.gm_truth.entries : [];
+    if (!entries.length) return "";
+    const due = entries.filter(e => e && (typeof e.unlock_stage !== "number" || e.unlock_stage <= progress));
+    if (!due.length) return "";
+    const lines = due.map(e => "- " + ((e.title && e.title.trim()) ? e.title.trim() + "：" : "") + (e.content || "").trim())
+        .filter(Boolean);
+    if (!lines.length) return "";
+    return "# GM 揭示（幕后真相）\n\n以下真相本局剧情已推进至揭示阶段，请按此作为叙事依据：\n" +
+        lines.join("\n") +
+        "\n\n注意：未在本清单中的幕后真相，你依旧不得知晓、不得暗示。";
+}
+
+// ★ 66：记忆三分型注入块。按 bucket（情感记忆/重要事件/学到的知识）分组，
+// 检索命中（retrieved 里的 behavior_ 片段）优先，pinned+importance 排序，每段最多 maxPerBucket 条。
+// 纯函数、无 DOM 依赖，可在 Node 下单测。
+export function buildMemoryInjection(retrieved, opts = {}) {
+    const records = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords : [];
+    if (!records.length) return "";
+    const maxPerBucket = (Number.isInteger(opts.maxPerBucket) && opts.maxPerBucket >= 1) ? opts.maxPerBucket : 3;
+    const hitIds = new Set();
+    for (const s of (retrieved || [])) {
+        if (String(s.id).startsWith("behavior_")) hitIds.add(String(s.id).slice("behavior_".length));
+    }
+    // bucket 兜底：旧记录无 bucket 时按 type/importance 推断（与 rag.inferBucket 同规则）
+    const bucketOf = (r) => (typeof r.bucket === "string" && MEMORY_BUCKETS.includes(r.bucket)) ? r.bucket
+        : (r.type === "event" || (typeof r.importance === "number" && r.importance >= 4)) ? "important_event"
+        : "learned_fact";
+    const sorted = [...records].sort((a, b) => {
+        const ah = hitIds.has(a.id) ? 100 : 0, bh = hitIds.has(b.id) ? 100 : 0;
+        if (ah !== bh) return bh - ah;
+        const ap = a.pinned ? 10 : 0, bp = b.pinned ? 10 : 0;
+        const ai = typeof a.importance === "number" ? a.importance : 3;
+        const bi = typeof b.importance === "number" ? b.importance : 3;
+        return (bp + bi) - (ap + ai);
+    });
+    const buckets = { emotional: [], important_event: [], learned_fact: [] };
+    const totalMax = maxPerBucket * 3;
+    for (const r of sorted) {
+        const b = bucketOf(r);
+        if (buckets[b] && buckets[b].length < maxPerBucket) buckets[b].push(r.text);
+        const filled = buckets.emotional.length + buckets.important_event.length + buckets.learned_fact.length;
+        if (filled >= totalMax) break;
+    }
+    const sections = [];
+    if (buckets.emotional.length) sections.push("【情感记忆】\n" + buckets.emotional.map((t, i) => (i + 1) + ". " + t).join("\n"));
+    if (buckets.important_event.length) sections.push("【重要事件】\n" + buckets.important_event.map((t, i) => (i + 1) + ". " + t).join("\n"));
+    if (buckets.learned_fact.length) sections.push("【学到的知识】\n" + buckets.learned_fact.map((t, i) => (i + 1) + ". " + t).join("\n"));
+    if (!sections.length) return "";
+    return "# 角色的记忆（务必保持一致性）\n\n" + sections.join("\n\n") + "\n\n";
 }
 
 export function getRecentKeyFacts(count) {

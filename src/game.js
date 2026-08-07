@@ -28,6 +28,8 @@ import { sanitizeModules, isModuleEnabled } from "./modules.js"; // ★ C1：保
 import { evaluateGate, collectCommFlags, PRIVATE_STAMINA_COST, DAILY_STAMINA_COST } from "./comm-gate.js"; // ★ docs/53：门禁引擎
 import { commitChannel } from "./comm-channels.js"; // ★ docs/53：动态渠道固化
 import { activeTimelineKey, getTimelineTriggered, recordTrigger, resetTriggers, createBranch, resolveTimeTravelStrategy } from "./triggers.js";
+// ★ docs/69：章节化回溯——回合日志追加 / 分支 / 回溯执行
+import { appendTurnLog, loadTurnLog, forkBranch, rewindToTurn, persistLog } from "./timeline-log.js";
 
 // UI-4：判定时间是否倒流（逆跳）。dated 模式用原生日期比较；day/none/period 用绝对分钟比较。
 function isBackwardJump(oldDate, newDate, tcWrap) {
@@ -210,6 +212,8 @@ export async function generateWorld() {
         const CHUNK_SIZE = 15000;   // ★ Plan A：单块 1.5 万字
         const COUNT_HINT = 25;      // ★ Plan A：每块抽 20-30 条
         const src = S.sourceFileContent || "";
+        // ★ 混淆点修复 1：生成时把向导模块开关传给生成 prompt（map 开启 → locations 段要求必产出）
+        const moduleSettings = getWizardModuleSettings();
         let generated, loreKb;
         if (src.length > CHUNK_SIZE) {
             // ===== Plan A：全书分块多遍抽取，合并去重成覆盖全书的大知识库 =====
@@ -218,7 +222,7 @@ export async function generateWorld() {
             showToast(`本书较大，知识库将分 ${chunkCount} 段生成，可能需要较长时间（数十次 API 调用），请耐心等待。`, "warn");
             // ① 基础世界配置（结构/开场）由首段生成
             const firstChunk = src.slice(0, CHUNK_SIZE);
-            const rawGen1 = await callWorldGenerationLLM(name, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, pov, CHUNK_SIZE, COUNT_HINT, stylePreset);
+            const rawGen1 = await callWorldGenerationLLM(name, desc, hero, ipName, firstChunk, styleRef, customStyle, plotFreedom, worldPrefix, pov, CHUNK_SIZE, COUNT_HINT, stylePreset, moduleSettings);
             warnIfTimeCorrected(rawGen1);
             generated = sanitizeWorldConfig(rawGen1);
             // ② 逐段抽取 lore 并合并（覆盖全书，同名条目汇总；含 relations 三元组）
@@ -238,7 +242,7 @@ export async function generateWorld() {
             catch (e) { logError("loreEmbedPrecompute", e); }
         } else {
             // 小书：沿用原有单次生成
-            const rawGen2 = await callWorldGenerationLLM(name, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix, pov, undefined, null, stylePreset);
+            const rawGen2 = await callWorldGenerationLLM(name, desc, hero, ipName, src, styleRef, customStyle, plotFreedom, worldPrefix, pov, undefined, null, stylePreset, moduleSettings);
             warnIfTimeCorrected(rawGen2);
             generated = sanitizeWorldConfig(rawGen2);
             loreKb = generated.lore_kb;
@@ -270,7 +274,12 @@ export async function generateWorld() {
             plot_freedom: plotFreedom,
             custom_prefix: customPrefix,
             // ★ W2-Style：玩法模块开关（来自创建向导勾选；ip_scan 由世界是否填作品名在加载时自动判定）
-            modules: getWizardModuleSettings(),
+            modules: moduleSettings,
+            // ★ docs/67/68 修复：AI 生成的可选「GM 真相」与「地点连接图」必须随世界保存——
+            // 此前 generateWorld 未拷贝这两个字段，AI 即使产出也会被丢弃（只能手动编辑）。
+            // generated 已经过 sanitizeWorldConfig 规整，直接引用安全。
+            ...(generated.gm_truth ? { gm_truth: generated.gm_truth } : {}),
+            ...(generated.locations ? { locations: generated.locations } : {}),
             rules: [], // ★ Phase 2：规则 DSL（创作者界面配置，见 docs/Phase2改造方案.md）
             characters: [], // ★ B1：人物卡（主角 + NPC），编辑器可编辑，注入提示词
             temperature_preset: (() => {
@@ -1451,6 +1460,17 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
     const facts = resp.key_facts || summarizeFactsFromChanges(input, resp.narrative, resp.state_changes);
     addBehaviorRecords(facts);
 
+    // ★ docs/69：回合日志——本回合定稿后追加快照（回溯用；写入失败不影响主流程）
+    // 仅当世界启用了 schedule 模块才记录（创作者可关掉"后悔药"）
+    if (S.currentSession && S.currentSession.saveId && isModuleEnabled(S.currentWorld, "schedule")) {
+        appendTurnLog(S.currentSession.saveId, S.currentWorld && S.currentWorld.id, {
+            state: S.gameState,
+            entry: pendingEntry,
+            histIdx: S.conversationHistory.length,
+            memoryCount: (Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords.length : 0)
+        }).catch(() => {});
+    }
+
     // 如果刚死亡，立即显示横幅 + 禁用输入
     if (S.gameState.is_alive === false) {
         checkDeathBanner();
@@ -1649,6 +1669,49 @@ export function toggleAIEnhanced() {
     updateAIEnhancedButton();
     createOrUpdateSave();
     showToast(S.aiEnhanced ? "AI 增强检查已开启（会产生额外 API 调用）" : "AI 增强检查已关闭", "success", 3500);
+}
+
+// ★ docs/69：章节化回溯——恢复到目标回合（返回是否成功）
+// opts.clearMemory：是否把行为记忆截断到目标回合（默认保留）
+// 分支：回溯后开启新分支，后续回合记入新分支（= 分叉点可视化基础）
+export async function rewindToTurnInGame(targetTurn, opts = {}) {
+    const saveId = S.currentSession && S.currentSession.saveId;
+    const save = saveId ? S.saves.find(s => s.id === saveId) : null;
+    if (!save) { showToast("未找到当前存档，无法回溯", "error"); return false; }
+    const log = await loadTurnLog(saveId);
+    if (!log || !Array.isArray(log.turns) || !log.turns.length) { showToast("该存档暂无回溯记录", "warn"); return false; }
+    const target = parseInt(targetTurn, 10);
+    if (!log.turns.some(t => t.turn === target)) { showToast("目标回合不存在", "warn"); return false; }
+    try {
+        const restored = rewindToTurn(save, log, target, {
+            behaviorRecords: S.activeBehaviorRecords,
+            clearMemory: opts.clearMemory === true
+        });
+        S.gameState = restored.gameState;
+        S.conversationHistory = restored.history;
+        S.chatHistory = restored.chatHistory;
+        S.chatSummary = restored.chatSummary;
+        if (restored.behaviorRecords) S.activeBehaviorRecords = restored.behaviorRecords;
+        // 分支：回溯即分叉（不立即追加回合，下一次正常回合自动进入新分支）
+        const branchId = forkBranch(log, target);
+        await persistLog(log);
+        S._currentBranchId = branchId;
+        // 存档覆盖当前槽位（未来线被覆盖；UI 已提供"另存为新存档"保护）
+        createOrUpdateSave();
+        invalidateSystemPromptCache();
+        S.currentChoices = [];
+        renderLog(true);
+        if (S.currentStatusTab) renderStatusPanel(S.currentStatusTab);
+        updateInputState();
+        checkDeathBanner();
+        closeModal("rewindModal");
+        showToast("已回到 " + (restored.label || "第" + target + "回合"), "success");
+        return true;
+    } catch (e) {
+        logError("rewindToTurn", e);
+        showToast("回溯失败：" + (e && e.message ? e.message : "未知错误"), "error");
+        return false;
+    }
 }
 
 export function deleteMemory(id) {

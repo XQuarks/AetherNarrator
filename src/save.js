@@ -21,6 +21,8 @@ import { LATEST_SAVE_SCHEMA_VERSION } from "./migrations.js";
 import { invalidateAllLoreAnn } from "./ann-index.js";
 import { sanitizeModules, ensureEventsWorldReady } from "./modules.js"; // ★ C1：读档/切换世界时确保 world.modules 完整；事件系统确保体力变量就位
 import { abortCurrentRequest } from "./turn-lifecycle.js";
+// ★ docs/69：章节化回溯——存档侧只做"另存复制日志 / 删除清日志"两件旁路事，不改存档结构
+import { copyTurnLog, deleteTurnLog } from "./timeline-log.js";
 
 export async function startGame(opts = {}) {
     abortCurrentRequest(S); // ★ P0: 失效在途请求，避免旧响应串入新周目
@@ -190,6 +192,7 @@ export function deleteSave(saveId) {
     if (S.currentSession.saveId === saveId) S.currentSession.saveId = null; // ★ 多存档槽位：删掉当前活动档则解绑，避免悬空
     S.saves = S.saves.filter(s => s.id !== saveId);
     saveSaves();
+    deleteTurnLog(saveId); // ★ docs/69：连带删除该存档的回合日志
     renderSaveList();
     showToast("存档已删除", "success");
 }
@@ -199,8 +202,10 @@ export function deleteWorld(worldId) {
     if (!world) return;
     if (!confirm(`确定要删除世界「${world.name}」吗？\n该世界的所有记忆库、状态、存档将被一并删除，此操作不可撤销。`)) return;
     // 删除该世界的存档
+    const doomedSaveIds = S.saves.filter(s => s.worldId === worldId).map(s => s.id);
     S.saves = S.saves.filter(s => s.worldId !== worldId);
     saveSaves();
+    doomedSaveIds.forEach(id => deleteTurnLog(id)); // ★ docs/69：连带删除该世界所有存档的回合日志
     // 如果当前正在玩的就是这个世界，清除运行状态
     if (S.currentWorld && S.currentWorld.id === worldId) {
         S.currentWorld = null;
@@ -291,6 +296,7 @@ export function saveAsNewSave(name) {
     const historyStr = JSON.stringify(S.conversationHistory);
     const slotName = (name && name.trim()) ? name.trim().slice(0, 60) : defaultSlotName(S.currentWorld.id, S.currentWorld.name);
     const newId = "s" + Date.now();
+    const oldSaveId = S.currentSession.saveId; // ★ docs/69：另存前记录旧槽位，用于复制回合日志
     S.saves.unshift({
         id: newId, worldId: S.currentWorld.id, worldName: S.currentWorld.name,
         name: slotName, progress, updatedAt: now,
@@ -306,6 +312,7 @@ export function saveAsNewSave(name) {
         player_notes: (typeof S.playerNotes === "string") ? S.playerNotes : ""
     });
     S.currentSession.saveId = newId;
+    if (oldSaveId) copyTurnLog(oldSaveId, newId); // ★ docs/69：新分支槽位复制回合日志（从复制点继续记录）
     saveSaves();
     saveState({ state: stateStr, history: historyStr, chatHistory: JSON.stringify(S.chatHistory) });
     showToast("已另存为新存档：" + slotName, "success");

@@ -387,6 +387,22 @@
     </div>
 </div>
 
+<!-- ================= 章节回溯弹窗（docs/69） ================= -->
+<div class="modal-overlay" id="rewindModal">
+    <div class="modal rewind-modal" role="dialog" aria-modal="true" aria-labelledby="rewindModalTitle">
+        <div class="modal-header">
+            <h2 id="rewindModalTitle">⏪ 章节回溯</h2>
+            <span class="muted" id="rewindModalInfo" style="flex:1;text-align:right;font-size:12px;"></span>
+            <button class="modal-close" data-action="closeModal" data-modal="rewindModal">×</button>
+        </div>
+        <div class="modal-body" id="rewindBody"></div>
+        <div class="modal-footer" style="display:flex;gap:10px;justify-content:flex-end;">
+            <button class="btn secondary" data-action="rewindAndFork">💾 另存为新存档并回溯</button>
+            <button class="btn primary" data-action="confirmRewind">⏪ 直接回溯</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= 角色状态面板 ================= -->
 <div class="status-panel-overlay" id="statusPanelOverlay" data-action="closeStatusPanel" tabindex="0" role="button" aria-label="关闭角色状态面板">
     <div class="status-panel" data-action="statusPanelStop">

@@ -2,7 +2,7 @@
 // AetherNarrator · rag.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
-import { MEMORY_TYPES, getWorldLoreKB } from "./store.js";
+import { MEMORY_TYPES, MEMORY_BUCKETS, getWorldLoreKB } from "./store.js";
 
 import { cosineSimilarity, isFuzzyFact, normFact, runPool } from "./utils.js";
 import { getEmbedConcurrency } from "./providers.js";
@@ -700,6 +700,19 @@ export async function retrieveBehaviorRecords(input, topK = 3, qVec = null) {
     return scored;
 }
 
+// ★ 66：记忆三分型兜底规则（纯函数，供 addBehaviorRecords / memory-transfer / 旧档展示共用）
+// emotional 只能显式标注（AI 判断"值得记住的情绪"时才产），避免误判泛滥；
+// type=event 或 importance>=4 视为重要事件；其余归"学到的知识"。
+export function inferBucket(fact, imp) {
+    if (fact && typeof fact.bucket === "string" && MEMORY_BUCKETS.includes(fact.bucket)) return fact.bucket;
+    const t = (fact && typeof fact.type === "string") ? fact.type : "";
+    if (t === "event") return "important_event";
+    const importance = (typeof imp === "number" && imp >= 1 && imp <= 5) ? imp
+        : (fact && typeof fact.importance === "number" && fact.importance >= 1 && fact.importance <= 5) ? fact.importance : 3;
+    if (importance >= 4) return "important_event";
+    return "learned_fact";
+}
+
 export function addBehaviorRecords(facts) {
     if (!S.currentWorld || !facts || !facts.length) return;
     if (!Array.isArray(S.activeBehaviorRecords)) S.activeBehaviorRecords = [];
@@ -719,18 +732,26 @@ export function addBehaviorRecords(facts) {
         const imp = (typeof fact.importance === "number" && fact.importance >= 1 && fact.importance <= 5)
             ? fact.importance : 3;
         const type = (typeof fact.type === "string" && MEMORY_TYPES.includes(fact.type)) ? fact.type : "other";
-        list.push({
+        const bucket = inferBucket(fact, imp);
+        const record = {
             id: "b" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Date.now() + Math.random().toString(36).slice(2, 6)),
             text,
             importance: imp,
             pinned: !!fact.pinned,
             type,
+            bucket, // ★ 66：记忆三分型（emotional/important_event/learned_fact）
             time: fact.time || timeLabel,
             location: fact.location || locLabel,
             npcs: Array.isArray(fact.npcs) ? fact.npcs.slice(0, 8) : [],
             embedding: null,  // C4：向量暂时留空，由 ensureBehaviorEmbeddings 后台异步补算；关键词检索在此期间兜底
             createdAt: new Date().toISOString()
-        });
+        };
+        // ★ 66：情感记忆附带对象与强度
+        if (bucket === "emotional") {
+            if (typeof fact.target === "string" && fact.target.trim()) record.target = fact.target.trim().slice(0, 80);
+            if (typeof fact.intensity === "number") record.intensity = Math.max(0, Math.min(1, fact.intensity));
+        }
+        list.push(record);
     }
     if (list.length > 100) S.activeBehaviorRecords = list.slice(-100);
 }

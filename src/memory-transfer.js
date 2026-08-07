@@ -1,5 +1,16 @@
 const FORMAT = "aethernarrator-memory-pack";
 const MEMORY_TYPES = new Set(["event", "relationship", "item", "discovery", "other"]);
+// ★ 66：记忆三分型（与 store.js MEMORY_BUCKETS 保持一致，独立白名单避免循环依赖）
+const MEMORY_BUCKETS = new Set(["emotional", "important_event", "learned_fact"]);
+
+// ★ 66：bucket 兜底（旧数据/未标注时按 type/importance 推断，与 rag.inferBucket 同规则）
+function inferBucket(raw) {
+    if (MEMORY_BUCKETS.has(raw?.bucket)) return raw.bucket;
+    if (raw?.type === "event") return "important_event";
+    const imp = Number.isFinite(raw?.importance) ? raw.importance : 3;
+    if (imp >= 4) return "important_event";
+    return "learned_fact";
+}
 
 function normalizeText(value) {
     return String(value || "")
@@ -17,6 +28,7 @@ function sanitizeMemory(raw, fallbackId) {
         importance: Number.isFinite(raw?.importance) ? Math.max(1, Math.min(5, Math.round(raw.importance))) : 3,
         pinned: raw?.pinned === true,
         type: MEMORY_TYPES.has(raw?.type) ? raw.type : "other",
+        bucket: inferBucket(raw),
         time: typeof raw?.time === "string" ? raw.time.slice(0, 100) : "",
         location: typeof raw?.location === "string" ? raw.location.slice(0, 100) : "",
         npcs: Array.isArray(raw?.npcs) ? raw.npcs.slice(0, 8).map(n => String(n).slice(0, 80)) : [],
@@ -57,6 +69,8 @@ export function mergeMemoryPack(existing, pack) {
             const current = memories[byText.get(key)];
             current.importance = Math.max(current.importance, incoming.importance);
             current.pinned = current.pinned || incoming.pinned;
+            // ★ 66：合并时 bucket 不降级——本地区分过情感/事件的，保留本地的；本地未区分才用导入的
+            if (!current.bucket && incoming.bucket) current.bucket = incoming.bucket;
             if (!current.location && incoming.location) current.location = incoming.location;
             current.npcs = [...new Set([...(current.npcs || []), ...(incoming.npcs || [])])].slice(0, 8);
             merged++;

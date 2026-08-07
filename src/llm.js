@@ -7,7 +7,7 @@ import { buildApiUrl, defaultWorldSchema, extractFirstBalancedJsonObject, getWor
 import { getNextPeriod, getTemperature, getTimeConfig } from "./theme.js";
 import { advanceCalendarTime, formatCalendarDate } from "./calendar.js";
 import { summarizeFactsFromChanges } from "./rag.js";
-import { buildSystemPrompt, buildLoreHardBreakpoint, buildCharactersBreakpoint, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, buildPlayerNote, getPositionedLore } from "./prompt.js";
+import { buildSystemPrompt, buildLoreHardBreakpoint, buildCharactersBreakpoint, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, buildPlayerNote, buildGmTruthReveals, getPositionedLore } from "./prompt.js";
 import { getProvider, readApiInputs, getChunkConcurrency, isToolChoiceConflictError } from "./providers.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
 import { buildLoreRevisionDiff } from "./lore-revision.js";
@@ -34,7 +34,7 @@ export function logTurnStats(hit, miss, total, usage) {
 }
 
 // ★ docs/58：移除 type 参数；新增 pov 参数（solo/ensemble）控制主角/群像剧。
-export async function callWorldGenerationLLM(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap = 8000, loreCountMin = null, stylePreset = null) {
+export async function callWorldGenerationLLM(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap = 8000, loreCountMin = null, stylePreset = null, moduleSettings = null) {
     const mock = document.getElementById("mockMode").checked;
     if (mock) {
         await sleep(1200);
@@ -46,7 +46,7 @@ export async function callWorldGenerationLLM(name, desc, hero, ipName, sourceCon
         throw new Error("请填写 Base URL、API Key 和模型名称，或开启模拟模式。");
     }
 
-    const prompt = buildWorldGenerationPrompt(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap, loreCountMin, stylePreset);
+    const prompt = buildWorldGenerationPrompt(name, desc, hero, ipName, sourceContent, styleRef, customStyle, plotFreedom, worldPrefix, pov, sourceCap, loreCountMin, stylePreset, moduleSettings);
     return await callStructured([{ role: "system", content: prompt }], "generate_world", {
         temperature: 0.7, maxTokens: 8192,
         mockFn: () => mockGenerateWorld(name, desc, hero, ipName, pov)
@@ -398,7 +398,21 @@ export const TOOLS = {
                 narrative: { type: "string" },
                 choices: { type: "array", items: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, hint: { type: "string" }, action: { type: "string" } } } },
                 state_changes: { type: "object" },
-                key_facts: { type: "string" },
+                key_facts: {
+                    type: "array",
+                    description: "本回合值得记住的关键事实（0~3 条）。每条含：text 事实文本；bucket 分类——emotional=情感印记(玩家/角色对某人某事的感觉，可带 target/intensity)、important_event=重要事件与转折、learned_fact=学到的事实与知识(默认)；importance 1~5。",
+                    items: {
+                        type: "object",
+                        additionalProperties: true,
+                        properties: {
+                            text: { type: "string" },
+                            bucket: { type: "string", enum: ["emotional", "important_event", "learned_fact"] },
+                            importance: { type: "number" },
+                            target: { type: "string" },
+                            intensity: { type: "number" }
+                        }
+                    }
+                },
                 atmosphere: { type: "string" },
                 is_forced_plot: { type: "boolean" },
                 next_period: { type: "string" },
@@ -745,6 +759,9 @@ export async function callLLM(input, retrieved, opts = {}) {
         buildPlayerNote() // ★ C4：玩家私人备忘并入中部槽位（存档级，每轮生效）
     ].filter(Boolean).join("\n\n");
 
+    // ★ docs/67：GM 真相受控揭示——仅当剧情推进到相应阶段时才有内容（未到期真相不进入任何叙事消息）
+    const gmReveal = buildGmTruthReveals();
+
     const messages = [
         { role: "system", content: systemPrompt },
         // ★ Phase 5 L2：角色卡段（排在世界知识段之前，独立缓存断点）
@@ -756,6 +773,9 @@ export async function callLLM(input, retrieved, opts = {}) {
         // 既有 system 级权威、贴近生成点，又不改动核心 system 前缀（保护 DeepSeek 缓存）。
         ...(positioned.system ? [{ role: "system", content: "# 世界知识（检索命中·请作为事实依据）\n\n" + positioned.system }] : []),
         ...(authorNote ? [{ role: "system", content: "# 剧情导演提示（作者注）\n\n" + authorNote }] : []),
+        // ★ docs/67：GM 真相受控揭示——独立 system 消息，仅当剧情已推进到相应阶段时存在；
+        //   未到期真相在此处之外不存在于任何叙事消息，从源头杜绝剧透。
+        ...(gmReveal ? [{ role: "system", content: gmReveal }] : []),
         { role: "user", content: userContent }
     ];
 

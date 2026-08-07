@@ -6,12 +6,13 @@
 // ============================================================
 import { S, LINK_RELATION_LABELS, normalizeTimeConfig } from "./store.js";
 import { validateStartDate, CUSTOM_CALENDAR_PRESETS, clampCustomCalendarMonths, summarizeCustomCalendar, reorderMonths, insertLeapMonth, seedDefaultTimelines, addTimeline, deleteTimeline, renameTimelineKey, setActiveTimeline, applyMultiverseTemplate, MULTIVERSE_TEMPLATES, clampSyncRules } from "./calendar.js";
-import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets, detectTimeConflict, formatConflictMessage, logError } from "./utils.js";
+import { deepClone, escapeHtml, getWorldSchema, defaultWorldSchema, mergeLoreSnippets, detectTimeConflict, formatConflictMessage, logError, dedupeStrings } from "./utils.js";
 import { showModal, closeModal, showToast } from "./render.js";
 import { ensureLoreEmbeddings } from "./rag.js";
 import { createOrUpdateSave, prepareSessionFromSave } from "./save.js";
 import { saveWorlds } from "./storage.js";
 import { isEnhancementContextCurrent } from "./worldview.js";
+import { isModuleEnabled } from "./modules.js"; // ★ 混淆点修复：地点图/GM 真相编辑面板提示模块开关状态
 import { applyLoreRevisionDiff } from "./lore-revision.js";
 import { markPromotedRecords } from "./promotion.js"; // ★ B6：晋升后标记原记忆 promoted
 import { callLoreRevisionLLM, extractLoreFromSource, callRegenerateOpeningLLM, callOptimizeOpeningLLM } from "./llm.js";
@@ -955,6 +956,118 @@ export function rejectOpeningFix() {
     showToast("已丢弃本次开场白修复建议", "success");
 }
 
+// ★ docs/67：GM 专属真相编辑面板（仅 world 模式；数据缓冲在 S._loreGmEdit，保存时写回 world.gm_truth）
+function renderGmTruthPane() {
+    const list = Array.isArray(S._loreGmEdit) ? S._loreGmEdit : [];
+    // ★ 混淆点修复 5：世界未定义剧情阶段总数（lore_stage_count）时，进度无钳制上限，
+    // 高 unlock_stage 的真相可能被提前全部揭示——给作者提示。
+    const stageCount = (S.currentWorld && typeof S.currentWorld.lore_stage_count === "number" && S.currentWorld.lore_stage_count >= 1)
+        ? S.currentWorld.lore_stage_count : null;
+    const stageHint = !stageCount
+        ? `<div class="lore-warn" style="background:rgba(201,168,124,0.1);border-color:var(--primary);margin-bottom:10px;">⚠ 本世界未定义「剧情阶段总数」（lore_stage_count）——剧情进度没有上限，若把揭示阶段设得过高，进度推高后真相可能被提前全部揭示。建议在知识库条目中同步配置阶段总数，或将揭示阶段保持在 1~3。</div>`
+        : "";
+    const rows = list.length ? list.map((e, i) => `
+        <div class="gm-truth-card">
+            <div class="gm-truth-row">
+                <label class="gm-truth-label">标题（≤20 字）</label>
+                <input class="gm-truth-input" data-gm-idx="${i}" data-gm-field="title" value="${escapeHtml(e.title || "")}" placeholder="如：勾玉的真相">
+            </div>
+            <div class="gm-truth-row">
+                <label class="gm-truth-label">真相内容（引擎按阶段揭示，叙事方到阶段才知晓）</label>
+                <textarea class="gm-truth-textarea" data-gm-idx="${i}" data-gm-field="content" rows="3" placeholder="填写幕后真相…">${escapeHtml(e.content || "")}</textarea>
+            </div>
+            <div class="gm-truth-row">
+                <label class="gm-truth-label">揭示阶段（1=开篇即揭示，越大越后期）</label>
+                <input class="gm-truth-input gm-truth-stage" type="number" min="1" max="50" data-gm-idx="${i}" data-gm-field="unlock_stage" value="${e.unlock_stage || 1}">
+                <button class="mem-act danger" data-action="gmDeleteEntry" data-idx="${i}">🗑 删除</button>
+            </div>
+        </div>
+    `).join("") : '<div class="empty-hint">暂无 GM 真相。可添加 1~4 条「藏到底的谜底」——这些内容绝不会主动透露给玩家，剧情推进到对应阶段时引擎才揭示给 AI。</div>';
+    return `
+        <div class="lore-time-pane">
+            <div class="status-section-title">GM 专属真相（幕后谜底）</div>
+            ${stageHint}
+            <div class="memory-hint">与知识库完全隔离：不参与检索、不进叙事 prompt；只有剧情推进到 unlock_stage 时，引擎才会把该条揭示给 AI 作为叙事依据。世界没有「藏到底的谜底」可留空。</div>
+            <div class="gm-truth-list">${rows}</div>
+            <button class="mem-act" data-action="gmAddEntry">＋ 添加真相</button>
+        </div>`;
+}
+
+// 保存前把 GM 表单值同步回缓冲（与 syncLoreEditFromDOM 同思路）
+function syncGmTruthFromDOM() {
+    if (!Array.isArray(S._loreGmEdit)) return;
+    document.querySelectorAll("[data-gm-idx][data-gm-field]").forEach(el => {
+        const i = parseInt(el.dataset.gmIdx, 10);
+        const f = el.dataset.gmField;
+        const e = S._loreGmEdit[i];
+        if (!e || !f) return;
+        if (f === "unlock_stage") {
+            const v = parseInt(el.value, 10);
+            e.unlock_stage = (Number.isFinite(v) && v >= 1) ? Math.min(v, 50) : 1;
+        } else if (f === "title") {
+            e.title = el.value.trim().slice(0, 200);
+        } else if (f === "content") {
+            e.content = el.value.trim().slice(0, 2000);
+        }
+    });
+}
+
+// ★ docs/68：地点连接图编辑面板（仅 world 模式；数据缓冲在 S._loreMapEdit，保存时写回 world.locations）
+function renderMapPane() {
+    const list = Array.isArray(S._loreMapEdit) ? S._loreMapEdit : [];
+    // ★ 混淆点修复 2：map 模块未开启时提示"编辑不生效"，避免作者白编辑
+    const mapOff = !isModuleEnabled(S.currentWorld, "map");
+    const mapGateHint = mapOff
+        ? `<div class="lore-warn" style="background:rgba(201,168,124,0.1);border-color:var(--primary);margin-bottom:10px;">⚠ 当前世界**未开启「地图系统」玩法模块**（可在世界详情「模块开关」中开启）——本页编辑的地点图暂不会在游玩中生效。</div>`
+        : "";
+    const rows = list.length ? list.map((l, i) => `
+        <div class="map-loc-card">
+            <div class="map-loc-row">
+                <label class="map-loc-label">名称</label>
+                <input class="map-loc-input" data-map-idx="${i}" data-map-field="name" value="${escapeHtml(l.name || "")}" placeholder="如：咖啡馆">
+            </div>
+            <div class="map-loc-row">
+                <label class="map-loc-label">描述（一句话）</label>
+                <input class="map-loc-input" data-map-idx="${i}" data-map-field="summary" value="${escapeHtml(l.summary || "")}" placeholder="这里是什么地方…">
+            </div>
+            <div class="map-loc-row">
+                <label class="map-loc-label">可达（逗号分隔）</label>
+                <input class="map-loc-input" data-map-idx="${i}" data-map-field="connections" value="${escapeHtml((l.connections || []).join("、"))}" placeholder="集市、码头后巷">
+            </div>
+            <div class="map-loc-row">
+                <label class="map-loc-label">常驻 NPC</label>
+                <input class="map-loc-input" data-map-idx="${i}" data-map-field="npcs" value="${escapeHtml((l.npcs_default || []).join("、"))}" placeholder="镜子">
+                <label class="map-loc-check"><input type="checkbox" data-map-idx="${i}" data-map-field="hidden" ${l.hidden ? "checked" : ""}> 隐藏</label>
+                <button class="mem-act danger" data-action="mapDeleteEntry" data-idx="${i}">🗑 删除</button>
+            </div>
+        </div>
+    `).join("") : '<div class="empty-hint">暂无地点图。可添加地点与连接——游戏内 AI 会获得「当前地点相邻可去」的空间提示，不限制移动。</div>';
+    return `
+        <div class="lore-time-pane">
+            <div class="status-section-title">地点连接图（空间网络）</div>
+            ${mapGateHint}
+            <div class="memory-hint">地点名尽量与知识库地点类条目一致；connections 填可达邻居的地点名（逗号/顿号分隔）；勾选「隐藏」的地点不提示可达性。纯参考增强，不限制 AI 自由移动。</div>
+            <div class="map-loc-list">${rows}</div>
+            <button class="mem-act" data-action="mapAddEntry">＋ 添加地点</button>
+        </div>`;
+}
+
+// 保存前把地点图表单值同步回缓冲
+function syncMapFromDOM() {
+    if (!Array.isArray(S._loreMapEdit)) return;
+    document.querySelectorAll("[data-map-idx][data-map-field]").forEach(el => {
+        const i = parseInt(el.dataset.mapIdx, 10);
+        const f = el.dataset.mapField;
+        const l = S._loreMapEdit[i];
+        if (!l || !f) return;
+        if (f === "name") l.name = el.value.trim().slice(0, 100);
+        else if (f === "summary") l.summary = el.value.trim().slice(0, 500);
+        else if (f === "connections") l.connections = el.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean).slice(0, 12);
+        else if (f === "npcs") l.npcs_default = el.value.split(/[,，、\s]+/).map(x => x.trim()).filter(Boolean).slice(0, 8);
+        else if (f === "hidden") l.hidden = el.checked === true;
+    });
+}
+
 // ★ 知识库视图（三栏）
 function renderKBPane(list) {
     const revisionHint = S._loreRevisionBuffer
@@ -1045,7 +1158,8 @@ function renderLoreReviewBody() {
     const tabs = [
         ["kb", "📚 知识库"],
         ["graph", "🔗 图谱"],
-        ["time", "🕰 时间体系"]
+        ["time", "🕰 时间体系"],
+        ...(S._loreEditingWorldDefault ? [["gm", "🔒 GM 真相"], ["map", "🗺 地点图"]] : [])
     ].map(([v, t]) => `<button class="lore-view-tab${S._loreView === v ? " active" : ""}" data-lore-view="${v}">${t}</button>`).join("");
 
     const timeForm = renderTimeConfigSection(S._loreEditingWorldDefault ? "world" : "save");
@@ -1054,6 +1168,10 @@ function renderLoreReviewBody() {
         paneHtml = renderKBPane(list);
     } else if (S._loreView === "graph") {
         paneHtml = renderGraphPane();
+    } else if (S._loreView === "gm") {
+        paneHtml = renderGmTruthPane();
+    } else if (S._loreView === "map") {
+        paneHtml = renderMapPane();
     } else {
         paneHtml = `<div class="lore-time-pane">${timeForm}</div>`;
     }
@@ -1119,6 +1237,40 @@ function bindLoreBodyDelegation() {
         if (tab) {
             S._loreNotePreview = tab.dataset.loreTab === "1";
             renderLoreReviewBody();
+            return;
+        }
+        // ★ docs/67：GM 真相面板操作（增删条目）
+        const gmAdd = e.target.closest("[data-action=gmAddEntry]");
+        if (gmAdd) {
+            if (!Array.isArray(S._loreGmEdit)) S._loreGmEdit = [];
+            S._loreGmEdit.push({ id: "gt" + Date.now().toString(36), title: "", content: "", unlock_stage: 1 });
+            renderLoreReviewBody();
+            return;
+        }
+        const gmDel = e.target.closest("[data-action=gmDeleteEntry]");
+        if (gmDel && gmDel.dataset.idx != null) {
+            const i = parseInt(gmDel.dataset.idx, 10);
+            if (Array.isArray(S._loreGmEdit) && i >= 0 && i < S._loreGmEdit.length) {
+                S._loreGmEdit.splice(i, 1);
+                renderLoreReviewBody();
+            }
+            return;
+        }
+        // ★ docs/68：地点图面板操作（增删条目）
+        const mapAdd = e.target.closest("[data-action=mapAddEntry]");
+        if (mapAdd) {
+            if (!Array.isArray(S._loreMapEdit)) S._loreMapEdit = [];
+            S._loreMapEdit.push({ id: "loc" + Date.now().toString(36), name: "", summary: "", connections: [], hidden: false, npcs_default: [] });
+            renderLoreReviewBody();
+            return;
+        }
+        const mapDel = e.target.closest("[data-action=mapDeleteEntry]");
+        if (mapDel && mapDel.dataset.idx != null) {
+            const i = parseInt(mapDel.dataset.idx, 10);
+            if (Array.isArray(S._loreMapEdit) && i >= 0 && i < S._loreMapEdit.length) {
+                S._loreMapEdit.splice(i, 1);
+                renderLoreReviewBody();
+            }
             return;
         }
     });
@@ -1193,6 +1345,13 @@ export function openLoreReview(mode = "save", focusId = null) {
     }
     if (!Array.isArray(S.activeLoreKB.snippets)) S.activeLoreKB.snippets = [];
     S._loreEdit = deepClone(S.activeLoreKB.snippets); // 深拷贝到缓冲，取消不影响原数据
+    // ★ docs/67：GM 真相编辑缓冲（仅 world 模式提供；从世界模板载入，取消不影响原数据）
+    const gm = (S.currentWorld && S.currentWorld.gm_truth && Array.isArray(S.currentWorld.gm_truth.entries))
+        ? S.currentWorld.gm_truth.entries : [];
+    S._loreGmEdit = deepClone(gm);
+    // ★ docs/68：地点图编辑缓冲（仅 world 模式提供；从世界模板载入，取消不影响原数据）
+    const mapLocs = (S.currentWorld && Array.isArray(S.currentWorld.locations)) ? S.currentWorld.locations : [];
+    S._loreMapEdit = deepClone(mapLocs);
     if (focusId) {
         const fi = S._loreEdit.findIndex(s => s.id === focusId);
         S._loreActiveIndex = fi >= 0 ? fi : (S._loreEdit.length ? 0 : -1);
@@ -1258,6 +1417,8 @@ export function deleteLoreEntry(idx) {
 
 export async function saveLoreReview() {
     syncLoreEditFromDOM();
+    syncGmTruthFromDOM(); // ★ docs/67：GM 真相表单值写回缓冲
+    syncMapFromDOM();     // ★ docs/68：地点图表单值写回缓冲
     if (!S.currentWorld) { closeModal("loreReviewModal"); return; }
     const list = (S._loreEdit || []).filter(s => (s.title && s.title.trim()) || (s.content && s.content.trim()));
     const blockingIssues = checkLoreQuality(list).filter(issue => /ID 缺失或重复|正则触发词.+无效|关联目标.+不存在/.test(issue));
@@ -1304,6 +1465,30 @@ export async function saveLoreReview() {
     S.activeLoreKB = candidateKB;
     if (S._loreEditingWorldDefault) {
         S.currentWorld.lore_kb = deepClone(candidateKB);
+        // ★ docs/67：GM 真相随世界模板保存（world 模式专属；存档副本不带——静态世界设定）
+        const gmEntries = (S._loreGmEdit || [])
+            .filter(e => (e.title && e.title.trim()) || (e.content && e.content.trim()))
+            .map(e => ({
+                id: (e.id || "gt" + Date.now().toString(36)).slice(0, 50),
+                title: (e.title || "").trim().slice(0, 200),
+                content: (e.content || "").trim().slice(0, 2000),
+                unlock_stage: (typeof e.unlock_stage === "number" && e.unlock_stage >= 1) ? Math.min(Math.floor(e.unlock_stage), 50) : 1
+            })).slice(0, 20);
+        if (gmEntries.length) S.currentWorld.gm_truth = { entries: gmEntries };
+        else delete S.currentWorld.gm_truth;
+        // ★ docs/68：地点图随世界模板保存（world 模式专属）
+        const mapEntries = (S._loreMapEdit || [])
+            .filter(l => l.name && l.name.trim())
+            .map(l => ({
+                id: (l.id || "loc" + Date.now().toString(36)).slice(0, 50),
+                name: (l.name || "").trim().slice(0, 100),
+                summary: (l.summary || "").trim().slice(0, 500),
+                connections: dedupeStrings((Array.isArray(l.connections) ? l.connections : []).map(c => String(c).trim()).filter(c => c && c !== l.name)).slice(0, 12),
+                hidden: l.hidden === true,
+                npcs_default: dedupeStrings((Array.isArray(l.npcs_default) ? l.npcs_default : []).map(n => String(n).trim()).filter(Boolean)).slice(0, 8)
+            })).slice(0, 30);
+        if (mapEntries.length) S.currentWorld.locations = mapEntries;
+        else delete S.currentWorld.locations;
         saveWorlds();
     } else {
         createOrUpdateSave();

@@ -144,6 +144,12 @@ function renderWizardSummary() {
     const freedomText = ((document.getElementById("plotFreedomLabel") || {}).textContent || "").split("—")[0].trim();
     let modOn = 0, modTotal = 0;
     document.querySelectorAll("#moduleToggles .module-cb").forEach(cb => { modTotal++; if (cb.checked) modOn++; });
+    // ★ 混淆点修复 4：确认摘要列出「地图系统 / 章节回溯」两个新模块的开关键状态，避免"已开启 X/N 项"过于笼统
+    const modState = (id, label) => {
+        const cb = document.querySelector(`#moduleToggles .module-cb[data-module='${id}']`);
+        return cb ? `${label}：${cb.checked ? "开" : "关"}` : "";
+    };
+    const modExtra = [modState("map", "地图系统"), modState("schedule", "章节回溯")].filter(Boolean).join(" · ");
     const timeCb = document.querySelector("#moduleToggles .module-cb[data-module='time']");
     const timeSel = document.getElementById("timePreset");
     const timeOff = timeCb && !timeCb.checked;
@@ -165,7 +171,7 @@ function renderWizardSummary() {
         item("世界来源", srcText, 0, false) +
         item("叙事风格", `${styleTag} · 温度 ${temp}`, 1, false) +
         item("视角 / 自由度", `${pov} · ${freedomText || "默认"}`, 2, false) +
-        item("玩法模块", `已开启 ${modOn}/${modTotal} 项`, 3, false) +
+        item("玩法模块", `已开启 ${modOn}/${modTotal} 项${modExtra ? "（" + modExtra + "）" : ""}`, 3, false) +
         item("时间系统", timeText, 3, timeOff) +
         item("角色与资源预设", presetText, 4, presetText.indexOf("未预置") === 0) +
         item("特殊要求", prefixText, 5, prefixText === "无");

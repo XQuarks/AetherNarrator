@@ -15,8 +15,7 @@
 //   promptFragment(world)  启用时拼进系统提示的行为指令（纯函数，可空）
 // ============================================================
 
-// ★ 占位模块（quest / map / schedule）：本期仅登记，不实现业务，
-// 用于证明"加新模块 = 加一条描述"的易扩展性；AI 会因它们未启用而少编造相关机制。
+// ★ 占位模块（仅 quest）：本期仅登记，不实现业务；map / schedule 已由 docs/68、docs/69 落地为真实功能。
 export const MODULE_REGISTRY = [
     // —— 核心三件套：永远开启，不可关闭 ——
     { id: "lore", name: "知识库", desc: "世界观设定库（规则/地点/人物/事件/物品/势力/冲突）", defaultEnabled: true, core: true },
@@ -53,8 +52,11 @@ export const MODULE_REGISTRY = [
 
     // —— 未来占位（本期只登记，不实现业务）——
     { id: "quest", name: "任务系统", desc: "可接取/交付的任务（占位，未实现）", defaultEnabled: false },
-    { id: "map", name: "地图系统", desc: "地点与地图探索（占位，未实现）", defaultEnabled: false },
-    { id: "schedule", name: "日程系统", desc: "日程与章节化回溯（占位，未实现）", defaultEnabled: false },
+    // ★ docs/68：地点连接图（创作者按需开启；关闭 = 不注入空间提示、不显示地图 tab）
+    { id: "map", name: "地图系统", desc: "地点连接图：地点与连接关系，游玩时给 AI「当前地点相邻可去」的空间提示（世界详情 → 🗺 地图可查看）", defaultEnabled: false,
+        promptFragment: () => "【地图系统】本世界启用了地点连接图：地点之间有明确的连接关系，角色的行动应体现空间位置与可达性。" },
+    // ★ docs/69：章节化回溯（创作者按需开启；关闭 = 不记录回合日志、不显示回溯入口）
+    { id: "schedule", name: "章节回溯", desc: "章节化回溯：记录每回合快照，可在「状态面板 → 时间线 → 章节回溯」从任意历史回合重新选择", defaultEnabled: false },
 
     // —— IP 一致性（IP#6 生成后约束；黎总 2026-07-30 拍板：填了作品名才默认开；2026-08-04 更名「IP 世界观约束」）——
     // defaultEnabled 为函数：世界填了 ip_name（参考的世界/作品来源名）→ 默认开；纯原创没填 → 默认关。

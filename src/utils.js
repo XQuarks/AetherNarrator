@@ -128,7 +128,7 @@ export function sanitizeWorldConfig(raw) {
     if (!raw || typeof raw !== "object") return {};
     const out = {};
     // 允许的顶层键（其余一律丢弃）
-    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags", "modules", "lore_stage_count", "lore_stage_labels"];
+    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags", "modules", "lore_stage_count", "lore_stage_labels", "gm_truth", "locations"];
     for (const k of ALLOWED) {
         if (k in raw && raw[k] !== undefined) out[k] = raw[k];
     }
@@ -157,6 +157,46 @@ export function sanitizeWorldConfig(raw) {
         out.lore_stage_labels = dedupeStrings(
             raw.lore_stage_labels.map(t => (typeof t === "string" ? t.trim() : "")).filter(t => t && t.length <= 20)
         ).slice(0, 50);
+    }
+    // ★ docs/67：GM 专属真相层（幕后谜底，叙事 AI 不可见；由引擎按 unlock_stage 受控揭示）。
+    //   独立顶层字段，绝不并入 lore_kb（不进检索池、不进任何叙事 prompt 构建路径）。
+    if (out.gm_truth !== undefined && (!out.gm_truth || typeof out.gm_truth !== "object")) {
+        delete out.gm_truth;
+    }
+    if (out.gm_truth && typeof out.gm_truth === "object") {
+        const entries = Array.isArray(out.gm_truth.entries) ? out.gm_truth.entries.slice(0, 20) : [];
+        const cleaned = entries
+            .map(e => ({
+                id: (typeof e.id === "string" && e.id.trim()) ? e.id.trim().slice(0, 50) : "gt" + Date.now().toString(36),
+                title: typeof e.title === "string" ? e.title.slice(0, 200) : "",
+                content: typeof e.content === "string" ? e.content.slice(0, 2000) : "",
+                unlock_stage: (typeof e.unlock_stage === "number" && e.unlock_stage >= 1) ? Math.min(Math.floor(e.unlock_stage), 50) : 1
+            }))
+            .filter(e => e.title || e.content);
+        out.gm_truth = cleaned.length ? { entries: cleaned } : undefined;
+        if (!out.gm_truth) delete out.gm_truth;
+    }
+    // ★ docs/68：地点连接图（可选旁路数据，借鉴 WorldLines locations）。
+    //   仅作参考/展示/事件地点匹配增强；不替换 current_location/revealed_locations/知识库地点条目。
+    if (out.locations !== undefined && !Array.isArray(out.locations)) delete out.locations;
+    if (Array.isArray(out.locations)) {
+        const cleaned = out.locations.slice(0, 30)
+            .map(l => ({
+                id: (typeof l.id === "string" && l.id.trim()) ? l.id.trim().slice(0, 50) : "loc" + Date.now().toString(36),
+                name: typeof l.name === "string" ? l.name.trim().slice(0, 100) : "",
+                summary: typeof l.summary === "string" ? l.summary.slice(0, 500) : "",
+                connections: Array.isArray(l.connections)
+                    ? dedupeStrings(l.connections.map(c => typeof c === "string" ? c.trim() : "").filter(Boolean)).slice(0, 12)
+                    : [],
+                hidden: l.hidden === true,
+                npcs_default: Array.isArray(l.npcs_default)
+                    ? dedupeStrings(l.npcs_default.map(n => typeof n === "string" ? n.trim() : "").filter(Boolean)).slice(0, 8)
+                    : []
+            }))
+            .filter(l => l.name)
+            .map(l => ({ ...l, connections: l.connections.filter(c => c !== l.name) })); // 连接不含自身
+        out.locations = cleaned.length ? cleaned : undefined;
+        if (!out.locations) delete out.locations;
     }
     // lore_kb：{ ip, snippets[] }
     if (out.lore_kb && typeof out.lore_kb === "object") {

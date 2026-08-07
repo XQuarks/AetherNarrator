@@ -10,9 +10,9 @@ import { applyFontSize, applyTheme, changeFontSize, toggleTheme, changeNarrative
 import { loadConfig, loadSaves, loadWorlds, saveApiConfig, applyProviderPreset, resetRunCache, wipeAllSaves, wipeAllData } from "./storage.js";
 import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
-import { closeModal, closeStatusPanel, hideStatusPanel, renderSaveList, renderWorldList, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, selectTagPref, onCustomTagInput, collectStylePrefs, showToast, renderEventPanel, showModal, openSaveMenu, openWorldSaveChooser, showEndingTracker } from "./render.js";
+import { closeModal, closeStatusPanel, hideStatusPanel, renderSaveList, renderWorldList, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, selectTagPref, onCustomTagInput, collectStylePrefs, showToast, renderEventPanel, showModal, openSaveMenu, openWorldSaveChooser, showEndingTracker, openRewindTurn } from "./render.js";
 import { wizardNextStep, wizardPrevStep, wizardSkipStep, gotoWizardStep, selectStyleTemplate, updateNarrativeStyleCount, toggleStyleGridExpand } from "./wizard-editor.js";
-import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, removeBannedSentence, ignoreBannedTerm, regenerateTurn, startPrivateChat, endPrivateChat, requestDaily, commitChannelAction, addContactChannelRow, removeContactChannelRow } from "./game.js";
+import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, removeBannedSentence, ignoreBannedTerm, regenerateTurn, startPrivateChat, endPrivateChat, requestDaily, commitChannelAction, addContactChannelRow, removeContactChannelRow, rewindToTurnInGame } from "./game.js";
 import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame, createOrUpdateSave, saveCurrentSlot, saveAsNewSave } from "./save.js";
 import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
 import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, refreshMultiverseEditor, timeStructChanged, mvAddLine, mvDelLine, mvSetActive, mvRenameId, mvRenName, mvCalChanged, mvRenEra, mvRenDate, mvRenWeather, mvMoveLine, mvTpl, defaultStrategyChanged, mvLineStrategy, mvAddSync, mvDelSync, mvSyncRef, mvSyncRatio, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
@@ -247,6 +247,21 @@ const ACTIONS = {
     exportMemoryPack: () => exportMemoryPack(),
     triggerMemoryPackImport: () => triggerMemoryPackImport(),
     importMemoryPack: (el) => importMemoryPack(el.files && el.files[0]),
+    // ★ docs/69：章节化回溯
+    openRewindTurn: (el) => openRewindTurn(el.dataset.turn),
+    confirmRewind: () => {
+        const turn = S._rewindTargetTurn;
+        if (!turn) return;
+        const clear = !!(document.getElementById("rewindClearMemory") && document.getElementById("rewindClearMemory").checked);
+        rewindToTurnInGame(turn, { clearMemory: clear });
+    },
+    rewindAndFork: () => {
+        const turn = S._rewindTargetTurn;
+        if (!turn) return;
+        const clear = !!(document.getElementById("rewindClearMemory") && document.getElementById("rewindClearMemory").checked);
+        saveAsNewSave(); // 先另存为新存档（保留当前进度 = 分支），再回溯
+        rewindToTurnInGame(turn, { clearMemory: clear });
+    },
     clearSourceFile: () => clearSourceFile(),
     // 选择按钮（修复：此前 choice-chip 仅渲染无监听，点击无效）
     chooseOption: (el) => chooseOption(Number(el.dataset.index)),

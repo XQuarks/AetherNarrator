@@ -1,7 +1,7 @@
 // ============================================================
 // AetherNarrator · render.js（由 app.js 模块化拆分自动生成）
 // ============================================================
-import { S, calendarLabel, MEMORY_TYPE_LABELS, getEnabledVariables } from "./store.js";
+import { S, calendarLabel, MEMORY_TYPE_LABELS, MEMORY_BUCKETS, getEnabledVariables } from "./store.js";
 
 import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema, computeWorldCompletion, logError } from "./utils.js";
 import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, formatTimeLabel, formatDeadlineLabel, stepOf, updateFontSizeButtons, getAllTimelineViews, formatDateOnly, tempLabelText } from "./theme.js";
@@ -15,6 +15,8 @@ import { gotoWizardStep, resetCreateWizard, initCreateWizardDOM, syncPovHighligh
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
 import { evaluateEndingStatus, ENDING_KINDS } from "./worldview.js"; // ★ docs/54：结局状态评估
 import { saveWorlds } from "./storage.js";
+// ★ docs/69：章节化回溯——状态面板回溯区块 + 回溯确认弹窗
+import { loadTurnLog, chapterOf } from "./timeline-log.js";
 
 // ★ docs/58：世界来源「类型」概念已移除——旧世界 type 字段仅作只读兼容，不再参与任何渲染/逻辑。
 //   来源信息统一由「参考的世界」（world.ip_name）在列表/详情页以文字展示，不再有角标。
@@ -438,6 +440,27 @@ function bindDetailTabs(bodyId) {
     });
 }
 
+// ★ docs/68：世界详情「🗺 地图」视图（纯展示；地点图编辑入口在知识库编辑器）
+function renderMapView(w) {
+    const locs = (w && Array.isArray(w.locations)) ? w.locations : [];
+    if (!locs.length) {
+        return `<div class="lore-empty-warn">该世界暂无地点图。可在「知识库 → 🗺 地点图」中添加地点与连接——游戏内 AI 会获得「当前地点相邻可去」的空间提示（不限制移动）。</div>`;
+    }
+    const cards = locs.map(l => `
+        <div class="map-loc-card">
+            <div class="map-loc-head">
+                <span class="map-loc-name">${escapeHtml(l.name)}</span>
+                ${l.hidden ? '<span class="map-loc-hidden">🔒 隐藏</span>' : ''}
+                ${(l.npcs_default || []).length ? `<span class="map-loc-npcs">👤 ${(l.npcs_default || []).slice(0, 5).map(n => escapeHtml(n)).join('、')}</span>` : ''}
+            </div>
+            ${l.summary ? `<div class="map-loc-summary">${escapeHtml(l.summary)}</div>` : ''}
+            ${(l.connections || []).length ? `<div class="map-loc-conns">🔗 可达：${(l.connections || []).slice(0, 8).map(n => escapeHtml(n)).join('、')}</div>` : ''}
+        </div>`).join("");
+    return `<div class="stat-grid"><div class="stat-card"><div class="stat-num">${locs.length}</div><div class="stat-label">地点</div></div></div>
+            <div class="map-loc-list">${cards}</div>
+            <button class="btn secondary" data-action="editWorldLore" data-id="${w.id}">编辑地点图（知识库 → 🗺 地点图）</button>`;
+}
+
 export function showWorldDetail(worldId) {
     abortCurrentRequest(S);
     S.currentWorld = S.worlds.find(w => w.id === worldId);
@@ -524,9 +547,11 @@ export function showWorldDetail(worldId) {
             <button class="detail-tab" data-detail-tab="variables">变量</button>
             <button class="detail-tab" data-detail-tab="items">物品</button>
             <button class="detail-tab" data-detail-tab="modules">模块开关</button>
+            ${isModuleEnabled(w, "map") ? `<button class="detail-tab" data-detail-tab="map">🗺 地图</button>` : ""}
         </div>
         <div class="detail-tab-content active" data-detail-tab-content="overview">
             ${completionCard}
+            ${(w.gm_truth && Array.isArray(w.gm_truth.entries) && w.gm_truth.entries.length) ? `<div class="form-group"><label>🔒 GM 真相</label><p style="margin:0;font-size:14px;color:var(--text-secondary);">${w.gm_truth.entries.length} 条幕后谜底（游戏内不会主动透露，剧情推进到对应阶段才揭示）</p></div>` : ""}
             ${w.ip_name ? `<div class="form-group"><label>参考作品</label><p style="margin:0;font-size:15px;color:var(--primary);">${escapeHtml(w.ip_name)}</p></div>` : ""}
             <div class="form-group"><label>世界观描述</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.desc)}</p></div>
             ${w.hero ? `<div class="form-group"><label>主角设定</label><p style="margin:0;font-size:14px;line-height:1.6;color:var(--text-secondary);">${escapeHtml(w.hero)}</p></div>` : ""}
@@ -591,6 +616,10 @@ export function showWorldDetail(worldId) {
             </div>
             <button class="btn primary" data-action="saveWorldModules" data-id="${id}">保存模块设置</button>
         </div>
+        ${isModuleEnabled(w, "map") ? `
+        <div class="detail-tab-content" data-detail-tab-content="map">
+            ${renderMapView(w)}
+        </div>` : ""}
     `;
 
     const worldSaves = S.saves.filter(s => s.worldId === w.id);
@@ -1006,20 +1035,18 @@ export function renderStatusPanel(tab) {
 
         case "memory": {
             const records = Array.isArray(S.activeBehaviorRecords) ? S.activeBehaviorRecords : [];
-            const sorted = [...records].sort((a, b) => {
+            // ★ 66：bucket 兜底（旧记录无 bucket 时按 type/importance 推断，与 rag.inferBucket 同规则）
+            const bucketOf = (r) => (typeof r.bucket === "string" && MEMORY_BUCKETS.includes(r.bucket)) ? r.bucket
+                : (r.type === "event" || (typeof r.importance === "number" && r.importance >= 4)) ? "important_event"
+                : "learned_fact";
+            const byBucket = { emotional: [], important_event: [], learned_fact: [] };
+            for (const r of records) byBucket[bucketOf(r)].push(r);
+            const sortCards = (arr) => arr.sort((a, b) => {
                 if (a.pinned && !b.pinned) return -1;
                 if (!a.pinned && b.pinned) return 1;
                 return (b.importance || 3) - (a.importance || 3);
             });
-            container.innerHTML = `
-                <div class="status-section">
-                    <div class="status-section-title">行为记忆 · ${records.length}/100</div>
-                    <div class="memory-hint">AI 记录的角色经历。★越多越重要（会被优先注入叙事上下文）。</div>
-                    <div class="memory-actions" style="margin:8px 0 12px;">
-                        <button class="mem-act" data-action="exportMemoryPack">导出记忆包</button>
-                        <button class="mem-act" data-action="triggerMemoryPackImport">导入记忆包</button>
-                    </div>
-                    ${sorted.length ? sorted.map(r => `
+            const card = (r) => `
                         <div class="memory-card ${r.pinned ? 'pinned' : ''}">
                             <div class="memory-header">
                                 <span class="memory-type type-${escapeHtml(r.type || 'other')}">${escapeHtml(MEMORY_TYPE_LABELS[r.type] || (r.type || '其他'))}</span>
@@ -1029,12 +1056,34 @@ export function renderStatusPanel(tab) {
                             <div class="memory-body">${escapeHtml(r.text || '')}</div>
                             ${r.location ? `<div class="memory-meta">📍 ${escapeHtml(r.location)}</div>` : ''}
                             ${(r.npcs || []).length ? `<div class="memory-meta">👤 ${(r.npcs || []).slice(0, 5).map(n => escapeHtml(n)).join(', ')}${(r.npcs || []).length > 5 ? '…' : ''}</div>` : ''}
+                            ${r.bucket === 'emotional' && r.target ? `<div class="memory-meta">❤️ ${escapeHtml(r.target)}${typeof r.intensity === 'number' ? ' · 强度 ' + Math.round(r.intensity * 100) + '%' : ''}</div>` : ''}
                             <div class="memory-actions">
                                 <button class="mem-act" data-action="togglePinMemory" data-id="${escapeHtml(r.id || '')}">${r.pinned ? '📌 取消置顶' : '📌 置顶'}</button>
                                 <button class="mem-act danger" data-action="deleteMemory" data-id="${escapeHtml(r.id || '')}">🗑 删除</button>
                             </div>
-                        </div>
-                    `).join("") : '<div class="empty-hint">暂无行为记忆。开始游玩后，AI 会把重要事件记录在这里。</div>'}
+                        </div>`;
+            const groups = [
+                { key: "emotional", label: "情感记忆" },
+                { key: "important_event", label: "重要事件" },
+                { key: "learned_fact", label: "学到的知识" }
+            ];
+            const groupedHtml = records.length ? groups.map(g => {
+                const items = sortCards(byBucket[g.key] || []);
+                if (!items.length) return "";
+                return `<div class="memory-group">
+                            <div class="memory-group-title">${g.label} · ${items.length}</div>
+                            ${items.map(card).join("")}
+                        </div>`;
+            }).join("") : '<div class="empty-hint">暂无行为记忆。开始游玩后，AI 会把重要事件记录在这里。</div>';
+            container.innerHTML = `
+                <div class="status-section">
+                    <div class="status-section-title">行为记忆 · ${records.length}/100</div>
+                    <div class="memory-hint">AI 记录的角色经历。★越多越重要（会被优先注入叙事上下文）。</div>
+                    <div class="memory-actions" style="margin:8px 0 12px;">
+                        <button class="mem-act" data-action="exportMemoryPack">导出记忆包</button>
+                        <button class="mem-act" data-action="triggerMemoryPackImport">导入记忆包</button>
+                    </div>
+                    ${groupedHtml}
                 </div>`;
             break;
         }
@@ -1103,7 +1152,13 @@ export function renderStatusPanel(tab) {
                 <div class="status-section">
                     <div class="status-section-title">📜 我的经历</div>
                     <div class="status-card timeline-list">${tlHtml}</div>
-                </div>`;
+                </div>
+                ${isModuleEnabled(S.currentWorld, "schedule") ? `
+                <div class="status-section">
+                    <div class="status-section-title">⏪ 章节回溯</div>
+                    <div class="status-card" id="rewindBlock"><div class="empty-hint">加载中…</div></div>
+                </div>` : ""}`;
+            if (isModuleEnabled(S.currentWorld, "schedule")) loadRewindBlock(); // ★ docs/69：异步填充回溯区块
             break;
         }
 
@@ -1112,6 +1167,79 @@ export function renderStatusPanel(tab) {
             container.innerHTML = renderLoreDeltaHTML();
             break;
     }
+}
+
+// ★ docs/69：章节回溯区块（异步加载回合日志，按章节分组 + 分支标记）
+async function loadRewindBlock() {
+    const el = document.getElementById("rewindBlock");
+    if (!el) return;
+    const saveId = S.currentSession && S.currentSession.saveId;
+    if (!saveId) { el.innerHTML = '<div class="empty-hint">未绑定存档槽位，无法回溯。</div>'; return; }
+    const log = await loadTurnLog(saveId);
+    if (!log || !Array.isArray(log.turns) || !log.turns.length) {
+        el.innerHTML = '<div class="empty-hint">暂无回溯记录。每完成一回合会自动记录一个回溯点，之后可从任意历史回合重新选择。</div>';
+        return;
+    }
+    const turns = log.turns;
+    const branches = Array.isArray(log.branches) ? log.branches : [];
+    const branchName = (id) => id === "main" ? "主线" : ("分支 " + ((branches.findIndex(b => b.id === id)) + 1));
+    const chapters = [];
+    for (const t of turns) {
+        const ch = chapterOf(t.turn);
+        let c = chapters.find(x => x.ch === ch);
+        if (!c) { c = { ch, items: [] }; chapters.push(c); }
+        c.items.push(t);
+    }
+    const branchInfoHtml = branches.length
+        ? `<div class="rewind-branches">${branches.map(b => `<span class="rewind-branch-chip">⤴ ${escapeHtml(branchName(b.id))}（从第 ${b.base_turn} 回合分叉）</span>`).join("")}</div>`
+        : "";
+    const chapHtml = chapters.slice().reverse().map(c => `
+        <div class="rewind-chapter">
+            <div class="rewind-chapter-title">第 ${c.ch} 章</div>
+            ${c.items.slice().reverse().map(t => `
+                <button class="rewind-turn" data-action="openRewindTurn" data-turn="${t.turn}">
+                    <span class="rewind-turn-label">${escapeHtml(t.label || ("第 " + t.turn + " 回合"))}</span>
+                    <span class="rewind-turn-player">${escapeHtml((t.entry && t.entry.player) || "")}</span>
+                    ${t.branch && t.branch !== "main" ? `<span class="rewind-turn-branch">${escapeHtml(branchName(t.branch))}</span>` : ""}
+                </button>`).join("")}
+        </div>`).join("");
+    el.innerHTML = `<div class="rewind-block">
+        <div class="muted" style="margin-bottom:6px;">已记录 ${turns.length} 个回溯点${branches.length ? " · " + branches.length + " 个分支" : ""}。点击任一回合可回到过去重新选择。</div>
+        ${branchInfoHtml}
+        ${chapHtml}
+    </div>`;
+}
+
+// ★ docs/69：打开回溯确认弹窗（填充目标回合信息）
+export async function openRewindTurn(turn) {
+    const saveId = S.currentSession && S.currentSession.saveId;
+    if (!saveId) { showToast("未绑定存档槽位，无法回溯", "warn"); return; }
+    const log = await loadTurnLog(saveId);
+    if (!log || !Array.isArray(log.turns)) { showToast("暂无回溯记录", "warn"); return; }
+    const snap = log.turns.find(t => t.turn === parseInt(turn, 10));
+    if (!snap) { showToast("目标回合不存在", "warn"); return; }
+    const total = log.turns.length;
+    const overwrite = total - snap.turn;
+    const label = snap.label || ("第 " + snap.turn + " 回合");
+    const player = (snap.entry && snap.entry.player) || "";
+    const narrative = (snap.entry && snap.entry.narrative) || "";
+    const choices = (snap.entry && snap.entry.choices) || [];
+    const body = document.getElementById("rewindBody");
+    if (body) {
+        body.innerHTML = `
+            <div class="rewind-target">
+                <div class="rewind-target-label">${escapeHtml(label)}</div>
+                ${player ? `<div class="rewind-target-player">你：${escapeHtml(player)}</div>` : ""}
+                ${narrative ? `<div class="rewind-target-narrative">${escapeHtml(narrative)}</div>` : ""}
+                ${choices.length ? `<div class="rewind-target-choices">当时选项：${choices.map(c => escapeHtml(c)).join(" / ")}</div>` : ""}
+            </div>
+            <div class="rewind-warn">⚠ 回到此回合后，其后的 ${overwrite} 个回合将被覆盖（本分支历史仍保留在日志中）。想保留当前进度，请先「另存为新存档」。</div>
+            <label class="rewind-option"><input type="checkbox" id="rewindClearMemory"> 回溯时清空角色记忆到当时（默认保留——角色会记得"未来"发生过的事）</label>`;
+    }
+    const info = document.getElementById("rewindModalInfo");
+    if (info) info.textContent = "回到 第 " + snap.turn + " 回合";
+    S._rewindTargetTurn = snap.turn; // 供 app.js 的 confirmRewind / rewindAndFork 读取
+    showModal("rewindModal");
 }
 
 // ★ 57：偏离原著报告——把 S.worldRuntime.deltaLog 渲染为可读列表（状态面板「偏离」页签）
