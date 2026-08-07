@@ -262,8 +262,10 @@ export function buildSystemPrompt() {
     // ★ P0: 预计算缓存 — 同一世界内 system prompt 完全固定，无需每轮重建
     const worldId = S.currentWorld && S.currentWorld.id;
     const strategy = getProvider().cacheStrategy;
+    // ★ A1：保密设定影响 system 内容，纳入缓存键，避免开启/关闭后命中旧缓存
+    const secrecyTag = (S.currentWorld && S.currentWorld.secrecy && S.currentWorld.secrecy.enabled) ? "1" : "0";
     // none 策略（如本地模型）不缓存 system，每次重建；其余走稳定前缀缓存
-    if (strategy !== "none" && S.cachedSystemPrompt !== null && worldId && worldId === S.cachedSysPromptWorldId) {
+    if (strategy !== "none" && S.cachedSystemPrompt !== null && worldId && worldId === S.cachedSysPromptWorldId && secrecyTag === S.cachedSysPromptSecrecy) {
         return S.cachedSystemPrompt;
     }
 
@@ -385,6 +387,21 @@ export function buildSystemPrompt() {
             "- 阶段是叙事内部顺序，请勿在叙事中出现「第X章」「第几回」等字样，只按自然剧情推进。";
     }
 
+    // ★ A1：信息边界 / 伪装法则（保密世界观）。仅当世界开启 secrecy 时注入。
+    // 与「剧情阶段解锁（防剧透）」互补：防剧透是"时间门禁"（别提前剧透后期），
+    // 本规则是"社交门禁"（机密对普通人保密，路人 NPC 不知情）。
+    const secrecy = S.currentWorld && S.currentWorld.secrecy;
+    if (secrecy && secrecy.enabled) {
+        const secretNote = (secrecy.note && secrecy.note.trim())
+            ? secrecy.note.trim()
+            : "本世界存在对普通大众保密的超自然/隐秘设定——其存在本身对外界就是机密。";
+        systemPrompt += "\n\n# 信息边界 / 伪装法则（保密世界观，重要）\n\n本世界存在对普通大众保密的机密内容，机密范畴如下：\n「" + secretNote + "」\n\n铁律（务必遵守）：\n" +
+            "- 普通 NPC、路人、未入门的旁观者**绝对不知道**这些机密；其言行须基于「该机密根本不存在」的常识来表现（例如：在普通人眼里，异常现象只是巧合、事故或都市传说）。\n" +
+            "- 即便玩家/角色主动追问机密，不知情的 NPC 只会以普通人视角困惑、否认、或当作玩笑/阴谋论，绝不能准确无误地讲述机密本体。\n" +
+            "- 仅世界中**明确标记为知情者/内围角色**（如已加入秘密组织、已被揭示身份者）才可触及机密；未被设定为知情者的角色一律视作不知情。\n" +
+            "- 旁白与叙事也不得在玩家角色尚不知情时，以「全知」口吻泄露机密；机密须随剧情由知情者逐步揭示，保持「隐藏世界」的悬念与沉浸感。";
+    }
+
     // ★ C1：模块化世界开关——启用模块注入行为指令；未启用模块约束 AI 不自行引入相关机制
     systemPrompt += buildModulePromptContext(S.currentWorld);
 
@@ -392,6 +409,7 @@ export function buildSystemPrompt() {
     if (strategy !== "none") {
         S.cachedSystemPrompt = systemPrompt;
         S.cachedSysPromptWorldId = worldId;
+        S.cachedSysPromptSecrecy = secrecyTag;
     }
     return systemPrompt;
 }
@@ -1036,7 +1054,7 @@ export function buildLoreRuntimeOverlay() {
     return lines.join("\n");
 }
 
-export function buildTurnUserMessage(input, retrieved) {
+export function buildTurnUserMessage(input, retrieved, webSearchContext) {
     let userPrompt = "";
 
     // ★ 对话历史摘要：用精简的 1-2 句摘要替代被截断的完整对话，大幅降低 token 消耗
@@ -1068,6 +1086,33 @@ export function buildTurnUserMessage(input, retrieved) {
     const positioned = getPositionedLore(retrieved);
     if (positioned.before_user) {
         userPrompt += "# 相关知识片段（动态检索）\n\n```\n" + positioned.before_user + "\n```\n\n";
+    }
+
+    // ★ 联网搜索（预检索接地）：把 DeepSeek 联网查证事实作为额外事实背景注入。
+    // 区分「当代现实事件」与「史实参考」两种措辞：
+    //   - 当代现实：以本世界设定/已发生剧情为准（现实世界设定即现实）；
+    //   - 史实参考：玩家可自由改写历史，史实仅作背景参考，严禁用史实强迫剧情回归历史。
+    // webSearchContext 兼容旧式纯字符串与 { text, mode } 对象两种形态。
+    const ws = (!webSearchContext) ? null
+        : (typeof webSearchContext === "string")
+            ? { text: webSearchContext, mode: "contemporary" }
+            : webSearchContext;
+    if (ws && ws.text && ws.text.trim()) {
+        if (ws.mode === "historical") {
+            userPrompt += "# 实时联网参考 · 史实核对（来自互联网检索，仅供史实参考）\n\n" +
+                "以下内容来自互联网实时检索，是「真实历史」在相关时期的客观事实，仅供史实参考；\n" +
+                "★ 重要：本世界为史实参考模式——玩家完全可以自由偏离历史、改写历史走向，你不得强迫剧情回归或遵循史实；" +
+                "一旦玩家已发生剧情/选择已偏离史实，一律以玩家已发生剧情与选择为准，史实仅作背景氛围、人物/事件可能性参考，" +
+                "禁止用史实纠正或否定玩家的决定；\n" +
+                "若检索内容与本世界既有设定（如虚构改编）冲突，以本世界设定为准。\n\n" +
+                ws.text.trim() + "\n\n";
+        } else {
+            userPrompt += "# 实时联网参考（来自互联网检索，仅供事实依据）\n\n" +
+                "以下内容来自互联网实时检索，是「现实世界」在相关时期的客观事实，仅供事实参考；" +
+                "若其与本世界设定、已发生剧情或世界观禁律冲突，一律以本世界设定与已发生剧情为准，不得让联网信息覆盖或改写你的世界观；" +
+                "若本世界为虚构/保密世界观，请直接忽略以下内容。\n\n" +
+                ws.text.trim() + "\n\n";
+        }
     }
 
     // ★ B2：事件引擎推进提示已迁移到「中部注入位 author_note」（见 buildAuthorNote），
@@ -1291,6 +1336,73 @@ export function getRecentKeyFacts(count) {
         return (bp + bi) - (ap + ai);
     });
     return sorted.slice(0, count).map(r => r.text);
+}
+
+// ============================================================
+// ★ docs/53 修复：世界日报上下文
+// 症状：日报 prompt 只拿到「世界名 + 200 字设定 + 时间地点」，等于让编辑闭着眼写稿，
+//      于是把主角正在做的游戏《龙裔》写成《龙族》这类"听着像、其实错"的名字。
+// 对策：把近期剧情、已确立记忆、已确立专有名词一并喂进去，并在 prompt 里要求照抄名词。
+// 以下两个函数为纯函数（不依赖 DOM），便于单测。
+// ============================================================
+const DAILY_TERM_MAX = 40;
+
+// 汇总本世界"已经确立、不能写错"的专有名词（人物 / 地点 / 知识库条目 / 背包物品…）
+export function collectKnownTerms(opts = {}) {
+    const world = opts.world || null;
+    const gs = opts.gameState || null;
+    const lore = opts.lore || null;
+    const out = [];
+    const push = (v) => {
+        const t = (v == null ? "" : String(v)).trim();
+        if (!t || t.length < 2 || t.length > 24) return;
+        if (!out.includes(t)) out.push(t);
+    };
+    if (world) {
+        (Array.isArray(world.characters) ? world.characters : []).forEach(c => c && push(c.name));
+        (Array.isArray(world.locations) ? world.locations : []).forEach(l => l && push(l.name));
+        const wkb = world.lore_kb && Array.isArray(world.lore_kb.snippets) ? world.lore_kb.snippets : [];
+        wkb.forEach(s => s && push(s.title));
+    }
+    if (lore && Array.isArray(lore.snippets)) lore.snippets.forEach(s => s && push(s.title));
+    if (gs) {
+        push(gs.current_location);
+        (Array.isArray(gs.revealed_locations) ? gs.revealed_locations : []).forEach(push);
+        Object.keys(gs.relationships || {}).forEach(push);
+        Object.keys(gs.bonds || {}).forEach(push);
+        (Array.isArray(gs.inventory) ? gs.inventory : []).forEach(i => i && push(i.name));
+    }
+    return out.slice(0, DAILY_TERM_MAX);
+}
+
+// 组装喂给"日报编辑"的事实上下文（近期剧情 + 记忆 + 专有名词 + 主角设定）
+export function buildDailyContext(opts = {}) {
+    const history = Array.isArray(opts.history) ? opts.history : [];
+    const memories = Array.isArray(opts.memories) ? opts.memories : [];
+    const recentTurns = Number.isInteger(opts.recentTurns) ? opts.recentTurns : 6;
+    const perTurnChars = Number.isInteger(opts.perTurnChars) ? opts.perTurnChars : 300;
+    const parts = [];
+
+    const hero = opts.world && opts.world.hero ? String(opts.world.hero).replace(/\s+/g, " ").trim() : "";
+    if (hero) parts.push("【主角设定】\n" + hero.slice(0, 300));
+
+    const recent = history
+        .filter(e => e && !e.isWarning && !e._pending && !e.isComm && e.narrative)
+        .slice(-recentTurns);
+    if (recent.length) {
+        parts.push("【近期剧情（旧→新，最后一条最新）】\n" + recent.map((e, i) => {
+            const act = e.player ? `（玩家：${String(e.player).replace(/\s+/g, " ").slice(0, 40)}）` : "";
+            return `${i + 1}. ${act}${String(e.narrative).replace(/\s+/g, " ").slice(0, perTurnChars)}`;
+        }).join("\n"));
+    }
+
+    const mem = memories.filter(t => t && String(t).trim()).slice(0, 12);
+    if (mem.length) parts.push("【已确立的事实/记忆】\n" + mem.map(t => "· " + String(t).trim()).join("\n"));
+
+    const terms = collectKnownTerms(opts);
+    if (terms.length) parts.push("【已确立的专有名词（只能照抄，不得改字或换近义词）】\n" + terms.join("、"));
+
+    return parts.join("\n\n");
 }
 
 export function pushChatTurn(userContent, parsed) {

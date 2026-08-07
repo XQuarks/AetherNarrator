@@ -128,7 +128,7 @@ export function sanitizeWorldConfig(raw) {
     if (!raw || typeof raw !== "object") return {};
     const out = {};
     // 允许的顶层键（其余一律丢弃）
-    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags", "modules", "lore_stage_count", "lore_stage_labels", "gm_truth", "locations"];
+    const ALLOWED = ["schema", "initial_state", "lore_kb", "system_prompt", "opening_narrative", "initial_choices", "tags", "modules", "lore_stage_count", "lore_stage_labels", "gm_truth", "locations", "secrecy", "historical_accuracy"];
     for (const k of ALLOWED) {
         if (k in raw && raw[k] !== undefined) out[k] = raw[k];
     }
@@ -175,6 +175,22 @@ export function sanitizeWorldConfig(raw) {
             .filter(e => e.title || e.content);
         out.gm_truth = cleaned.length ? { entries: cleaned } : undefined;
         if (!out.gm_truth) delete out.gm_truth;
+    }
+    // ★ A1：信息边界 / 伪装法则（保密世界观）。world.secrecy = { enabled: bool, note: string }。
+    //   启用后引擎在 system prompt 注入「伪装法则」，约束普通 NPC 不知情、机密不外泄。
+    if (raw.secrecy && typeof raw.secrecy === "object") {
+        out.secrecy = {
+            enabled: raw.secrecy.enabled === true,
+            note: typeof raw.secrecy.note === "string" ? raw.secrecy.note.slice(0, 1000) : ""
+        };
+    }
+    // ★ C2-史实：史实参考 / 联网核对历史。world.historical_accuracy = { enabled: bool, note: string }。
+    //   开启后引擎写剧情前实时联网核对相关时期真实历史，作为「史实参考」注入；玩家可改写历史，史实仅作参考。
+    if (raw.historical_accuracy && typeof raw.historical_accuracy === "object") {
+        out.historical_accuracy = {
+            enabled: raw.historical_accuracy.enabled === true,
+            note: typeof raw.historical_accuracy.note === "string" ? raw.historical_accuracy.note.slice(0, 1000) : ""
+        };
     }
     // ★ docs/68：地点连接图（可选旁路数据，借鉴 WorldLines locations）。
     //   仅作参考/展示/事件地点匹配增强；不替换 current_location/revealed_locations/知识库地点条目。
@@ -598,20 +614,35 @@ export function parseResponse(content) {
     }
 }
 
-// ★ docs/65：narrative 字段防御——AI 或流式累积偶发把整个 tool_calls arguments 的 JSON 字串
-//   塞进 narrative 字段（用户看到 "{"text":"...","action":"...","state_changes":{...}}"）。此函数检测
-//   raw 是否是嵌套 JSON 字串，若是则提取其中的 .narrative 子字段；否则原样返回。
+// ★ docs/65：narrative 字段防御——AI 或流式累积偶发把结构化 JSON 塞进 narrative 字段。
+//   两种畸形形态都要兜住：
+//   A 型：整段 narrative 是 `{...}` 对象字串（如 '{"text":"...","action":"...","state_changes":{...}}'）。
+//   B 型：narrative 以真实剧情开头、尾部把后续结构键（choices/state_changes/…）当字串一起编码进来
+//        （如 '真实剧情…","choices":[{…}],"state_changes":{…}'）——模型把整段参数二次编码进 narrative。
+//   此函数检测这两种情况并还原出真正的剧情文字；否则原样返回。
 export function extractNarrativeText(raw) {
     if (raw == null) return "";
     if (typeof raw !== "string") return String(raw);
     const trimmed = raw.trim();
-    // 快速门：必须以 { 开头且包含 "narrative" 关键字（避免误伤正常包含 { 的中文文本）
-    if (!trimmed.startsWith("{") || !/["']narrative["']\s*:/.test(trimmed)) return raw;
-    // 尝试解析：先用整段 parse（最常见 AI 输出 = 完整 JSON 字串）；失败则用括号平衡提取第一个完整对象
-    let obj = null;
-    try { obj = JSON.parse(trimmed); } catch (_) { obj = extractFirstBalancedJsonObject(trimmed); }
-    if (!obj || typeof obj !== "object") return raw;
-    if (typeof obj.narrative === "string" && obj.narrative.trim()) return obj.narrative;
+    // ★ 防御 A 型：整段是 {…} 对象
+    if (trimmed.startsWith("{") && /["']narrative["']\s*:/.test(trimmed)) {
+        let obj = null;
+        try { obj = JSON.parse(trimmed); } catch (_) { obj = extractFirstBalancedJsonObject(trimmed); }
+        if (obj && typeof obj === "object" && typeof obj.narrative === "string" && obj.narrative.trim()) return obj.narrative;
+    }
+    // ★ 防御 B 型：剧情尾部 glued 上 `","<已知结构键>"` 标记（二次编码）。
+    //   检测首个紧邻已知结构键的 `","` 标记，截断到标记之前，并把前缀里被转义的正文还原出来。
+    const KNOWN_KEYS = ["choices", "state_changes", "side_events", "key_facts", "atmosphere", "next_period", "comment", "is_forced_plot", "lore_delta"];
+    const marker = new RegExp('["\']\\s*,\\s*["\']?(' + KNOWN_KEYS.join("|") + ')["\']?\\s*:');
+    const m = trimmed.match(marker);
+    if (m && m.index > 0) {
+        let prefix = trimmed.slice(0, m.index).replace(/[",\s]+$/, "");
+        // 还原 JSON 转义（二次编码时前缀里是 \" \\ \n 等字面量）
+        const unescaped = prefix
+            .replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r")
+            .replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+        if (unescaped.trim()) return unescaped.trim();
+    }
     return raw;
 }
 

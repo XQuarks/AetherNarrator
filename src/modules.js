@@ -58,6 +58,11 @@ export const MODULE_REGISTRY = [
     // ★ docs/69：章节化回溯（创作者按需开启；关闭 = 不记录回合日志、不显示回溯入口）
     { id: "schedule", name: "章节回溯", desc: "章节化回溯：记录每回合快照，可在「状态面板 → 时间线 → 章节回溯」从任意历史回合重新选择", defaultEnabled: false },
 
+    // ★ 联网搜索（DeepSeek v4 专属）：回合前预检索现实查证事实，作为额外背景注入剧情。
+    // 仅 DeepSeek 模型生效；现实/当代/IP 类世界自动搜（带冷却），玩家输入含"查一下/新闻/今天…"也触发。
+    // 不加 promptFragment，避免写入 system 前缀影响 DeepSeek 缓存。
+    { id: "web_search", name: "联网搜索", desc: "调用 DeepSeek 联网搜索获取现实查证事实，作为剧情背景（仅 DeepSeek v4 模型生效；默认关闭）", defaultEnabled: false },
+
     // —— IP 一致性（IP#6 生成后约束；黎总 2026-07-30 拍板：填了作品名才默认开；2026-08-04 更名「IP 世界观约束」）——
     // defaultEnabled 为函数：世界填了 ip_name（参考的世界/作品来源名）→ 默认开；纯原创没填 → 默认关。
     { id: "ip_scan", name: "IP 世界观约束", desc: "生成后扫描叙事，标黄偏离世界观设定的概念并提示（不阻断）",

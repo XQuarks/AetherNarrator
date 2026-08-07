@@ -62,10 +62,32 @@ export function setBackgroundInert(on) {
     });
 }
 
+// ★ 弹窗叠层：弹窗默认 z-index 都是 1000，谁在 HTML 里靠后谁就压在上面。
+// 于是「世界详情」里点「选择存档」，后开的存档弹窗反而被世界详情盖住。
+// 这里在打开时按当前已开弹窗的最高层级 +10 抬一层，关闭时复位，谁后开谁在上。
+const MODAL_BASE_Z = 1000;
+function raiseModalLayer(el) {
+    if (!el || !el.style) return;
+    let maxZ = MODAL_BASE_Z;
+    let opened = [];
+    try { opened = Array.from(document.querySelectorAll(".modal-overlay.show") || []); } catch (e) { opened = []; }
+    const others = opened.filter(o => o !== el); // 对已打开的同一个弹窗再调 showModal 时，不该把它自己越抬越高
+    for (const o of others) {
+        let z = parseInt((o.style && o.style.zIndex) || "", 10);
+        if (isNaN(z) && typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+            try { z = parseInt(window.getComputedStyle(o).zIndex, 10); } catch (e) { z = NaN; }
+        }
+        if (isNaN(z)) z = MODAL_BASE_Z;
+        if (z > maxZ) maxZ = z;
+    }
+    if (others.length) el.style.zIndex = String(maxZ + 10);
+}
+
 export function showModal(id) {
     const el = document.getElementById(id);
     if (!el) return;
     S.lastFocusedBeforeModal = document.activeElement;
+    raiseModalLayer(el);
     el.classList.add("show");
     el.setAttribute("role", "dialog");
     el.setAttribute("aria-modal", "true");
@@ -81,7 +103,11 @@ export function closeModal(id) {
     el.classList.remove("show");
     el.removeAttribute("role");
     el.removeAttribute("aria-modal");
-    setBackgroundInert(false);
+    if (el.style) el.style.zIndex = ""; // 复位叠层，避免下次打开时层级越堆越高
+    // 还有别的弹窗开着就别解除背景 inert（如从世界详情里开的存档弹窗关掉后，世界详情仍是模态）
+    let stillOpen = 0;
+    try { stillOpen = (document.querySelectorAll(".modal-overlay.show") || []).length; } catch (e) { stillOpen = 0; }
+    if (!stillOpen) setBackgroundInert(false);
     if (S.lastFocusedBeforeModal && typeof S.lastFocusedBeforeModal.focus === "function") {
         S.lastFocusedBeforeModal.focus();
     }
@@ -547,6 +573,8 @@ export function showWorldDetail(worldId) {
             <button class="detail-tab" data-detail-tab="variables">变量</button>
             <button class="detail-tab" data-detail-tab="items">物品</button>
             <button class="detail-tab" data-detail-tab="modules">模块开关</button>
+            <button class="detail-tab" data-detail-tab="secrecy">保密设定</button>
+            <button class="detail-tab" data-detail-tab="history">史实参考</button>
             ${isModuleEnabled(w, "map") ? `<button class="detail-tab" data-detail-tab="map">🗺 地图</button>` : ""}
         </div>
         <div class="detail-tab-content active" data-detail-tab-content="overview">
@@ -615,6 +643,40 @@ export function showWorldDetail(worldId) {
                 </div>
             </div>
             <button class="btn primary" data-action="saveWorldModules" data-id="${id}">保存模块设置</button>
+        </div>
+        <div class="detail-tab-content" data-detail-tab-content="secrecy">
+            <div class="status-section">
+                <div class="status-section-title">保密设定 / 伪装法则（A1）</div>
+                <div class="memory-hint">开启后，引擎会约束「普通 NPC / 路人不知道机密」，防止像龙族这样本该隐藏的世界观被写成人尽皆知，破坏沉浸感。适合有「隐藏世界 / 秘密组织」设定的世界。</div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="secrecyEnabled" ${((w.secrecy && w.secrecy.enabled) ? "checked" : "")} style="width:auto;">
+                        <span>启用信息边界 / 伪装法则</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>机密范畴说明（写给 AI 看，越具体越好）</label>
+                    <textarea id="secrecyNote" rows="4" placeholder="例如：龙族、混血种、卡塞尔学院、屠龙家族的存在对普通人保密；普通人只当异常是事故或都市传说。">${escapeHtml((w.secrecy && w.secrecy.note) || "")}</textarea>
+                </div>
+            </div>
+            <button class="btn primary" data-action="saveWorldSecrecy" data-id="${id}">保存保密设定</button>
+        </div>
+        <div class="detail-tab-content" data-detail-tab-content="history">
+            <div class="status-section">
+                <div class="status-section-title">史实参考 / 联网核对历史（C2-史实）</div>
+                <div class="memory-hint">开启后，引擎会在写剧情前实时联网核对相关时期的真实历史，作为「史实参考」注入。玩家可自由偏离历史、改写走向，史实只作背景参考，不会被用来强迫剧情回归历史。适合三国、明清、二战等基于真实历史的剧本。</div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="historyEnabled" ${((w.historical_accuracy && w.historical_accuracy.enabled) ? "checked" : "")} style="width:auto;">
+                        <span>启用史实参考（联网核对历史）</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>史实范畴说明（可选，写给 AI 看）</label>
+                    <textarea id="historyNote" rows="4" placeholder="例如：以《三国志》正史为参考，玩家可改写历史；赤壁之战前后为关键窗口期。">${escapeHtml((w.historical_accuracy && w.historical_accuracy.note) || "")}</textarea>
+                </div>
+            </div>
+            <button class="btn primary" data-action="saveWorldHistory" data-id="${id}">保存史实参考设置</button>
         </div>
         ${isModuleEnabled(w, "map") ? `
         <div class="detail-tab-content" data-detail-tab-content="map">
@@ -1449,19 +1511,13 @@ export function renderScanWarnBar(entry, index) {
         </div>`;
 }
 
-export function renderLog(reset) {
-    const log = document.getElementById("gameLog");
-    if (reset) { S.renderedEntryCount = 0; log.innerHTML = '<div class="choices-row in-log" id="choicesArea"></div>'; }
-    updateEventButtonVisibility(); // ★ 事件系统：每轮重绘时同步「🎴 支线」按钮显隐
-
-    // 只追加新增的条目
-    for (let i = S.renderedEntryCount; i < S.conversationHistory.length; i++) {
-        const entry = S.conversationHistory[i];
-        const warningClass = entry.isWarning ? " warning" : "";
-        const metaLabel = entry.isWarning
-            ? "系统提示"
-            : (entry.player ? "你" : "开场");
-        const html = `
+// 单条日志的 HTML（renderLog 追加 与 replaceEntryDOM 原地替换 共用同一份模板，避免两处渲染逻辑漂移）
+export function buildLogEntryHTML(entry, i) {
+    const warningClass = entry.isWarning ? " warning" : "";
+    const metaLabel = entry.isWarning
+        ? "系统提示"
+        : (entry.player ? "你" : "开场");
+    return `
         <div class="log-entry${warningClass}">
             <div class="meta">
                 <span>${metaLabel} · ${escapeHtml(entry.tcd ? formatTimeLabel(entry.tcd, getTimeConfig().timeConfig) : formatTimeShort(entry.day, entry.period, entry.clock))}</span>
@@ -1473,7 +1529,16 @@ export function renderLog(reset) {
             ${entry.scanWarn && !entry.isWarning ? renderScanWarnBar(entry, i) : ""}
         </div>
         `;
-        log.insertBefore(createElementFromHTML(html), document.getElementById("choicesArea"));
+}
+
+export function renderLog(reset) {
+    const log = document.getElementById("gameLog");
+    if (reset) { S.renderedEntryCount = 0; log.innerHTML = '<div class="choices-row in-log" id="choicesArea"></div>'; }
+    updateEventButtonVisibility(); // ★ 事件系统：每轮重绘时同步「🎴 支线」按钮显隐
+
+    // 只追加新增的条目
+    for (let i = S.renderedEntryCount; i < S.conversationHistory.length; i++) {
+        log.insertBefore(createElementFromHTML(buildLogEntryHTML(S.conversationHistory[i], i)), document.getElementById("choicesArea"));
     }
     S.renderedEntryCount = S.conversationHistory.length;
     log.scrollTop = log.scrollHeight;
@@ -1556,15 +1621,39 @@ function removeEntryDOMOnly(index) {
 
 // ★ 实时流式：移除某条已渲染的日志条目（DOM + 数组 + 渲染计数同步），供丢弃过期响应等场景用
 export function removeLogEntry(index) {
-    removeEntryDOMOnly(index);
+    const log = document.getElementById("gameLog");
+    if (log) {
+        const entries = log.querySelectorAll(".log-entry");
+        const el = entries[index];
+        if (el) el.remove();
+    }
+    // ★ 修复重复渲染：渲染计数按「少了一条」递减，而不是回退到 index。
+    //   否则 index 之后已经渲染过的条目（如等待回复期间插入的「今日动态」）
+    //   会在下一次 renderLog 时被再追加一遍，界面上出现两条。
+    if (S.renderedEntryCount > index) S.renderedEntryCount -= 1;
     if (S.conversationHistory.length > index) S.conversationHistory.splice(index, 1);
 }
 
 // ★ 实时流式：用最新数据重渲染指定条目（提交为格式化叙事 + 氛围提示）。
-// 先移除旧 DOM，再让 renderLog 从该下标重新追加（该下标之后通常无其它条目）。
-// 注意：这里只能删 DOM、不能动数组——若误用 removeLogEntry 会把刚定稿的回合从
+// 原地替换该条目的 DOM 节点，不动数组、不动渲染计数——
+// 早期实现是「删旧 DOM + renderLog 从该下标重新追加」，一旦这条之后还有别的条目
+// （等待回复期间点「今日动态」插进来的播报），那些条目就会被重复追加一次（弹两次）。
+// 注意：这里只能改 DOM、不能动数组——若误用 removeLogEntry 会把刚定稿的回合从
 // conversationHistory 里删掉，导致剧情数据丢失（processTurn 集成测试抓到的 bug）。
 export function replaceEntryDOM(index) {
+    const log = document.getElementById("gameLog");
+    const data = S.conversationHistory[index];
+    if (log && data && index < S.renderedEntryCount) {
+        const old = log.querySelectorAll(".log-entry")[index];
+        if (old) {
+            const fresh = createElementFromHTML(buildLogEntryHTML(data, index));
+            if (typeof old.replaceWith === "function") old.replaceWith(fresh);
+            else if (old.parentNode) old.parentNode.replaceChild(fresh, old);
+            log.scrollTop = log.scrollHeight;
+            return;
+        }
+    }
+    // 兜底：该条尚未渲染 / DOM 缺失 → 回落到原「删旧 DOM + 追加」路径
     removeEntryDOMOnly(index);
     renderLog();
 }

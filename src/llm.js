@@ -7,11 +7,12 @@ import { buildApiUrl, defaultWorldSchema, extractFirstBalancedJsonObject, getWor
 import { getNextPeriod, getTemperature, getTimeConfig } from "./theme.js";
 import { advanceCalendarTime, formatCalendarDate } from "./calendar.js";
 import { summarizeFactsFromChanges } from "./rag.js";
-import { buildSystemPrompt, buildLoreHardBreakpoint, buildCharactersBreakpoint, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, buildPlayerNote, buildGmTruthReveals, getPositionedLore } from "./prompt.js";
+import { buildSystemPrompt, buildLoreHardBreakpoint, buildCharactersBreakpoint, buildTurnUserMessage, buildWorldGenerationPrompt, buildLoreChunkPrompt, buildAuthorNote, buildPlayerNote, buildGmTruthReveals, getPositionedLore, buildDailyContext, getRecentKeyFacts } from "./prompt.js";
 import { getProvider, readApiInputs, getChunkConcurrency, isToolChoiceConflictError } from "./providers.js";
 import { updateCacheIndicator, updateLoadingProgress } from "./render.js";
 import { buildLoreRevisionDiff } from "./lore-revision.js";
 import { selectPromotionCandidates } from "./promotion.js"; // ★ B6：记忆晋升候选筛选
+import { maybeWebSearch } from "./websearch.js"; // ★ 联网搜索（预检索接地）：DeepSeek /responses 联网查证，仅作事实背景
 
 export function logTurnStats(hit, miss, total, usage) {
     const model = document.getElementById("modelName")?.value || "unknown";
@@ -659,19 +660,35 @@ ${channelLines || "（无）"}
 }
 
 // ★ docs/53：AI 生成世界日报——返回 { headlines:[{title,detail}], rumor }
+// 修复：原先只喂「世界名 + 200 字设定 + 时间地点」，AI 只能靠猜，于是把主角在做的游戏
+//      《龙裔》写成《龙族》。现在补上近期剧情 / 记忆 / 已确立专有名词，并下"名词照抄"铁律。
 export async function aiGenerateDaily(ctx) {
     const { world, flags } = ctx || {};
     const summary = buildWorldSummary(world);
+    const context = (ctx && typeof ctx.context === "string" && ctx.context.trim())
+        ? ctx.context.trim()
+        : buildDailyContext({
+            world: world || S.currentWorld,
+            gameState: (ctx && ctx.gameState) || S.gameState,
+            lore: S.activeLoreKB,
+            history: S.conversationHistory,
+            memories: getRecentKeyFacts(12)
+        });
     const userMsg = `世界：${summary}
 时间：${flags && flags.time_of_day}，地点=${flags && flags.location}
+${context ? "\n" + context + "\n" : ""}
 请生成“今日世界动态”：3-5 条简短头条（每条含 title 与 detail），外加 1 条 rumor（小道消息）。
-要求：内容须与本世界设定一致、不重复近期已知剧情、不泄露未触发主线；若世界处于信息管制，头条可含被审查或宣传性质内容。`;
+要求：
+1. 内容须与本世界设定、以及上面的近期剧情一致，像是这几天世界里真实在发生的事。
+2.【专有名词铁律】人物、地点、组织、作品、道具等名称，只能照抄上文出现过的写法，一个字都不能改（不得改字、缩写、换近义词，例如上文写《龙裔》就绝不能写成《龙族》）。上文没出现过的名字一律不要编造；确需提及时改用泛称（如“那款新游戏”“某位老工匠”）。
+3. 不复述玩家刚经历的这一幕，也不泄露尚未触发的主线与隐藏剧情。
+4. 若世界处于信息管制，头条可含被审查或宣传性质内容。`;
     const messages = [
-        { role: "system", content: "你是本世界的“日报编辑”。生成贴合世界观的今日动态，简短、有信息量、不剧透。" },
+        { role: "system", content: "你是本世界的“日报编辑”。依据给定事实生成贴合世界观的今日动态，简短、有信息量、不剧透。专有名词必须与给定事实完全一致，绝不改写或杜撰。" },
         { role: "user", content: userMsg }
     ];
     try {
-        const parsed = await callStructured(messages, "generate_daily", { temperature: 0.8, maxTokens: 1200 });
+        const parsed = await callStructured(messages, "generate_daily", { temperature: 0.7, maxTokens: 1200 });
         if (!parsed) return { headlines: [], rumor: "" };
         return {
             headlines: Array.isArray(parsed.headlines) ? parsed.headlines.slice(0, 5) : [],
@@ -745,7 +762,10 @@ export async function callLLM(input, retrieved, opts = {}) {
     const loreHardBreak = buildLoreHardBreakpoint();
     const systemPrompt = buildSystemPrompt();
     const charactersBreak = buildCharactersBreakpoint();
-    const userContent = buildTurnUserMessage(input, retrieved);
+    // ★ 联网搜索（预检索接地）：回合生成前先做一次 DeepSeek 联网查证，作为事实背景注入 prompt。
+    // 失败/未开启/非 DeepSeek 时返回 { text: "", mode }，不影响主流程。
+    const webSearch = await maybeWebSearch(input, S.currentWorld);
+    const userContent = buildTurnUserMessage(input, retrieved, webSearch);
     // ★ P0-2：按 insert_at 分流的动态 lore。before_user/after_user 已在 buildTurnUserMessage 里
     // 拼进 userContent；这里取 system / author_note 两个槽位并入对应 role 消息。
     const positioned = getPositionedLore(retrieved);

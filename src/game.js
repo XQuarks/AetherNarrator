@@ -473,6 +473,36 @@ export function saveWorldModules(worldId) {
     showToast("模块设置已保存", "success");
 }
 
+// ★ A1：保存"保密设定"（信息边界 / 伪装法则），从世界详情的保密设定页签读回 world.secrecy
+export function saveWorldSecrecy(worldId) {
+    const w = S.worlds.find(x => x.id === worldId);
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    const enEl = document.querySelector("#detailWorldBody #secrecyEnabled");
+    const noteEl = document.querySelector("#detailWorldBody #secrecyNote");
+    w.secrecy = {
+        enabled: !!(enEl && enEl.checked),
+        note: noteEl ? (noteEl.value || "").trim().slice(0, 1000) : ""
+    };
+    saveWorlds();
+    invalidateSystemPromptCache(); // 保密设定影响 system 提示，失效缓存以便重建
+    showToast("保密设定已保存", "success");
+}
+
+// ★ C2-史实：保存"史实参考"设置，从世界详情的史实参考页签读回 world.historical_accuracy。
+// 注：史实参考只影响「用户消息区」的联网注入措辞，不改变 system prompt，故无需失效 system 缓存。
+export function saveWorldHistory(worldId) {
+    const w = S.worlds.find(x => x.id === worldId);
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    const enEl = document.querySelector("#detailWorldBody #historyEnabled");
+    const noteEl = document.querySelector("#detailWorldBody #historyNote");
+    w.historical_accuracy = {
+        enabled: !!(enEl && enEl.checked),
+        note: noteEl ? (noteEl.value || "").trim().slice(0, 1000) : ""
+    };
+    saveWorlds();
+    showToast("史实参考设置已保存", "success");
+}
+
 // ============================================================
 // ★ docs/53：NPC 私聊 / 世界日报
 // ============================================================
