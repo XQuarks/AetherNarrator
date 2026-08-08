@@ -3,13 +3,15 @@
 // ============================================================
 import { S, calendarLabel, MEMORY_TYPE_LABELS, MEMORY_BUCKETS, getEnabledVariables } from "./store.js";
 
-import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema, computeWorldCompletion, logError } from "./utils.js";
+import { createElementFromHTML, escapeHtml, escapeRegExp, getAttributeLabel, getWorldSchema, computeWorldCompletion, logError, sanitizeLLMText } from "./utils.js";
 import { getPeriodLabel, getTimeConfig, formatWorldTime, formatTimeShort, formatTimeLabel, formatDeadlineLabel, stepOf, updateFontSizeButtons, getAllTimelineViews, formatDateOnly, tempLabelText } from "./theme.js";
 import { isModuleEnabled, MODULE_REGISTRY } from "./modules.js"; // ★ C1：状态 Tab 按模块开关显隐 + 模块开关 UI
 // 注：页面按钮的 chooseOption / startGame / loadSave 等动作均通过 data-action 属性由 app.js 事件接线分发，
 // 本模块不直接引用这些函数，不反向依赖 game.js / save.js，避免循环引用（docs/34 #1）。
 import { abortCurrentRequest } from "./turn-lifecycle.js";
-import { formatStateChanges } from "./prompt.js";
+import { formatStateChanges, formatStateChangesStructured } from "./prompt.js";
+// ★ docs/75：关系升级门控——确定性判定引擎（纯函数）
+import { getTiers, nextGate, isEligible, upgradeLabel } from "./relationship-gating.js";
 // ★ W2-Style：创建向导编辑器逻辑（模块导航 / 风格模板库 / 模块开关 / 世界书入口）
 import { gotoWizardStep, resetCreateWizard, initCreateWizardDOM, syncPovHighlight } from "./wizard-editor.js";
 import { buildWorldSummary, normalizeSimulationState } from "./simulation.js";
@@ -496,6 +498,82 @@ export function showWorldDetail(worldId) {
     const w = S.currentWorld;
     const id = w.id;
 
+    // ★ docs/73：随机事件条件编辑器（函数声明，自动 hoist 到本函数作用域）
+    function toggleCondInputs(sel) {
+        const row = sel.closest(".re-cond-row");
+        if (!row) return;
+        const type = sel.value;
+        const npc = row.querySelector(".re-cond-npc");
+        const op = row.querySelector(".re-cond-op");
+        if (npc) npc.style.display = (type === "bond") ? "inline-block" : "none";
+        if (op) op.style.display = (type === "story_progress" || type === "bond") ? "inline-block" : "none";
+    }
+    function renderCondRow(cond, world) {
+        cond = cond || {};
+        const showNpc = cond.type === "bond";
+        const showOp = cond.type === "story_progress" || cond.type === "bond";
+        const affOn = isModuleEnabled(world, "affinity");
+        const evOn = isModuleEnabled(world, "events");
+        const loreOn = isModuleEnabled(world, "lore");
+        const opt = (val, label, depOn) => {
+            const dis = (depOn === false) ? " disabled" : "";
+            const sel = cond.type === val ? " selected" : "";
+            const note = (depOn === false) ? "（需开启对应模块）" : "";
+            return `<option value="${val}"${sel}${dis}>${label}${note}</option>`;
+        };
+        return `
+        <div class="re-cond-row" data-cond>
+            <select class="re-cond-type">
+                ${opt("location", "当前地点")}
+                ${opt("story_progress", "剧情阶段")}
+                ${opt("bond", "角色好感", affOn)}
+                ${opt("fired", "前置·随机事件已发生")}
+                ${opt("events", "前置·支线事件已发生", evOn)}
+                ${opt("lore", "前置·知识卡已解锁", loreOn)}
+                ${opt("season", "季节")}
+                ${opt("era", "纪元")}
+            </select>
+            <input class="re-cond-npc" value="${escapeHtml(cond.npc || "")}" placeholder="角色名" style="display:${showNpc ? "inline-block" : "none"}">
+            <select class="re-cond-op" style="display:${showOp ? "inline-block" : "none"}">
+                <option value=">="${cond.op === ">=" ? " selected" : ""}>≥</option>
+                <option value="<="${cond.op === "<=" ? " selected" : ""}>≤</option>
+                <option value="=="${cond.op === "==" ? " selected" : ""}>=</option>
+            </select>
+            <input class="re-cond-value" value="${escapeHtml(cond.value || "")}" placeholder="值（地点名/阶段数/事件标题…）">
+            <button class="re-cond-del" data-action="removeRandomEventCond">✕</button>
+        </div>`;
+    }
+    function renderRandomEventRow(ev, world) {
+        const mode = (ev && ev.condition_mode === "any") ? "any" : "all";
+        const conds = (ev && Array.isArray(ev.conditions)) ? ev.conditions : [];
+        const condRows = conds.length ? conds.map(c => renderCondRow(c, world)).join("") : "";
+        return `
+        <div class="random-event-row">
+            <div class="re-main">
+                <input class="re-title" value="${escapeHtml(ev.title || "")}" placeholder="事件标题，如：走廊遇故人">
+                <input class="re-cond-hint re-hint" value="${escapeHtml(ev.hint || "")}" placeholder="提示（可选），如：一位旧识叫住你">
+                <button class="re-del" data-action="removeRandomEvent">✕</button>
+            </div>
+            <div class="re-conds">
+                <div class="re-cond-head">
+                    <span class="re-cond-label">条件组合</span>
+                    <select class="re-mode">
+                        <option value="all"${mode === "all" ? " selected" : ""}>全部满足（AND）</option>
+                        <option value="any"${mode === "any" ? " selected" : ""}>任一满足（OR）</option>
+                    </select>
+                    <button class="btn-secondary-sm re-add-cond" data-action="addRandomEventCond">+ 添加条件</button>
+                </div>
+                <div class="re-cond-list">${condRows}</div>
+                <div class="re-cond-empty muted">无条件 = 任何节奏回合都可能被抽中（向后兼容）</div>
+            </div>
+        </div>`;
+    }
+
+    // ★ docs/73：随机事件池（可自选功能）——预渲染事件行（含条件编辑器）
+    const rePool = Array.isArray(w.random_events) ? w.random_events : [];
+    const randomEventRows = rePool.length ? rePool.map((ev) => renderRandomEventRow(ev, w)).join("")
+        : `<p class="muted">事件池为空。请先在「模块开关」启用「随机事件」，再点下方「+ 添加事件」填写。</p>`;
+
     // 知识库统计（默认知识库）
     const snippets = (w.lore_kb && w.lore_kb.snippets) || (S.activeLoreKB && S.activeLoreKB.snippets) || [];
     const catColors = ["#C9A87C", "#7BAA92", "#6B9BD1", "#C56B5E", "#B98FC9", "#C9A455", "#5AA8B0", "#A89070"];
@@ -575,6 +653,7 @@ export function showWorldDetail(worldId) {
             <button class="detail-tab" data-detail-tab="modules">模块开关</button>
             <button class="detail-tab" data-detail-tab="secrecy">保密设定</button>
             <button class="detail-tab" data-detail-tab="history">史实参考</button>
+            <button class="detail-tab" data-detail-tab="randomevent">随机事件</button>
             ${isModuleEnabled(w, "map") ? `<button class="detail-tab" data-detail-tab="map">🗺 地图</button>` : ""}
         </div>
         <div class="detail-tab-content active" data-detail-tab-content="overview">
@@ -678,6 +757,22 @@ export function showWorldDetail(worldId) {
             </div>
             <button class="btn primary" data-action="saveWorldHistory" data-id="${id}">保存史实参考设置</button>
         </div>
+        <div class="detail-tab-content" data-detail-tab-content="randomevent">
+            <div class="status-section">
+                <div class="status-section-title">随机事件 / 事件池（docs/70 · 可自选功能）</div>
+                <div class="memory-hint">在「模块开关」页签启用「随机事件」模块后，引擎会每隔若干回合自动在叙事里融入一次本池中的突发事件，丰富剧情变数。需先启用模块并填写下方事件池，否则不会触发；事件池为空时引擎不注入任何提示，也不会诱导 AI 自行编造。</div>
+                <div class="form-group">
+                    <label>触发间隔（每 N 回合融入一次，默认 3，范围 1–20）</label>
+                    <input type="number" id="randomEventInterval" min="1" max="20" value="${typeof w.random_event_interval === 'number' ? w.random_event_interval : 3}">
+                </div>
+                <div class="form-group">
+                    <label>事件池（AI 会从中抽取融入；标题必填，提示可选）</label>
+                    <div id="randomEventList">${randomEventRows}</div>
+                    <button class="btn-secondary-sm" data-action="addRandomEvent">+ 添加事件</button>
+                </div>
+            </div>
+            <button class="btn primary" data-action="saveWorldRandomEvents" data-id="${id}">保存随机事件设置</button>
+        </div>
         ${isModuleEnabled(w, "map") ? `
         <div class="detail-tab-content" data-detail-tab-content="map">
             ${renderMapView(w)}
@@ -713,6 +808,9 @@ export function showWorldDetail(worldId) {
     }
 
     bindDetailTabs("detailWorldBody");
+    // ★ docs/73：条件类型切换 → 显隐 npc/op 输入
+    const dwb = document.getElementById("detailWorldBody");
+    if (dwb) dwb.querySelectorAll(".re-cond-type").forEach(sel => sel.addEventListener("change", () => toggleCondInputs(sel)));
     showModal("worldDetailModal");
 }
 
@@ -847,12 +945,17 @@ export function renderStatusTabs() {
     if (isModuleEnabled(world, "time")) {
         tabs.push({ key: "timeline", label: "时间线" });
     }
+    // ★ docs/76：世界线页签按 parallel_narrative 模块开关（管理平行叙事层 + 影响度）
+    if (isModuleEnabled(world, "parallel_narrative")) {
+        tabs.push({ key: "worldlines", label: "世界线" });
+    }
     // ★ 57：偏离原著报告页签（本局对知识库工作副本做过的改动一览）
     tabs.push({ key: "divergence", label: "偏离" });
 
     document.getElementById("statusTabs").innerHTML = tabs.map(t => `
         <button class="status-tab ${S.currentStatusTab === t.key ? "active" : ""}" data-action="switchStatusTab" data-key="${t.key}">${t.label}</button>
-    `).join("");
+    `).join("")
+        + `<button class="status-reanchor-btn" data-action="requestOocReanchor" title="下一回合让所有角色回到各自已定义切面内（人设守门）">🎭 人设校准</button>`;
 }
 
 export function switchStatusTab(tab) {
@@ -998,13 +1101,23 @@ export function renderStatusPanel(tab) {
                         const side = aff >= 0 ? "pos" : "neg";
                         const tags = bond && Array.isArray(bond.tags) ? bond.tags : [];
                         const desc = (bond && bond.desc) || rel || "";
+                        // ★ docs/75：关系等级标签 + 主动升级按钮（仅 relationship_upgrade + affinity 均开启时显示）
+                        const relUpOn = isModuleEnabled(S.currentWorld, "relationship_upgrade") && isModuleEnabled(S.currentWorld, "affinity");
+                        const tierIdx = relUpOn ? (typeof (bond && bond.tier) === "number" ? bond.tier : 0) : -1;
+                        const tierName = relUpOn ? (getTiers(S.currentWorld)[tierIdx] || "") : "";
+                        const gate = relUpOn ? nextGate(S.currentWorld, s, name) : null;
+                        const eligible = relUpOn && !!gate && gate.active === true && isEligible(S.currentWorld, s, name);
+                        const upLabel = eligible ? upgradeLabel(S.currentWorld, tierIdx + 1) : "";
                         return `
                         <div class="status-card ${isKey ? "bond-key" : ""}">
-                            <div class="row"><span class="label">${isKey ? "★ " : ""}${escapeHtml(name)}</span><span class="value">${aff > 0 ? "+" : ""}${aff}</span></div>
+                            <div class="row"><span class="label">${isKey ? "★ " : ""}${escapeHtml(name)}${tierName ? ` <span class="bond-tier">${escapeHtml(tierName)}</span>` : ""}</span><span class="value">${aff > 0 ? "+" : ""}${aff}</span></div>
                             <div class="bond-bar"><div class="bond-fill ${side}" style="width:${pct}%"></div></div>
                             ${tags.length ? `<div class="bond-tags">${tags.map(t => `<span class="bond-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
                             ${desc ? `<div class="text-block">${escapeHtml(desc)}</div>` : ""}
-                            ${isModuleEnabled(S.currentWorld, "npc_chat") ? `<button class="bond-chat-btn" data-action="privateChat" data-npc="${escapeHtml(name)}">私聊</button>` : ""}
+                            <div class="bond-actions">
+                                ${isModuleEnabled(S.currentWorld, "npc_chat") ? `<button class="bond-chat-btn" data-action="privateChat" data-npc="${escapeHtml(name)}">私聊</button>` : ""}
+                                ${eligible ? `<button class="bond-upgrade-btn" data-action="upgradeRelationship" data-npc="${escapeHtml(name)}">${escapeHtml(upLabel)}</button>` : ""}
+                            </div>
                         </div>`;
                     }).join("") : '<div class="empty-hint">暂无人物关系</div>'}
                 </div>
@@ -1228,6 +1341,42 @@ export function renderStatusPanel(tab) {
             // ★ 57：偏离原著报告——本局对知识库工作副本做过的改动一览
             container.innerHTML = renderLoreDeltaHTML();
             break;
+
+        case "worldlines": {
+            // ★ docs/76：平行叙事层管理（parallel_narrative 开启时显示）
+            const layers = (s.narrative_layers && typeof s.narrative_layers === "object") ? s.narrative_layers : {};
+            const ids = Object.keys(layers);
+            const inf = (typeof s.player_influence === "number") ? s.player_influence : 0;
+            const wcfg = (S.currentWorld && S.currentWorld.parallel_narrative) || {};
+            const thresholds = Array.isArray(wcfg.influence_thresholds) && wcfg.influence_thresholds.length
+                ? wcfg.influence_thresholds : [100];
+            const nextTier = thresholds.find(t => t > inf);
+            const refTier = (typeof nextTier === "number") ? nextTier : thresholds[thresholds.length - 1];
+            const pct = Math.max(0, Math.min(100, refTier ? (inf / refTier) * 100 : 0));
+            const layerCards = ids.length ? ids.map(id => {
+                const L = layers[id];
+                const active = id === s.active_narrative_layer;
+                const fromLabel = L.derived_from && layers[L.derived_from] ? layers[L.derived_from].label : null;
+                const meta = [
+                    `进度 ${L.core && typeof L.core.story_progress === "number" ? L.core.story_progress : (typeof s.story_progress === "number" ? s.story_progress : 1)}`,
+                    fromLabel ? `衍生自 ${escapeHtml(fromLabel)}` : "初始世界线"
+                ].join(" · ");
+                return `
+                <div class="status-card ${active ? "bond-key" : ""}">
+                    <div class="row"><span class="label">${active ? "★ " : ""}${escapeHtml(L.label || id)}</span>${active ? '<span class="value">游玩中</span>' : ""}</div>
+                    <div class="text-block">${meta}</div>
+                    ${active ? "" : `<button class="bond-chat-btn" data-action="switchNarrativeLayer" data-id="${escapeHtml(id)}">切换到此线</button>`}
+                </div>`;
+            }).join("") : '<div class="empty-hint">暂无平行世界线</div>';
+            container.innerHTML = `
+                <div class="narrative-influence">
+                    <div class="row"><span class="label">玩家影响度</span><span class="value">${inf}</span></div>
+                    <div class="bond-bar"><div class="bond-fill pos" style="width:${pct}%"></div></div>
+                    <div class="text-block">${nextTier ? `距下一世界线分岔阈值 ${nextTier}（偏离度越线将自动派生新叙事层）` : `已达最高分岔阈值 ${refTier}，可继续游玩衍生线`}</div>
+                </div>
+                <div class="narrative-layers">${layerCards}</div>`;
+            break;
+        }
     }
 }
 
@@ -1467,7 +1616,8 @@ export function highlightBanned(html, hits) {
  * - 高亮不会破坏已插入的 <br>，也不会互相嵌套（highlightTerms 防嵌套）。
  */
 export function renderNarrative(text, isWarning, bannedHits) {
-    if (isWarning) return escapeHtml(text || "");
+    text = sanitizeLLMText(text || "");
+    if (isWarning) return escapeHtml(text);
     const blocks = (text || "")
         .split(/\n{2,}/)
         .map(b => b.trim())
@@ -1544,13 +1694,60 @@ export function renderLog(reset) {
     log.scrollTop = log.scrollHeight;
 }
 
-// ★ B2：渲染「本回合变化」块（叙事+氛围之后）。无变化时返回空字符串。
+// ★ docs/70：渲染「本回合变化」块（叙事+氛围之后）。
+// - 默认折叠（<details> 不带 open 属性）：玩家点 summary 才展开；
+// - 按类别分组，单类最多 6 条，超出显示「…另有 N 项未列出」；
+// - 整轮无任何变化时返回空串，区块完全不渲染（不占界面）。
 export function renderTurnChanges(entry) {
-    const lines = formatStateChanges(entry, S.currentWorld);
-    if (!lines.length) return "";
-    return `<div class="turn-changes"><div class="turn-changes-title">本回合变化</div>` +
-        lines.map(l => `<div class="turn-change-item">${escapeHtml(l)}</div>`).join("") +
-        `</div>`;
+    const structured = formatStateChangesStructured(entry, S.currentWorld);
+    // ★ docs/74：技能升星挂在本回合 entry（引擎确定性追踪，独立于 LLM state_changes），一并进「本回合变化」
+    if (entry && Array.isArray(entry.skill_growth_events)) {
+        for (const g of entry.skill_growth_events) {
+            if (g && g.type === "skill_up") {
+                structured.push({ cat: "技能", text: `★ ${g.name} 升星（${g.oldStars}★→${g.newStars}★）` });
+            }
+        }
+    }
+    // ★ docs/75：关系升级挂在本回合 entry（引擎确定性追踪，独立于 LLM state_changes），一并进「本回合变化」
+    if (entry && Array.isArray(entry.relationship_events)) {
+        for (const g of entry.relationship_events) {
+            if (g && g.type === "rel_upgrade") {
+                const tiers = getTiers(S.currentWorld);
+                const from = tiers[g.fromTier] || "?";
+                const to = tiers[g.toTier] || "?";
+                structured.push({ cat: "关系", text: `↑ 与 ${g.npc} 关系升级（${from}→${to}）` });
+            }
+        }
+    }
+    // ★ docs/76：影响度/分岔挂在本回合 entry（引擎确定性追踪），一并进「本回合变化」
+    if (entry && Array.isArray(entry.influence_events)) {
+        for (const ev of entry.influence_events) {
+            if (ev && ev.type === "influence_tier") {
+                structured.push({ cat: "世界", text: `🌊 影响度 +${ev.added}（当前 ${ev.influence}）` });
+            } else if (ev && ev.type === "layer_fork") {
+                const label = (S.gameState && S.gameState.narrative_layers && S.gameState.narrative_layers[ev.layerId] && S.gameState.narrative_layers[ev.layerId].label) || ev.layerId || "新世界线";
+                structured.push({ cat: "世界", text: `⚡ 世界线分岔：衍生「${label}」` });
+            }
+        }
+    }
+    if (!structured.length) return "";
+    const groups = new Map();
+    for (const it of structured) {
+        if (!groups.has(it.cat)) groups.set(it.cat, []);
+        groups.get(it.cat).push(it.text);
+    }
+    const catHtml = [];
+    for (const [cat, texts] of groups) {
+        let body = texts;
+        let extra = "";
+        if (texts.length > 6) {
+            body = texts.slice(0, 6);
+            extra = `<div class="turn-change-item tc-more">…另有 ${texts.length - 6} 项未列出</div>`;
+        }
+        const items = body.map(t => `<div class="turn-change-item">${escapeHtml(t)}</div>`).join("") + extra;
+        catHtml.push(`<div class="tc-cat"><span class="tc-cat-name">${escapeHtml(cat)}</span>${items}</div>`);
+    }
+    return `<details class="turn-changes"><summary>📊 本回合变化（${structured.length} 项）</summary>${catHtml.join("")}</details>`;
 }
 
 // ★ P0：阅读速度 → 打字机延迟表（instant=null 表示跳过逐字动画直接定稿）
@@ -1920,6 +2117,65 @@ export function renderEndingTracker() {
 export function showEndingTracker() {
     renderEndingTracker();
     showModal("endingTrackerModal");
+}
+
+// ★ docs/74：技能升星「成长事件 banner」——方案 B：非阻塞独立卡片，引擎确定性呈现，不依赖 AI 临场发挥。
+// 数据来自本回合 entry 的 skill_growth_events（applyStateChanges 推入、processTurn 定稿时挂上）；点 ✕ 即走，不挡叙事。
+export function renderSkillGrowthBanner(entry) {
+    const el = document.getElementById("skillGrowthBanner");
+    if (!el) return;
+    const events = (entry && Array.isArray(entry.skill_growth_events)) ? entry.skill_growth_events : [];
+    const ups = events.filter(g => g && g.type === "skill_up");
+    if (!ups.length) { el.classList.remove("show"); el.innerHTML = ""; return; }
+    const lines = ups.map(g => {
+        const before = "★".repeat(Math.max(0, g.oldStars)) || "—";
+        const after = "★".repeat(Math.max(0, g.newStars)) || "—";
+        return `<div class="sgb-line">★ <b>${escapeHtml(g.name)}</b> 升星 <span class="sgb-stars">${before}</span> → <span class="sgb-stars sgb-up">${after}</span></div>`;
+    }).join("");
+    el.innerHTML = `<div class="sgb-head">🌟 技能成长</div>${lines}<button class="sgb-close" data-action="dismissSkillGrowth" title="收起">✕</button>`;
+    el.classList.add("show");
+}
+
+// ★ docs/75：关系升级「关系门控 banner」——方案 B：非阻塞独立卡片，引擎确定性呈现，不依赖 AI 临场发挥。
+// 数据来自本回合 entry 的 relationship_events（applyStateChanges 推入、processTurn 定稿时挂上）；点 ✕ 即走，不挡叙事。
+// 主动升级（UI 点击）也复用本函数，传入合成 entry { relationship_events: [ev] }。
+export function renderRelationshipBanner(entry) {
+    const el = document.getElementById("relUpgradeBanner");
+    if (!el) return;
+    const events = (entry && Array.isArray(entry.relationship_events)) ? entry.relationship_events : [];
+    const ups = events.filter(g => g && g.type === "rel_upgrade");
+    if (!ups.length) { el.classList.remove("show"); el.innerHTML = ""; return; }
+    const tiers = getTiers(S.currentWorld);
+    const lines = ups.map(g => {
+        const from = tiers[g.fromTier] || "?";
+        const to = tiers[g.toTier] || "?";
+        return `<div class="rub-line">↑ 与 <b>${escapeHtml(g.npc)}</b> 关系：<span class="rub-from">${escapeHtml(from)}</span> → <span class="rub-to">${escapeHtml(to)}</span></div>`;
+    }).join("");
+    el.innerHTML = `<div class="rub-head">💞 关系升级</div>${lines}<button class="rub-close" data-action="dismissRelUpgrade" title="收起">✕</button>`;
+    el.classList.add("show");
+}
+
+// ★ docs/76：影响度/分岔「banner」——方案 B：非阻塞独立卡片，引擎确定性呈现，不依赖 AI 临场发挥。
+// 数据来自 S.gameState.pendingInfluenceEvents（applyStateChanges 推入、processTurn 定稿时渲染后清空）。点 ✕ 即走，不挡叙事。
+export function renderInfluenceBanner() {
+    const el = document.getElementById("influenceBanner");
+    if (!el) return;
+    const s = S.gameState;
+    const events = (s && Array.isArray(s.pendingInfluenceEvents)) ? s.pendingInfluenceEvents : [];
+    if (!events.length) { el.classList.remove("show"); el.innerHTML = ""; return; }
+    const lines = events.map(ev => {
+        if (ev && ev.type === "layer_fork") {
+            const label = (s.narrative_layers && s.narrative_layers[ev.layerId] && s.narrative_layers[ev.layerId].label) || ev.layerId || "新世界线";
+            return `<div class="ib-line">⚡ 世界线分岔：衍生出「<b>${escapeHtml(label)}</b>」（影响度 ${ev.influence}）</div>`;
+        }
+        if (ev && ev.type === "influence_tier") {
+            return `<div class="ib-line">🌊 影响度 +${ev.added}（当前 ${ev.influence}）</div>`;
+        }
+        return "";
+    }).filter(Boolean).join("");
+    if (!lines) { el.classList.remove("show"); el.innerHTML = ""; return; }
+    el.innerHTML = `<div class="ib-head">🌀 平行叙事层</div>${lines}<button class="ib-close" data-action="dismissInfluence" title="收起">✕</button>`;
+    el.classList.add("show");
 }
 
 export function showToast(msg, type = "", duration = 2000) {

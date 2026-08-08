@@ -1240,6 +1240,66 @@
         .toast.success { border-color: var(--success); }
         .toast.error { border-color: var(--danger); }
 
+        /* ★ docs/74：技能升星 banner（非阻塞独立卡片，引擎确定性呈现） */
+        .skill-growth-banner { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%) translateY(20px); z-index: 600;
+            min-width: 240px; max-width: 360px; background: var(--bg-panel, #fff); border: 1px solid var(--accent, #6c5ce7);
+            border-radius: 12px; box-shadow: var(--shadow-modal); padding: 12px 14px; opacity: 0; pointer-events: none;
+            transition: opacity .25s ease, transform .25s ease; }
+        .skill-growth-banner.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+        .skill-growth-banner .sgb-head { font-weight: 700; margin-bottom: 6px; color: var(--accent, #6c5ce7); font-size: 14px; }
+        .skill-growth-banner .sgb-line { font-size: 13px; line-height: 1.7; color: var(--text, #222); }
+        .skill-growth-banner .sgb-stars { letter-spacing: 1px; color: var(--muted, #888); }
+        .skill-growth-banner .sgb-stars.sgb-up { color: #e6a700; }
+        .skill-growth-banner .sgb-close { position: absolute; top: 8px; right: 10px; background: none; border: none;
+            color: var(--muted, #888); cursor: pointer; font-size: 14px; line-height: 1; }
+        .skill-growth-banner .sgb-close:hover { color: var(--danger, #c0392b); }
+
+        /* ===== 关系升级 banner（docs/75，方案 B 非阻塞卡片，镜像 skill-growth-banner） ===== */
+        .rel-upgrade-banner { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%) translateY(20px); z-index: 600;
+            min-width: 240px; max-width: 360px; background: var(--bg-panel, #fff); border: 1px solid #e84393;
+            border-radius: 12px; box-shadow: var(--shadow-modal); padding: 12px 14px; opacity: 0; pointer-events: none;
+            transition: opacity .25s ease, transform .25s ease; }
+        .rel-upgrade-banner.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+        .rel-upgrade-banner .rub-head { font-weight: 700; margin-bottom: 6px; color: #e84393; font-size: 14px; }
+        .rel-upgrade-banner .rub-line { font-size: 13px; line-height: 1.7; color: var(--text, #222); }
+        .rel-upgrade-banner .rub-from { color: var(--muted, #888); }
+        .rel-upgrade-banner .rub-to { color: #e84393; font-weight: 700; }
+        .rel-upgrade-banner .rub-close { position: absolute; top: 8px; right: 10px; background: none; border: none;
+            color: var(--muted, #888); cursor: pointer; font-size: 14px; line-height: 1; }
+        .rel-upgrade-banner .rub-close:hover { color: var(--danger, #c0392b); }
+
+        /* ===== 关系页签：等级标签 + 主动升级按钮（docs/75） ===== */
+        .bond-tier { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+            font-size: 11px; font-weight: 600; color: #fff; background: linear-gradient(135deg, #e84393, #fd79a8); vertical-align: middle; }
+        .bond-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+        .bond-upgrade-btn { align-self: flex-start; padding: 4px 12px; border: 1px solid #e84393; border-radius: 8px;
+            background: #fff0f6; color: #e84393; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s ease; }
+        .bond-upgrade-btn:hover { background: #e84393; color: #fff; }
+
+        /* ===== 影响度/分岔 banner（docs/76，方案 B 非阻塞卡片，镜像 rel-upgrade-banner） ===== */
+        .influence-banner { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%) translateY(20px); z-index: 600;
+            min-width: 240px; max-width: 380px; background: var(--bg-panel, #fff); border: 1px solid #6c5ce7;
+            border-radius: 12px; box-shadow: var(--shadow-modal); padding: 12px 14px; opacity: 0; pointer-events: none;
+            transition: opacity .25s ease, transform .25s ease; }
+        .influence-banner.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+        .influence-banner .ib-head { font-weight: 700; margin-bottom: 6px; color: #6c5ce7; font-size: 14px; }
+        .influence-banner .ib-line { font-size: 13px; line-height: 1.7; color: var(--text, #222); }
+        .influence-banner .ib-close { position: absolute; top: 8px; right: 10px; background: none; border: none;
+            color: var(--muted, #888); cursor: pointer; font-size: 14px; line-height: 1; }
+        .influence-banner .ib-close:hover { color: var(--danger, #c0392b); }
+
+        /* ===== 世界线页签：影响度条 + 叙事层卡片（docs/76） ===== */
+        .narrative-influence { background: #f3f0ff; border: 1px solid #d6ccf7; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+        .narrative-influence .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .narrative-influence .label { font-size: 13px; font-weight: 600; color: #6c5ce7; }
+        .narrative-influence .value { font-size: 15px; font-weight: 700; color: #4834b0; }
+        .narrative-influence .bond-bar { margin: 4px 0 8px; }
+        .narrative-influence .text-block { font-size: 12px; color: var(--muted, #666); line-height: 1.6; }
+        .narrative-layers { display: flex; flex-direction: column; gap: 10px; }
+        .narrative-layers .status-card.bond-key { border-color: #6c5ce7; box-shadow: 0 0 0 1px #6c5ce7 inset; }
+        .narrative-layers .bond-chat-btn { border-color: #6c5ce7; background: #f3f0ff; color: #6c5ce7; align-self: flex-start; }
+        .narrative-layers .bond-chat-btn:hover { background: #6c5ce7; color: #fff; }
+
         /* ===== 屏幕层 · 游戏界面（氛围背景 + 浮层卡片） ===== */
         /* 背景透明，复用 body 渐变 + 全局 #bgMotes 光点（与其它屏统一，避免盖住底层光点） */
         .game-screen { color: var(--text); }
@@ -3229,6 +3289,21 @@ html[data-theme="light"] .char-card select {
 .contact-channel-row input { flex: 1; padding: 5px 8px; border: 1px solid var(--border, #e3e3e8); border-radius: 6px; font-size: 13px; }
 .contact-channel-row select { padding: 5px; border: 1px solid var(--border, #e3e3e8); border-radius: 6px; font-size: 13px; }
 .contact-channel-row button { background: none; border: none; color: var(--danger, #c0392b); cursor: pointer; font-size: 14px; }
+/* ★ docs/70/73：随机事件池 + 条件编辑器 */
+.random-event-row { border: 1px solid var(--border, #e3e3e8); border-radius: 8px; padding: 8px; margin-bottom: 8px; background: var(--panel, #fafafa); }
+.random-event-row .re-main { display: flex; align-items: center; gap: 6px; }
+.random-event-row .re-title { flex: 2; padding: 5px 8px; border: 1px solid var(--border, #e3e3e8); border-radius: 6px; font-size: 13px; }
+.random-event-row .re-hint { flex: 3; padding: 5px 8px; border: 1px solid var(--border, #e3e3e8); border-radius: 6px; font-size: 13px; }
+.random-event-row .re-del { background: none; border: none; color: var(--danger, #c0392b); cursor: pointer; font-size: 14px; }
+.re-conds { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border, #e3e3e8); }
+.re-cond-head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.re-cond-label { font-size: 13px; color: var(--muted, #888); }
+.re-cond-list { display: flex; flex-direction: column; gap: 6px; }
+.re-cond-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.re-cond-row select, .re-cond-row input { font-size: 13px; padding: 4px 6px; border: 1px solid var(--border, #e3e3e8); border-radius: 6px; }
+.re-cond-row select.re-cond-type { min-width: 150px; }
+.re-cond-del { background: none; border: none; color: var(--danger, #c0392b); cursor: pointer; font-size: 13px; }
+.re-cond-empty { font-size: 12px; margin-top: 4px; }
 .radio-inline { margin-right: 14px; font-size: 13px; }
 
 /* ===== docs/54：规则可视化与结局系统 ===== */
@@ -3335,3 +3410,50 @@ html[data-theme="light"] .char-card select {
 .wv-item.wv-info { background: rgba(70,130,180,.08); color: #3a6ea5; }
 .wv-enable-btn { flex: 0 0 auto; font-size: 11.5px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--primary); background: transparent; color: var(--primary); cursor: pointer; white-space: nowrap; }
 .wv-enable-btn:hover { background: rgba(var(--accent-rgb), .12); }
+
+/* ★ docs/70：本回合变化块（默认折叠 <details>） */
+.turn-changes { margin: 8px 0 2px; border: 1px solid var(--card-border); border-radius: 10px; background: var(--bg-secondary); overflow: hidden; }
+.turn-changes > summary { cursor: pointer; list-style: none; padding: 8px 12px; font-size: 13px; font-weight: 600; color: var(--text); user-select: none; }
+.turn-changes > summary::-webkit-details-marker { display: none; }
+.turn-changes > summary::before { content: "▸"; display: inline-block; margin-right: 6px; transition: transform .15s ease; color: var(--primary); }
+.turn-changes[open] > summary::before { transform: rotate(90deg); }
+.turn-changes[open] > summary { border-bottom: 1px solid var(--card-border); }
+.tc-cat { padding: 6px 12px 8px; }
+.tc-cat-name { display: inline-block; font-size: 11px; font-weight: 700; color: var(--primary); background: rgba(var(--accent-rgb), .12); border-radius: 6px; padding: 1px 7px; margin-right: 6px; }
+.turn-change-item { font-size: 12.5px; line-height: 1.6; color: var(--text); padding: 2px 0 2px 14px; position: relative; }
+.turn-change-item::before { content: "·"; position: absolute; left: 2px; color: var(--text-tertiary, #999); }
+.turn-change-item.tc-more { color: var(--text-secondary); font-style: italic; }
+.turn-change-item.tc-more::before { content: ""; }
+
+/* ★ docs/71：状态面板「人设校准」按钮 + 人物卡「情境人格切面」编辑器 */
+.status-reanchor-btn {
+    margin-left: auto;
+    border: 1px solid rgba(var(--accent-rgb), .4);
+    background: rgba(var(--accent-rgb), .1);
+    color: var(--primary);
+    border-radius: 7px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.status-reanchor-btn:hover { background: rgba(var(--accent-rgb), .2); }
+.char-modes {
+    margin-top: 8px;
+    padding: 10px;
+    border: 1px dashed rgba(var(--accent-rgb), .35);
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb), .05);
+}
+.mode-row {
+    border: 1px solid rgba(var(--accent-rgb), .2);
+    border-radius: 7px;
+    padding: 8px;
+    margin-bottom: 8px;
+    background: var(--surface, #fff);
+}
+.mode-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.mode-ctype { flex: 0 0 auto; max-width: 130px; }
+.mode-cval { flex: 1 1 140px; min-width: 100px; }
+.mode-alter { font-size: 12px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.mode-list { margin-bottom: 6px; }

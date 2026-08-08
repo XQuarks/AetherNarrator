@@ -2,16 +2,20 @@
 // AetherNarrator · game.js（由 app.js 模块化拆分自动生成）
 // ============================================================
 import { S } from "./store.js";
+import { applySkillResult, ensureGrowthEntry } from "./skill-growth.js"; // ★ docs/74：技能成长容器——确定性判定引擎
+import { nextGate, isEligible, applyRelationshipUpgrade } from "./relationship-gating.js"; // ★ docs/75：关系升级门控——确定性判定引擎
+import { accumulateInfluence, crossedInfluenceTier, getInfluenceWeights, getInfluenceThresholds, getMaxLayers } from "./influence.js"; // ★ docs/76：玩家影响度判定引擎
+import { ensureNarrativeLayers, forkNarrativeLayer, injectCrossLayerInfluence, saveActiveLayer, switchNarrativeLayer as switchNarrativeLayerState, layerCount } from "./narrative-layers.js"; // ★ docs/76：平行时间轴叙事层引擎
 import { DEFAULT_PERIOD_ORDER, LINK_RELATION_LABELS, STORAGE_KEYS, getActiveConditionTags, getBannedConceptRules, getBannedConcepts, ensureWorldCanon, resolveCanonContext, applyConsistencyPack, computeVariableUpdates, computeBondUpdates, applyLoreDelta } from "./store.js";
-import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, extractNarrativeText, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeWorldConfig, validateStateShape, logError, removeSentenceWithTerm } from "./utils.js";
+import { pickWorldTags, capSource, deepClone, defaultInitialState, defaultWorldSchema, escapeHtml, extractNarrativeText, getWorldSchema, isNonStoryResponse, sanitizeAtmosphere, sanitizeLLMText, sanitizeWorldConfig, validateStateShape, logError, removeSentenceWithTerm } from "./utils.js";
 import { getPeriodLabel, getTemperature, getTimeConfig, formatWorldTime, formatTimeLabel, formatDeadlineLabel, stepOf } from "./theme.js";
 import { ensureCurrentDate, compareCalendar, advanceCalendarTime, validateStartDate, applySyncRules, calendarDayIndex } from "./calendar.js";
 import { saveSaves, saveState, saveWorlds, clearCurrentRunState, importWorldPack } from "./storage.js";
 import { clearSourceFile } from "./files.js";
 import { addBehaviorRecords, ensureLoreEmbeddings, retrieve, summarizeFactsFromChanges } from "./rag.js";
-import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory, styleToTemperature } from "./prompt.js";
+import { detectPromptInjection, invalidateSystemPromptCache, pushChatTurn, rebuildChatFromHistory, rebuildSummaryFromHistory, styleToTemperature, detectOocCorrection } from "./prompt.js";
 import { callLLM, callWorldGenerationLLM, extractLoreFromSource, callLoreRevisionLLM, judgeWorldviewConsistency, extractPartialNarrative, generateConsistencyPack, predictBranches, aiGenerateDaily } from "./llm.js";
-import { checkDeathBanner, closeModal, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, renderEndingTracker, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry, collectStylePrefs } from "./render.js";
+import { checkDeathBanner, closeModal, hideLoading, renderChoices, renderLog, renderSaveDetail, renderSaveList, renderStatusPanel, renderWorldList, restoreLastChoices, showGameOver, renderEndingTracker, showLoading, showModal, showScreen, showToast, skipTypewriter, startTypewriter, stopTypewriter, updateGameDayInfo, updateInputState, isSourceFileUploaded, updateLiveNarrative, replaceEntryDOM, removeLogEntry, collectStylePrefs, renderSkillGrowthBanner, renderRelationshipBanner, renderInfluenceBanner } from "./render.js";
 // ★ W2-Style：读取创建向导的 style_preset / 模块开关 / 时间偏好
 import { getStylePresetFromWizard, getWizardModuleSettings, getWizardTimePreset, getWizardTimeConfig, buildTimeConfigPrompt, syncPovHighlight } from "./wizard-editor.js";
 // ★ docs/60：读取创建向导里玩家预设的叙事结构化容器
@@ -503,6 +507,137 @@ export function saveWorldHistory(worldId) {
     showToast("史实参考设置已保存", "success");
 }
 
+// ★ docs/70：保存「随机事件」设置（事件池 + 间隔），从世界详情的随机事件页签读回 world.random_events / world.random_event_interval。
+// 仅当模块开启且事件池非空时引擎才会真正触发（getRandomEventHint 与 modules.promptFragment 双重门禁），本函数只负责持久化创作者配置。
+export function saveWorldRandomEvents(worldId) {
+    const w = S.worlds.find(x => x.id === worldId);
+    if (!w) { showToast("未找到该世界", "error"); return; }
+    const ivEl = document.querySelector("#detailWorldBody #randomEventInterval");
+    let iv = ivEl ? parseInt(ivEl.value, 10) : 3;
+    if (!Number.isFinite(iv) || iv < 1) iv = 1;
+    if (iv > 20) iv = 20;
+    const rows = document.querySelectorAll("#detailWorldBody .random-event-row");
+    const pool = [];
+    rows.forEach(row => {
+        const tEl = row.querySelector(".re-title");
+        const hEl = row.querySelector(".re-hint");
+        const title = tEl ? tEl.value.trim() : "";
+        if (!title) return; // 标题为空跳过
+        const hint = hEl ? hEl.value.trim() : "";
+        // ★ docs/73：解析条件组合与条件列表
+        const modeEl = row.querySelector(".re-mode");
+        const mode = modeEl && modeEl.value === "any" ? "any" : "all";
+        const condRows = row.querySelectorAll(".re-cond-row");
+        const conditions = [];
+        condRows.forEach(cr => {
+            const typeEl = cr.querySelector(".re-cond-type");
+            const valEl = cr.querySelector(".re-cond-value");
+            const type = typeEl ? typeEl.value : "";
+            const value = valEl ? valEl.value.trim() : "";
+            if (!type || !value) return; // 类型或值为空跳过该条件
+            const cond = { type, value };
+            if (type === "bond") {
+                const npcEl = cr.querySelector(".re-cond-npc");
+                const npc = npcEl ? npcEl.value.trim() : "";
+                if (!npc) return; // 好感条件必须填角色名
+                cond.npc = npc;
+                cond.op = opOf(cr);
+            } else if (type === "story_progress") {
+                cond.op = opOf(cr);
+            }
+            conditions.push(cond);
+        });
+        const ev = { title, hint };
+        if (conditions.length) { ev.condition_mode = mode; ev.conditions = conditions; }
+        pool.push(ev);
+    });
+    w.random_event_interval = iv;
+    w.random_events = pool;
+    saveWorlds();
+    invalidateSystemPromptCache(); // 事件池变化影响 system 提示（promptFragment 依赖 random_events），失效缓存以便重建
+    showToast("随机事件设置已保存", "success");
+}
+
+// ★ docs/73：取条件行的比较算子（数值类条件用）
+function opOf(cr) {
+    const opEl = cr.querySelector(".re-cond-op");
+    const v = opEl ? opEl.value : ">=";
+    return (v === "<=" || v === "==" || v === ">=") ? v : ">=";
+}
+
+// ★ docs/70/73：随机事件的增删行（DOM 即时操作，保存时由 saveWorldRandomEvents 统一读回）
+export function addRandomEventRow() {
+    const list = document.getElementById("randomEventList");
+    if (!list) return;
+    const row = document.createElement("div");
+    row.className = "random-event-row";
+    row.innerHTML = `
+        <div class="re-main">
+            <input class="re-title" placeholder="事件标题，如：走廊遇故人">
+            <input class="re-cond-hint re-hint" placeholder="提示（可选），如：一位旧识叫住你">
+            <button class="re-del" data-action="removeRandomEvent">✕</button>
+        </div>
+        <div class="re-conds">
+            <div class="re-cond-head">
+                <span class="re-cond-label">条件组合</span>
+                <select class="re-mode">
+                    <option value="all" selected>全部满足（AND）</option>
+                    <option value="any">任一满足（OR）</option>
+                </select>
+                <button class="btn-secondary-sm re-add-cond" data-action="addRandomEventCond">+ 添加条件</button>
+            </div>
+            <div class="re-cond-list"></div>
+            <div class="re-cond-empty muted">无条件 = 任何节奏回合都可能被抽中（向后兼容）</div>
+        </div>`;
+    list.appendChild(row);
+}
+
+// ★ docs/73：为某事件行新增一条条件行（按当前世界模块开关禁用依赖项）
+export function addRandomEventCondRow(btn) {
+    const holder = btn && btn.closest ? btn.closest(".re-conds") : null;
+    const list = holder ? holder.querySelector(".re-cond-list") : null;
+    if (!list) return;
+    const world = S.currentWorld || {};
+    const affOn = isModuleEnabled(world, "affinity");
+    const evOn = isModuleEnabled(world, "events");
+    const loreOn = isModuleEnabled(world, "lore");
+    const opt = (val, label, depOn) => `<option value="${val}"${depOn === false ? " disabled" : ""}>${label}${depOn === false ? "（需开启对应模块）" : ""}</option>`;
+    const row = document.createElement("div");
+    row.className = "re-cond-row";
+    row.setAttribute("data-cond", "");
+    row.innerHTML = `
+        <select class="re-cond-type">
+            ${opt("location", "当前地点")}
+            ${opt("story_progress", "剧情阶段")}
+            ${opt("bond", "角色好感", affOn)}
+            ${opt("fired", "前置·随机事件已发生")}
+            ${opt("events", "前置·支线事件已发生", evOn)}
+            ${opt("lore", "前置·知识卡已解锁", loreOn)}
+            ${opt("season", "季节")}
+            ${opt("era", "纪元")}
+        </select>
+        <input class="re-cond-npc" placeholder="角色名" style="display:none">
+        <select class="re-cond-op" style="display:none">
+            <option value=">=">≥</option>
+            <option value="<=">≤</option>
+            <option value="==">=</option>
+        </select>
+        <input class="re-cond-value" placeholder="值（地点名/阶段数/事件标题…）">
+        <button class="re-cond-del" data-action="removeRandomEventCond">✕</button>`;
+    list.appendChild(row);
+}
+
+export function removeRandomEventRow(btn) {
+    const row = btn && btn.closest ? btn.closest(".random-event-row") : null;
+    if (row && row.parentNode) row.parentNode.removeChild(row);
+}
+
+// ★ docs/73：删除一条条件行
+export function removeRandomEventCondRow(btn) {
+    const row = btn && btn.closest ? btn.closest(".re-cond-row") : null;
+    if (row && row.parentNode) row.parentNode.removeChild(row);
+}
+
 // ============================================================
 // ★ docs/53：NPC 私聊 / 世界日报
 // ============================================================
@@ -731,7 +866,38 @@ export function restToNextDay() {
     showToast("已休息到次日清晨", "success");
 }
 
-// Phase 2/3 多世界/分支：手动切换时间线或分支（顶栏切换控件调用；S4 切回主线/其它分支）
+// ★ docs/75：玩家主动触发关系升级（确定性动作，不依赖 AI 临场发挥）。
+// 仅当 relationship_upgrade + affinity 均开启、且 isEligible 为真时升级；升级后即时呈现 banner 并刷新关系页签。
+// 主动升级走「合成 entry」即时弹 banner，不进回合 pending 队列，避免下回合重复弹出。
+export function upgradeRelationship(npc) {
+    if (!S.gameState || !S.currentWorld) return;
+    if (!isModuleEnabled(S.currentWorld, "relationship_upgrade") || !isModuleEnabled(S.currentWorld, "affinity")) return;
+    if (!npc) return;
+    const r = applyRelationshipUpgrade(S.currentWorld, S.gameState, npc);
+    if (!r.ok) { showToast("当前尚不满足升级条件", "warn"); return; }
+    renderRelationshipBanner({ relationship_events: [r.event] });
+    S.gameState.pendingRelationshipEvents = []; // 主动升级已即时呈现，清队列防下回合重复
+    if (typeof renderStatusPanel === "function") renderStatusPanel(S.currentStatusTab);
+    // ★ 性能：createOrUpdateSave() 内部已统一持久化（当前存档 + 存档槽）
+    createOrUpdateSave();
+    showToast("关系升级！", "success");
+}
+
+// ★ docs/76：玩家主动切换平行叙事层（确定性动作；UI 世界线页签的「切换到此线」按钮调用）
+export function switchNarrativeLayerAction(id) {
+    if (!S.gameState || !S.currentWorld) return;
+    if (!isModuleEnabled(S.currentWorld, "parallel_narrative")) return;
+    if (!id) return;
+    const ok = switchNarrativeLayerState(S.gameState, id);
+    if (!ok) { showToast("无法切换到该世界线", "warn"); return; }
+    invalidateSystemPromptCache();
+    updateGameDayInfo();
+    if (typeof renderStatusPanel === "function") renderStatusPanel(S.currentStatusTab);
+    // ★ 性能：createOrUpdateSave() 内部已统一持久化（当前存档 + 存档槽）
+    createOrUpdateSave();
+    const label = (S.gameState.narrative_layers && S.gameState.narrative_layers[id] && S.gameState.narrative_layers[id].label) || id;
+    showToast("已切换到世界线：" + label, "success");
+}
 export function switchTimeline(id) {
     if (!S.gameState || !S.currentWorld) return;
     const tc = getTimeConfig();
@@ -780,6 +946,20 @@ function daysAdvancedSince(prev, cur, tc) {
     return calendarDayIndex(cur, mode, custom) - calendarDayIndex(prev, mode, custom);
 }
 
+// ★ A6 / docs/71：标签增量运算（纯函数，可在 Node 单测）。
+// 兼容 {add:[...],remove:[...]} 与纯数组（视为 add）；目标非数组则忽略。
+export function applyTagOpTo(target, op) {
+    if (!Array.isArray(target)) return target;
+    const normTagOp = (o) => Array.isArray(o) ? { add: o } : (o && typeof o === "object" ? o : null);
+    const o = normTagOp(op);
+    if (!o) return target;
+    if (Array.isArray(o.add)) for (const t of o.add) if (t != null && !target.includes(t)) target.push(t);
+    if (Array.isArray(o.remove)) {
+        for (const t of o.remove) { const i = target.indexOf(t); if (i >= 0) target.splice(i, 1); }
+    }
+    return target;
+}
+
 export function applyStateChanges(changes) {
     if (!changes) return;
     // ★ P1.2.6: 事务保护——先在副本上应用，任何中途异常都回滚 gameState，绝不保留半套状态
@@ -789,6 +969,8 @@ export function applyStateChanges(changes) {
     let backup = null;
     try {
     const s = S.gameState;
+    // ★ docs/76：捕获本回合「剧情进度」起点，供影响度跨阶解锁 lore 计数
+    const startSp = (typeof s.story_progress === "number") ? s.story_progress : 1;
     // ★ 修复：AI 生成世界可能缺 attributes/relationships/skills 字段，
     // 下方 s.attributes[k]=v 等写入前兜底为对象，否则抛 "Cannot set properties of undefined"
     if (s) {
@@ -811,23 +993,16 @@ export function applyStateChanges(changes) {
     // changes.tags / changes.present_npcs 支持 {add:[...], remove:[...]} 增量操作。
     // 标签变化会改变「仍被禁用的概念」集合，故失效 system prompt 缓存以便按新解锁状态重建禁律。
     if (!backup) backup = deepClone(S.gameState); // ★ P1 性能：首次变更前才克隆整份状态快照（此后异常可回滚）
-    if (changes.tags || changes.present_npcs || changes.revealed_locations) {
+    if (changes.tags || changes.present_npcs || changes.revealed_locations || changes.situation_tags) {
         if (!Array.isArray(s.tags)) s.tags = [];
         if (!Array.isArray(s.present_npcs)) s.present_npcs = [];
         if (!Array.isArray(s.revealed_locations)) s.revealed_locations = [];
-        // 兼容两种格式：{add:[...],remove:[...]} 或纯数组（视为 add）
-        const normTagOp = (op) => Array.isArray(op) ? { add: op } : (op && typeof op === "object" ? op : null);
-        const applyTagOp = (target, op) => {
-            const o = normTagOp(op);
-            if (!o) return;
-            if (Array.isArray(o.add)) for (const t of o.add) if (!target.includes(t)) target.push(t);
-            if (Array.isArray(o.remove)) {
-                for (const t of o.remove) { const i = target.indexOf(t); if (i >= 0) target.splice(i, 1); }
-            }
-        };
-        applyTagOp(s.tags, changes.tags);
-        applyTagOp(s.present_npcs, changes.present_npcs);
-        applyTagOp(s.revealed_locations, changes.revealed_locations);
+        if (!Array.isArray(s.situation_tags)) s.situation_tags = [];
+        // 兼容两种格式：{add:[...],remove:[...]} 或纯数组（视为 add）；纯函数见 applyTagOpTo
+        applyTagOpTo(s.tags, changes.tags);
+        applyTagOpTo(s.present_npcs, changes.present_npcs);
+        applyTagOpTo(s.revealed_locations, changes.revealed_locations);
+        applyTagOpTo(s.situation_tags, changes.situation_tags);
         invalidateSystemPromptCache();
         // ★ P0 性能：不再在此存盘——持久化统一由调用方（processTurn / 手动时间穿越）在回合末经 createOrUpdateSave() 完成，避免每回合重复写盘。
     }
@@ -915,16 +1090,73 @@ export function applyStateChanges(changes) {
             })));
         }
     }
-    // ★ C1：skills 模块关闭时不应用技能变化
-    if (changes.skills && isModuleEnabled(S.currentWorld, "skills")) {
-        for (const [k, v] of Object.entries(changes.skills)) {
-            if (typeof v === "string" && v.trim() !== "") {
-                s.skills[k] = v;
-            } else if (typeof v === "number") {
-                // 数字只作数值提示，绝不覆盖已有文字描述（修复类型污染 #7）
-                const prev = s.skills[k];
-                if (typeof prev !== "string") s.skills[k] = `数值约 ${v}`;
-                // 若已是文字描述则保留，忽略该数字
+    // ★ docs/75：关系升级门控（gated by relationship_upgrade 且 affinity 均开启）。
+    // 仅「自动门控」（gate.active === false）在回合结算时确定性升级；主动门控（active:true）由玩家 UI 触发。
+    // 升级资格以 isEligible 双保险（阈值 + 节点），绝不信任 AI 自报等级。
+    if (S.currentWorld && isModuleEnabled(S.currentWorld, "relationship_upgrade") && isModuleEnabled(S.currentWorld, "affinity")) {
+        if (!Array.isArray(s.pendingRelationshipEvents)) s.pendingRelationshipEvents = [];
+        for (const npc of Object.keys(s.bonds || {})) {
+            const gate = nextGate(S.currentWorld, s, npc);
+            if (gate && gate.active === false && isEligible(S.currentWorld, s, npc)) {
+                applyRelationshipUpgrade(S.currentWorld, s, npc);
+            }
+        }
+    }
+    // ★ docs/76：玩家影响度 + 平行叙事层（gated by parallel_narrative 模块，defaultEnabled:false）。
+    // 影响度由本回合 state_changes 增量确定性加权累加；偏离度越线自动 fork 新叙事层（蝴蝶效应）。
+    // 绝不信任 AI 自报影响度；跨层切换/分岔由确定性动作与回合结算阈值触发。
+    if (S.currentWorld && isModuleEnabled(S.currentWorld, "parallel_narrative")) {
+        const weights = getInfluenceWeights(S.currentWorld);
+        ensureNarrativeLayers(s); // 懒初始化主线（基准=当前状态）
+        // 本回合影响度增量（relUpgrades 取本回合关系升阶数；loreUnlocked 取剧情进度跨阶解锁数）
+        const relUp = (Array.isArray(s.pendingRelationshipEvents) ? s.pendingRelationshipEvents.length : 0);
+        const endSp = (typeof s.story_progress === "number") ? s.story_progress : 1;
+        let loreUnlocked = 0;
+        const kb = (S.currentWorld && Array.isArray(S.currentWorld.lore_kb)) ? S.currentWorld.lore_kb : [];
+        for (const card of kb) {
+            const stage = (card && typeof card.unlock_stage === "number") ? card.unlock_stage : 1;
+            if (stage > startSp && stage <= endSp) loreUnlocked++;
+        }
+        const inc = accumulateInfluence(changes, weights, { relUpgrades: relUp, loreUnlocked });
+        s.player_influence = (typeof s.player_influence === "number" ? s.player_influence : 0) + inc;
+        // 偏离度越线 → 自动 fork（受 max_layers 封顶，档位消费一次防重复派生）
+        s.consumed_influence_tiers = Array.isArray(s.consumed_influence_tiers) ? s.consumed_influence_tiers : [];
+        const tier = crossedInfluenceTier(s.player_influence, getInfluenceThresholds(S.currentWorld), s.consumed_influence_tiers);
+        if (tier && layerCount(s) < getMaxLayers(S.currentWorld)) {
+            const lid = forkNarrativeLayer(s, "衍生线 " + layerCount(s));
+            injectCrossLayerInfluence(s.narrative_layers[lid], changes);
+            s.consumed_influence_tiers.push(tier);
+            s.pendingInfluenceEvents = s.pendingInfluenceEvents || [];
+            s.pendingInfluenceEvents.push({ type: "layer_fork", layerId: lid, influence: s.player_influence, tier });
+        }
+        s.pendingInfluenceEvents = s.pendingInfluenceEvents || [];
+        s.pendingInfluenceEvents.push({ type: "influence_tier", influence: s.player_influence, added: inc });
+        saveActiveLayer(s); // 每回合末持久化当前激活层进度（含本回合变化）
+    }
+    // ★ docs/74：技能成长容器（gated by skills 模块）。同时兼容两种 state_changes.skills 信封：
+    //   a) 旧式字符串描述 {名: "描述"} → 写入 s.skills 文字层（保持历史契约，不被成长引擎覆盖）
+    //   b) 新式成长信封 {名: {result:"success"|"fail"|"use"}} → 确定性累加 successCount、跨阈值升星、推入 pendingGrowthEvents
+    if (changes.skills && S.currentWorld && isModuleEnabled(S.currentWorld, "skills")) {
+        if (!s.skill_growth) s.skill_growth = {};
+        if (!Array.isArray(s.pendingGrowthEvents)) s.pendingGrowthEvents = [];
+        for (const [name, info] of Object.entries(changes.skills)) {
+            if (!name || !info) continue;
+            // a) 旧式字符串描述：直接写文字层
+            if (typeof info === "string" && info.trim() !== "") {
+                s.skills[name] = info;
+                continue;
+            }
+            // b) 新式成长信封：仅处理合法 result
+            const result = (info && typeof info === "object") ? info.result : undefined;
+            if (result !== "success" && result !== "fail" && result !== "use") continue;
+            const entry = ensureGrowthEntry(s.skill_growth, name);
+            const r = applySkillResult(entry, result);
+            s.skill_growth[name] = r.state;
+            if (r.leveledUp) {
+                s.pendingGrowthEvents.push({
+                    type: "skill_up", name,
+                    oldStars: r.oldStars, newStars: r.newStars
+                });
             }
         }
     }
@@ -1282,6 +1514,9 @@ export async function submitInput() {
     inputEl.value = "";
     inputEl.style.height = ""; // 重置多行输入框的自动增高
     renderChoices([]); // 发送时立即隐藏选项
+    // ★ docs/71：若玩家输入含人设偏离关键词，标记一次性人设校准（下一轮中部注入重锚指令）
+    const ooc = detectOocCorrection(input, S.currentWorld);
+    if (ooc) S.oocReanchor = ooc;
     await processTurn(input);
 }
 
@@ -1290,6 +1525,13 @@ export function chooseOption(index) {
     if (!choice) return;
     document.getElementById("playerInput").value = choice.text;
     // 只填入，不自动发送，方便玩家修改
+}
+
+// ★ docs/71：状态面板「人设校准」按钮——标记一次性校准，下一回合所有角色回到各自已定义切面内。
+// 与玩家输入关键词检测汇入同一机制（S.oocReanchor），由 buildAuthorNote 的 consumeOocReanchor 消费。
+export function requestOocReanchor() {
+    S.oocReanchor = { charName: null };
+    showToast("已标记「人设校准」：下一回合所有角色将回到各自已定义切面内。", "info");
 }
 
 // ===== processTurn 阶段函数（docs/34 #2：拦截记录 → 重试调用 → 状态应用 → 定稿渲染） =====
@@ -1470,7 +1712,7 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
         }
     }).catch(e => logError("worldviewJudge", e));
 
-    pendingEntry.narrative = extractNarrativeText(resp.narrative) || "（无叙事）";
+    pendingEntry.narrative = sanitizeLLMText(extractNarrativeText(resp.narrative)) || "（无叙事）";
     pendingEntry.retrieved = retrieved.map(s => s.title);
     pendingEntry.period = S.gameState.current_date.period;
     pendingEntry.day = stepOf(S.gameState.current_date);
@@ -1482,6 +1724,21 @@ function applyNormalTurn(input, resp, retrieved, pendingEntry) {
     // ★ B2：保存本回合结构化变化（变量增减摘要 + 原始 state_changes），供「本回合变化」面板渲染
     pendingEntry.varChanges = pendingVarChanges;
     pendingEntry.state_changes = resp.state_changes || {};
+    // ★ docs/74：把本回合引擎确定的技能升星事件挂到 entry（供状态栏「本回合变化」与升星 banner 呈现），并清空全局队列
+    pendingEntry.skill_growth_events = Array.isArray(S.gameState.pendingGrowthEvents) ? S.gameState.pendingGrowthEvents.slice() : [];
+    S.gameState.pendingGrowthEvents = [];
+    // ★ docs/74：升星 banner（非阻塞，确定性呈现，不依赖 AI 临场发挥）
+    renderSkillGrowthBanner(pendingEntry);
+    // ★ docs/75：关系升级事件挂到 entry（供状态栏「本回合变化」与升级 banner 呈现），并清空全局队列
+    pendingEntry.relationship_events = Array.isArray(S.gameState.pendingRelationshipEvents) ? S.gameState.pendingRelationshipEvents.slice() : [];
+    S.gameState.pendingRelationshipEvents = [];
+    // ★ docs/75：关系升级 banner（非阻塞，确定性呈现，不依赖 AI 临场发挥）
+    renderRelationshipBanner(pendingEntry);
+    // ★ docs/76：影响度/分岔事件挂到 entry（供状态栏「本回合变化」与 banner 呈现），并清空全局队列
+    pendingEntry.influence_events = Array.isArray(S.gameState.pendingInfluenceEvents) ? S.gameState.pendingInfluenceEvents.slice() : [];
+    S.gameState.pendingInfluenceEvents = [];
+    // ★ docs/76：影响度 banner（非阻塞，确定性呈现，不依赖 AI 临场发挥）
+    renderInfluenceBanner();
 
     // 推入多轮对话历史（仅正常轮次，警告/错误轮次不入历史，避免污染上下文）
     pushChatTurn(resp._turnUserContent, resp);
@@ -1601,7 +1858,7 @@ export async function processTurn(input) {
         const isWarning = isNonStoryResponse(resp.narrative);
         if (isWarning) {
             // ⚠️ 非故事内容：不应用状态变更、不写入知识库、不影响记忆
-            pendingEntry.narrative = extractNarrativeText(resp.narrative) || "（无内容）";
+            pendingEntry.narrative = sanitizeLLMText(extractNarrativeText(resp.narrative)) || "（无内容）";
             pendingEntry.retrieved = retrieved.map(s => s.title);
             pendingEntry.key_facts = [];
             pendingEntry.isWarning = true;

@@ -400,6 +400,47 @@ export function saveRuleReview() {
 // ★ B1：人物卡编辑（角色卡）
 // ============================================================
 
+// ★ docs/71：渲染单个角色的「情境人格切面」编辑器（图形化）。
+// 每个切面：context 类型(默认/对某人/情境) + 对象名 + 性格标签 + 声音标签 + 态度 + 真·多重人格 + 优先级。
+function renderModesHtml(c, i) {
+    const modes = (c && Array.isArray(c.personality_modes)) ? c.personality_modes : [];
+    const modeRows = modes.map((m, j) => {
+        const ctx = (typeof m.context === "string") ? m.context : "default";
+        const ctype = ctx.indexOf(":") >= 0 ? ctx.slice(0, ctx.indexOf(":")) : "default";
+        const cval = ctx.indexOf(":") >= 0 ? ctx.slice(ctx.indexOf(":") + 1) : "";
+        const traits = (typeof m.traits === "string") ? m.traits : "";
+        const voice = (typeof m.voice === "string") ? m.voice : "";
+        const attitude = (typeof m.attitude === "string") ? m.attitude : "";
+        const isAlter = m.is_alter ? "checked" : "";
+        const prio = (typeof m.priority === "number") ? m.priority : 0;
+        return `<div class="mode-row" data-j="${j}">
+            <div class="mode-head">
+                <select id="ch_mode_${i}_${j}_ctype" class="mode-ctype">
+                    <option value="default" ${ctype === "default" ? "selected" : ""}>常态(default)</option>
+                    <option value="npc" ${ctype === "npc" ? "selected" : ""}>对某人(npc:)</option>
+                    <option value="situation" ${ctype === "situation" ? "selected" : ""}>情境(situation:)</option>
+                </select>
+                <input id="ch_mode_${i}_${j}_cval" class="mode-cval" placeholder="对象/情境名（default 留空）" value="${escapeHtml(cval)}">
+                <label class="mode-alter"><input type="checkbox" id="ch_mode_${i}_${j}_alter" ${isAlter}> 真·多重人格</label>
+                <button class="btn-secondary-sm danger" data-action="delCharMode" data-i="${i}" data-j="${j}">删除切面</button>
+            </div>
+            <div class="char-grid">
+                <div class="form-group"><label>性格标签（顿号分隔）</label><textarea id="ch_mode_${i}_${j}_traits" rows="1">${escapeHtml(traits)}</textarea></div>
+                <div class="form-group"><label>声音标签 / 说话方式</label><input id="ch_mode_${i}_${j}_voice" value="${escapeHtml(voice)}"></div>
+            </div>
+            <div class="char-grid">
+                <div class="form-group"><label>态度（可选，覆盖基线）</label><input id="ch_mode_${i}_${j}_attitude" value="${escapeHtml(attitude)}"></div>
+                <div class="form-group"><label>优先级（数字，大者优先）</label><input id="ch_mode_${i}_${j}_priority" type="number" value="${prio}"></div>
+            </div>
+        </div>`;
+    }).join("");
+    return `<div class="char-modes">
+        <div class="muted" style="font-size:12px;margin:6px 0;">多重人格 / 情境切面（可选：用于「对不同人不同语气」「多重人格切换」；OOC 守门只纠偏越出切面并集的言行）</div>
+        <div class="mode-list">${modeRows}</div>
+        <button class="btn-secondary-sm" data-action="addCharMode" data-idx="${i}">＋ 添加切面</button>
+    </div>`;
+}
+
 // 从 DOM 把当前编辑内容读回 S._charEdit（add/delete/save 前调用，避免丢失未保存的改动）
 function syncCharacterForm() {
     if (!Array.isArray(S._charEdit)) return;
@@ -423,6 +464,33 @@ function syncCharacterForm() {
         c.voice = v("ch_voice_" + i);
         c.untouchable = v("ch_untouchable_" + i);
         c.notes = v("ch_notes_" + i);
+        // ★ docs/71：读取情境人格切面（按当前 DOM 行数回填，避免丢失未保存的改动）
+        if (!Array.isArray(c.personality_modes)) c.personality_modes = [];
+        const modeCount = c.personality_modes.length;
+        const newModes = [];
+        for (let j = 0; j < modeCount; j++) {
+            const ctypeEl = document.getElementById("ch_mode_" + i + "_" + j + "_ctype");
+            const cvalEl = document.getElementById("ch_mode_" + i + "_" + j + "_cval");
+            const alterEl = document.getElementById("ch_mode_" + i + "_" + j + "_alter");
+            const traitsEl = document.getElementById("ch_mode_" + i + "_" + j + "_traits");
+            const voiceEl = document.getElementById("ch_mode_" + i + "_" + j + "_voice");
+            const attEl = document.getElementById("ch_mode_" + i + "_" + j + "_attitude");
+            const prioEl = document.getElementById("ch_mode_" + i + "_" + j + "_priority");
+            const ctype = ctypeEl ? ctypeEl.value : "default";
+            const cval = cvalEl ? cvalEl.value.trim() : "";
+            const context = ctype === "default" ? "default" : (ctype + ":" + cval);
+            const oldMode = c.personality_modes[j] || {};
+            newModes.push({
+                id: (typeof oldMode.id === "string" && oldMode.id) ? oldMode.id : ("m" + Date.now().toString(36) + "_" + i + "_" + j),
+                context: context,
+                traits: traitsEl ? traitsEl.value : "",
+                voice: voiceEl ? voiceEl.value : "",
+                attitude: attEl ? attEl.value : "",
+                is_alter: !!(alterEl && alterEl.checked),
+                priority: prioEl ? (Number(prioEl.value) || 0) : 0
+            });
+        }
+        c.personality_modes = newModes;
     });
 }
 
@@ -480,6 +548,7 @@ function renderCharacterEditorBody() {
             </div>
             <div class="form-group"><label>不可触碰设定（红线，AI 不得违背）</label><textarea id="ch_untouchable_${i}" rows="2">${escapeHtml(c.untouchable || "")}</textarea></div>
             <div class="form-group"><label>自由备注（给 AI 的额外发挥空间）</label><textarea id="ch_notes_${i}" rows="2">${escapeHtml(c.notes || "")}</textarea></div>
+            ${renderModesHtml(c, i)}
         </div>`;
     });
     body.innerHTML = html;
@@ -503,6 +572,29 @@ export function deleteCharacter(idx) {
     }
 }
 
+// ★ docs/71：新增 / 删除「情境人格切面」
+export function addCharMode(i) {
+    syncCharacterForm();
+    if (!Array.isArray(S._charEdit)) S._charEdit = [];
+    const c = S._charEdit[Number(i)];
+    if (!c) return;
+    if (!Array.isArray(c.personality_modes)) c.personality_modes = [];
+    c.personality_modes.push({
+        id: "m" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
+        context: "default", traits: "", voice: "", attitude: "", is_alter: false, priority: 0
+    });
+    renderCharacterEditorBody();
+}
+
+export function delCharMode(i, j) {
+    syncCharacterForm();
+    const ci = Number(i), cj = Number(j);
+    if (Array.isArray(S._charEdit) && S._charEdit[ci] && Array.isArray(S._charEdit[ci].personality_modes)) {
+        S._charEdit[ci].personality_modes.splice(cj, 1);
+        renderCharacterEditorBody();
+    }
+}
+
 export function saveCharacterReview() {
     syncCharacterForm();
     if (!S.currentWorld) { closeModal("characterEditorModal"); return; }
@@ -518,6 +610,19 @@ export function saveCharacterReview() {
         else o.affinity = Math.max(-100, Math.min(100, o.affinity));
         if (!Array.isArray(o.rel_tags)) o.rel_tags = [];
         if (!o.id) o.id = "c" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
+        // ★ docs/71：情境人格切面清洗（与 ensureWorldCharacters 加载归一互为双保险）
+        if (!Array.isArray(o.personality_modes)) o.personality_modes = [];
+        o.personality_modes = o.personality_modes
+            .filter(m => m && typeof m === "object")
+            .map(m => ({
+                id: (typeof m.id === "string" && m.id) ? m.id : "m" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
+                context: (typeof m.context === "string" && m.context.trim()) ? m.context.trim() : "default",
+                traits: (typeof m.traits === "string") ? m.traits.trim().slice(0, 200) : (typeof o.personality === "string" ? o.personality : ""),
+                voice: (typeof m.voice === "string") ? m.voice.trim().slice(0, 200) : (typeof o.voice === "string" ? o.voice : ""),
+                attitude: (typeof m.attitude === "string") ? m.attitude.trim().slice(0, 200) : "",
+                is_alter: !!m.is_alter,
+                priority: (typeof m.priority === "number" && isFinite(m.priority)) ? m.priority : 0
+            }));
         return o;
     });
     ensureWorldCharacters(S.currentWorld);

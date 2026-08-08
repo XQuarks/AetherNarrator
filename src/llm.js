@@ -1198,12 +1198,13 @@ export function parseCharacters(text) {
             identity: typeof c.identity === "string" ? c.identity.trim() : "",
             gender_age: typeof c.gender_age === "string" ? c.gender_age.trim() : "",
             appearance: typeof c.appearance === "string" ? c.appearance.trim() : "",
-            personality: typeof c.personality === "string" ? c.personality.trim() : "",
+            // ★ 性格 / 声音标签：数组则顿号拼接（避免 LLM 返回数组时被静默丢弃），字符串则裁剪
+            personality: Array.isArray(c.personality) ? c.personality.filter(Boolean).join("、") : (typeof c.personality === "string" ? c.personality.trim() : ""),
             motivation: typeof c.motivation === "string" ? c.motivation.trim() : "",
             relationship: typeof c.relationship === "string" ? c.relationship.trim() : "",
             attitude: typeof c.attitude === "string" ? c.attitude.trim() : "",
             current_state: typeof c.current_state === "string" ? c.current_state.trim() : "",
-            voice: typeof c.voice === "string" ? c.voice.trim() : "",
+            voice: Array.isArray(c.voice) ? c.voice.filter(Boolean).join("、") : (typeof c.voice === "string" ? c.voice.trim() : ""),
             untouchable: typeof c.untouchable === "string" ? c.untouchable.trim() : "",
             notes: typeof c.notes === "string" ? c.notes.trim() : "",
             // ★ B4：解析初始好感度与关系标签（之前被丢弃，导致 AI 设不了好感初值）
@@ -1212,7 +1213,22 @@ export function parseCharacters(text) {
                 : (parseFloat(c.affinity) || 0),
             rel_tags: Array.isArray(c.rel_tags)
                 ? c.rel_tags.map(t => String(t).trim()).filter(Boolean)
-                : (typeof c.rel_tags === "string" ? c.rel_tags.split(/[，,]/).map(t => t.trim()).filter(Boolean) : [])
+                : (typeof c.rel_tags === "string" ? c.rel_tags.split(/[，,]/).map(t => t.trim()).filter(Boolean) : []),
+            // ★ docs/71：情境人格（AI 可选返回）；数组 traits→顿号串、context 缺省 default、is_alter/priority 兜底
+            personality_modes: Array.isArray(c.personality_modes)
+                ? c.personality_modes.filter(m => m && typeof m === "object").map((m, mi) => {
+                    const nstr = (v) => Array.isArray(v) ? v.filter(Boolean).join("、") : (typeof v === "string" ? v.trim() : "");
+                    return {
+                        id: (typeof m.id === "string" && m.id) ? m.id : "m" + Date.now().toString(36) + "_" + mi,
+                        context: (typeof m.context === "string" && m.context.trim()) ? m.context.trim() : "default",
+                        traits: nstr(m.traits),
+                        voice: nstr(m.voice),
+                        attitude: nstr(m.attitude),
+                        is_alter: !!m.is_alter,
+                        priority: (typeof m.priority === "number" && isFinite(m.priority)) ? m.priority : 0
+                    };
+                })
+                : []
         });
     }
     return out.slice(0, 12);
@@ -1239,6 +1255,43 @@ const CHARACTER_SYSTEM_PROMPT = `你是文字游戏角色设计师。根据用�
 }
 要求：主角 1 张；NPC 2-5 张；字段用中文简洁填写；无内容填空字符串或空数组。若提供了玩家已填的骨架，请尊重并补全其空白字段，不要改动玩家已填的姓名/身份等内容。`;
 
+// ★ docs/71：角色生成时自动产出「情境人格 / 多重人格切面」（personality_modes）。
+// 基础 schema 指令——所有世界通用（原创世界也按"看情况"产出，不硬凑）。
+const CHARACTER_MODES_INSTRUCTION = `
+
+【情境人格 / 多重人格切面（personality_modes）】
+若角色在不同对象或不同情境下有明显不同的面目、态度或说话方式，请在其 personality_modes 中列出，否则给空数组 []。
+每个切面结构：
+{
+  "context": "default"（默认面目，每个角色至少要有 1 个）或 "npc:<角色名>"（面对特定角色时）或 "situation:<情境标签>"（如 battle/谈判/独处/社交 等），
+  "traits": "该切面下的性格与行为基调",
+  "voice": "该切面下的说话方式/口癖（可空字符串）",
+  "attitude": "该切面下对主角的态度（可空字符串）",
+  "is_alter": false（true=截然不同的独立人格 / 多重人格）,
+  "priority": 0（数字，越具体越高；default 基线留 0）
+}
+要求：每个角色至少 1 个 context="default" 的切面作为基线；其余切面仅在确实存在明显差异时才加，不要为凑数硬加。`;
+
+// ★ docs/71：IP / 同人（有原作来源）世界 → 强制深挖原作真实表现，产出可溯源的精准切面。
+function ipFacetInstruction(ipName) {
+    const name = String(ipName || "").trim() || "该原作";
+    return `
+
+【重要 · 原作考据要求】
+本世界基于真实原作《${name}》（改编 / 同人）。请严格依据《${name}》原作中角色的真实性格与表现来生成：
+- 仔细分析每个知名角色在原作里「面对不同对象、处于不同情境」时的真实差异（例如：对主角 vs 对宿敌 vs 对导师 vs 战斗时 vs 独处时的不同面目）；
+- 把这些真实差异写成精准的 personality_modes 切面（npc:/situation: 形式），每个切面必须能在原作中找到依据；
+- 禁止凭空杜撰与原作明显相悖的人格或态度；若某角色在原作中并无明显多面性，则只保留 default 基线即可，不要硬凑。`;
+}
+
+// ★ docs/71：组装角色生成系统指令（基础 + 切面 schema + IP 原作考据），供 generateCharacters 复用、单测可覆盖。
+export function buildCharacterSystemPrompt(world) {
+    const w = world || {};
+    let p = CHARACTER_SYSTEM_PROMPT + CHARACTER_MODES_INSTRUCTION;
+    if (w.ip_name) p += ipFacetInstruction(w.ip_name);
+    return p;
+}
+
 // ★ B1：建世界/编辑时由 AI 依据世界观草拟角色卡。无 API / mock / 失败 均安全返回空数组，绝不阻断。
 // existing：玩家在向导里已填的骨架（完善模式），传入后 AI 据此补全空白。
 export async function generateCharacters(world, existing = null) {
@@ -1258,11 +1311,11 @@ export async function generateCharacters(world, existing = null) {
     try {
         const obj = await callStructured(
             [
-                { role: "system", content: CHARACTER_SYSTEM_PROMPT },
+                { role: "system", content: buildCharacterSystemPrompt(w) },
                 { role: "user", content: userContent }
             ],
             "character_cards",
-            { maxTokens: 1500, temperature: 0.6, mockFn: () => [] }
+            { maxTokens: 2200, temperature: 0.6, mockFn: () => [] }
         );
         return parseCharacters(JSON.stringify(obj || []));
     } catch (e) {

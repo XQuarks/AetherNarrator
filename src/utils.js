@@ -313,6 +313,16 @@ export function defaultInitialState() {
         progression: { path: "未入门", rank: "凡人", progress: 0 },
         relationships: {},
         skills: {},
+        skill_growth: {},    // ★ docs/74：技能成长进度（运行时对象映射，与 s.skills 字符串描述解耦）
+        pendingGrowthEvents: [], // ★ docs/74：待渲染的成长事件队列（升星 banner 消费后清空）
+        pendingRelationshipEvents: [], // ★ docs/75：待渲染的关系升级事件队列（关系门控 banner 消费后清空）
+        // ★ docs/76：平行叙事层 + 玩家影响度（parallel_narrative 模块开启时由 ensureNarrativeLayers 填充主线基准）
+        narrative_layers: {},            // 叙事层字典：id → { id, label, core(状态副本), lore_scope, active, derived_from, fork_influence, fork_cause }
+        active_narrative_layer: "main",  // 当前激活层 id（镜像 active_timeline）
+        player_influence: 0,             // 玩家影响度累计（确定性，由 state_changes 增量加权算得）
+        influence_baseline: null,        // 当前层初始状态 deepClone（computeInfluence 比对用，懒填充）
+        consumed_influence_tiers: [],    // 已消费的影响度档位（防重复 fork）
+        pendingInfluenceEvents: [],      // 待渲染的影响度/分岔事件队列（banner 消费后清空）
         inventory: [],
         completed_events: [],
         current_location: "初始地点",
@@ -325,10 +335,12 @@ export function defaultInitialState() {
         status_effects: [],
         tags: [],            // ★ A6 解锁标签：时代/物品/人物等条件标签，决定禁用概念是否解锁
         present_npcs: [],    // ★ A6 在场角色：自动激活 char:<姓名> 标签，用于人物型解锁条件
+        situation_tags: [],  // ★ docs/71：当前情境标签（如 combat / alone_night / secret_revealed），供情境人格 situation: 切面匹配
         revealed_locations: [], // ★ L3 认知追踪：角色已发现/已知的可达地点（不含当前所在地），供保底与 AI 生成"前往Y"选项
         is_alive: true,
         death_reason: null,
-        unlockedEndings: []   // ★ docs/54：结局图鉴，记录本档已触发的结局（按 ruleId 去重）
+        unlockedEndings: [],  // ★ docs/54：结局图鉴，记录本档已触发的结局（按 ruleId 去重）
+        random_event_state: { lastTitle: null, firedTitles: [] }  // ★ docs/73：随机事件抽取状态（排重 + 已触发标题记录）
     };
 }
 
@@ -680,6 +692,33 @@ export function sanitizeAtmosphere(v) {
     const t = v.replace(/\s+/g, " ").trim();
     if (!t) return null;
     return t.slice(0, 60);
+}
+
+// ★ docs/70：LLM 文本净化器（显示层兜底，防"代码/格式泄漏到界面"）。
+// 任何进入叙事 DOM 的 LLM 文本都应先过本函数，剥离其可能误吐的 Markdown 代码围栏、
+// 行内反引号、模板残留、状态栏占位标记、以及疑似 JSON 的结构行——
+// 这样即便 prompt 没拦住，玩家也绝不会在界面上看到 ``` / {…} / 【状态栏】 等代码样式。
+// 纯函数、无 DOM 依赖，可在 Node 下单测。
+export function sanitizeLLMText(raw) {
+    if (!raw || typeof raw !== "string") return "";
+    let t = raw;
+    // 1) 代码围栏标记（``` 或 ```json 等）——只去标记，内容保留为普通文本
+    t = t.replace(/```[a-zA-Z0-9_-]*\s*/g, "");
+    // 2) 行内反引号代码 → 保留内容去掉反引号
+    t = t.replace(/`([^`\n]+)`/g, "$1");
+    // 3) 模板/插值残留
+    t = t.replace(/\{\{[^}]*\}\}/g, "").replace(/<%[^%]*%>/g, "");
+    // 4) 状态栏占位标记（防 LLM 把模板占位吐进正文）
+    t = t.replace(/【状态栏】/g, "").replace(/【状态栏/g, "");
+    // 5) 疑似 JSON 结构行（整行丢弃）：以 [ 或 { 开头且含 "key": 形式
+    t = t.split("\n").filter(line => {
+        const s = line.trim();
+        if (!s) return true;
+        if (/^[\[{]/.test(s) && /["']?[\w一-龥]+["']?\s*:/.test(s)) return false;
+        if (/^state_changes|^state_delta|state_changes\s*[:=]/.test(s)) return false;
+        return true;
+    }).join("\n");
+    return t;
 }
 
 // ★ Plan A：跨分块合并同名 lore 条目——同一条目在多处出现时汇总内容、并集触发词/链接，

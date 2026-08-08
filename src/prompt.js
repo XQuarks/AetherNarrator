@@ -195,7 +195,7 @@ ${plotFreedomDesc[plotFreedom] || plotFreedomDesc[3]}
 - 请在 initial_state.tags 中按世界类型设定时代标签：古代/武侠/仙侠→era_ancient；魔法/中世纪→era_medieval；近代工业→era_industrial；现代都市→era_modern；科幻未来→era_future。该标签供引擎判定现代/科技概念是否被允许出现（解锁世界观禁律）。
 - 若剧情推进需要（如跨越时代、获得特定物品、关键 NPC 在场），可在每轮的 state_changes 中返回 tags:{add:[...],remove:[...]} 与 present_npcs:{add:[...],remove:[...]}，用于动态解锁禁律。例如时代推进到现代时 add "era_modern"，则手机/汽车等概念不再被视为违和；玩家合法持有火器时可在物品上加 tags:["has_firearm"] 来解锁枪械相关概念。
 - ${ipName ? "参考作品改编（已填写「参考的世界」）：不要篡改该作品不可改变的核心设定和关键角色命运。" : "原创/公共领域世界请保持内部逻辑自洽。"}
-- attributes / relationships / skills 全部使用文字描述，不要输出数字。
+- attributes / relationships / skills 的文字描述全部用文字，不要输出数字。技能可在 state_changes.skills 中用两种形式回报：① 文字描述 { "技能名": "一句话描述" }（记录/更新技能说明）；② 运用回报 { "技能名": { "result": "success" } }（成功运用或习得）/ { "result": "fail" }（尝试未成）/ { "result": "use" }（仅是运用未判定）。引擎会依据 success 自动累计并升星，你不需、也不得自行输出星级或数字进度。
 - 输出必须是合法 JSON，不要包含 markdown 代码块标记。`;
 }
 
@@ -651,12 +651,98 @@ export function buildCharactersContext(world) {
         }
         b += line("不可触碰设定", c.untouchable);
         b += line("备注", c.notes);
+        b += formatPersonalityModes(c);
         blocks.push(b.replace(/\n+$/, ""));
     });
     if (!blocks.length) return "";
     return "# 角色设定（人物卡）\n\n" +
         "以下为本世界已确立的角色卡。请在处理相关角色时严格遵循其设定，尤其「不可触碰设定」不得违背；关系描述本身即故事状态，请保持前后一致：\n\n" +
         blocks.join("\n\n") + "\n";
+}
+
+// ★ docs/71：把角色的「情境人格切面」格式化为角色卡内的守门说明块。
+// 仅当角色定义了 personality_modes 才输出；traits/voice 缺省回退到角色基线单值。
+function formatPersonalityModes(c) {
+    const modes = (c && Array.isArray(c.personality_modes)) ? c.personality_modes.filter(m => m && typeof m === "object") : [];
+    if (!modes.length) return "";
+    const baseTraits = (typeof c.personality === "string") ? c.personality.trim() : "";
+    const baseVoice = (typeof c.voice === "string") ? c.voice.trim() : "";
+    const lines = modes.map(m => {
+        const ctx = (typeof m.context === "string" && m.context.trim()) ? m.context.trim() : "default";
+        const traits = (typeof m.traits === "string" && m.traits.trim()) ? m.traits.trim() : baseTraits;
+        const voice = (typeof m.voice === "string" && m.voice.trim()) ? m.voice.trim() : baseVoice;
+        const att = (typeof m.attitude === "string" && m.attitude.trim()) ? ` 态度[${m.attitude.trim()}]` : "";
+        const tag = m.is_alter ? "（真·多重人格）" : "";
+        return `  · ${ctx}${tag}：性格[${traits}] 声音[${voice}]${att}`;
+    });
+    return "\n— 多重人格 / 切面（OOC 守门）—\n"
+        + "  该角色可在以下切面间切换，均为合法人设；OOC = 言行落到所有切面并集之外：\n"
+        + lines.join("\n")
+        + "\n  请依据当前对话对象 / 情境选用对应切面；切面之间切换（如常态↔面具↔第二人格）是允许的剧情特性，不算偏离。"
+        + "不可触碰设定跨切面一律生效。";
+}
+
+// ★ docs/71：根据运行时上下文选出生效切面（纯函数，供测试 / 校准 pin 使用）。
+// ctx = { presentNpcs:[], situationTags:[], focusNpc:null }。
+// 命中优先级：specific(ctx 非 default) 永远高于 default（default 的权重 -1，保证被具体切面覆盖）；
+// 同为具体切面时取 priority 大者，平局取数组先现者。无命中返回 null。
+export function selectActiveFacet(char, ctx) {
+    if (!char || !Array.isArray(char.personality_modes) || !char.personality_modes.length) return null;
+    const present = (ctx && Array.isArray(ctx.presentNpcs)) ? ctx.presentNpcs : [];
+    const situations = (ctx && Array.isArray(ctx.situationTags)) ? ctx.situationTags : [];
+    const focus = (ctx && typeof ctx.focusNpc === "string") ? ctx.focusNpc : null;
+    let best = null;
+    for (const m of char.personality_modes) {
+        if (!m || typeof m !== "object") continue;
+        const c = (typeof m.context === "string") ? m.context.trim() : "";
+        let hit = false;
+        if (c === "default") hit = true;
+        else if (c.startsWith("npc:")) {
+            const name = c.slice(4).trim();
+            if (name && (present.includes(name) || (focus && focus === name))) hit = true;
+        } else if (c.startsWith("situation:")) {
+            const tag = c.slice(10).trim();
+            if (tag && situations.includes(tag)) hit = true;
+        }
+        if (!hit) continue;
+        const explicit = (typeof m.priority === "number" && isFinite(m.priority)) ? m.priority : 0;
+        const prio = (c === "default" ? explicit - 1 : explicit); // default 永远低于具体切面
+        if (!best || prio > best._prio) best = { ...m, _prio: prio };
+    }
+    return best;
+}
+
+// ★ docs/71：检测玩家输入是否为人设校准请求（纯函数，可在 Node 下单测）。
+// 命中关键词（ooc / 人设崩 / 不像他 / 语气不对 等）则返回 { charName }；
+// charName 为输入中出现的世界角色名（若有），否则 null（表示校准所有角色）。
+export function detectOocCorrection(input, world) {
+    if (typeof input !== "string" || !input.trim()) return null;
+    if (!/(ooc|o\.o\.c|人设崩|人设坏|人设偏离|性格崩|性格偏离|不像(他|她|本人)|说话方式不对|语气不对|人设不对|崩人设|崩了人设)/i.test(input)) return null;
+    const chars = (world && Array.isArray(world.characters)) ? world.characters : [];
+    let charName = null;
+    for (const c of chars) {
+        const nm = (c && typeof c.name === "string" && c.name.trim()) ? c.name.trim() : "";
+        if (nm && input.includes(nm)) { charName = nm; break; }
+    }
+    return { charName };
+}
+
+// ★ docs/71：把"人设校准"指令拼成中部注入文案（纯函数）。
+export function buildOocReanchorNote(charName) {
+    const who = charName ? `「${charName}」` : "所有角色";
+    return `【人设校准】下一轮请让 ${who} 严格保持在其【已定义切面】之内；`
+        + `切面之间切换（如常态↔面具↔第二人格）是允许的剧情特性，不算偏离；`
+        + `但言行不得落到所有已定义切面并集之外，也绝不得违背其「不可触碰设定」。`
+        + `若上一轮确有明显越界，可于本轮以该角色自身口吻做轻微回调，不要改写已存档的剧情历史。`;
+}
+
+// ★ docs/71：消费一次性人设校准标记（由 submitInput 关键词检测 或 状态面板按钮设置）。
+// 返回注入文案；若无标记返回 ""；注入后即清空 S.oocReanchor（一次性）。
+export function consumeOocReanchor() {
+    if (!S.oocReanchor) return "";
+    const note = buildOocReanchorNote(S.oocReanchor.charName);
+    S.oocReanchor = null;
+    return note;
 }
 
 // ★ B2：玩家变量定义（静态，注入 system 段；编辑保存时 invalidateSystemPromptCache 重建）。
@@ -714,58 +800,77 @@ export function buildBondHint() {
 - 玩家与某 NPC 的关系进展时，鼓励在 state_changes.bonds 中返回 { "NPC名": { "delta": ±数值, "tags": [标签], "desc": "关系新描述" } }（delta 为相对变化，夹取 -100~100；tags 与既有标签合并去重；desc 可选，会同步更新文字关系层）。`;
 }
 
-// ★ B2：把本回合的 state_changes 转成人类可读的「本回合变化」条目（纯函数，供 render.js 渲染）。
-// entry 需包含 entry.state_changes（AI 返回的原始变化）与 entry.varChanges（applyStateChanges 计算出的变量增减摘要）。
-// 返回字符串数组，空数组表示本回合无结构化变化。
-export function formatStateChanges(entry, world) {
+// ★ docs/70：把本回合的 state_changes 转成「本回合变化」条目。
+// 返回结构化数组 [{ cat, text }]，cat 用于渲染时分组成「变量/地点/关系/物品/状态/技能」各类，
+// text 为单条人类可读文案（与历史测试期望的字串保持一致，便于兼容）。
+// entry 需包含 entry.state_changes（AI 返回的原始变化）与 entry.varChanges（变量增减摘要）。
+export function formatStateChangesStructured(entry, world) {
     const changes = (entry && entry.state_changes) || {};
     const varChanges = (entry && entry.varChanges) || [];
-    const lines = [];
+    const out = [];
+    const push = (cat, text) => { if (text) out.push({ cat, text }); };
     // 1) 玩家变量增减（已由 computeVariableUpdates 计算，含 from/to/type/unit）
     for (const v of varChanges) {
         if (v.type === "number") {
             const delta = (typeof v.to === "number" && typeof v.from === "number") ? (v.to - v.from) : 0;
             const sign = delta > 0 ? "+" : (delta < 0 ? "-" : "");
             const deltaStr = delta !== 0 ? `（${sign}${Math.abs(delta)}${v.unit || ""}）` : "";
-            lines.push(`变量 · ${v.name}：${v.from} → ${v.to}${deltaStr}`);
+            push("变量", `变量 · ${v.name}：${v.from} → ${v.to}${deltaStr}`);
         } else if (v.type === "toggle") {
-            lines.push(`变量 · ${v.name}：${v.to ? "开" : "关"}`);
+            push("变量", `变量 · ${v.name}：${v.to ? "开" : "关"}`);
         } else {
-            lines.push(`变量 · ${v.name}：${v.to}`);
+            push("变量", `变量 · ${v.name}：${v.to}`);
         }
     }
     // 2) 地点
-    if (changes.current_location) lines.push(`前往 ${changes.current_location}`);
-    // 3) 关系 / 好感度
+    if (changes.current_location) push("地点", `前往 ${changes.current_location}`);
+    // 3) 关系 / 好感度（好感 ±1 也显示，不设阈值——装饰性微变动亦有叙事意义）
     if (changes.bonds && typeof changes.bonds === "object" && !Array.isArray(changes.bonds)) {
         for (const [n, upd] of Object.entries(changes.bonds)) {
             if (!upd || typeof upd !== "object") continue;
             const deltaStr = (typeof upd.delta === "number" && upd.delta !== 0)
                 ? `（好感 ${upd.delta > 0 ? "+" : ""}${upd.delta}）` : "";
             const tagsStr = (Array.isArray(upd.tags) && upd.tags.length) ? ` +标签[${upd.tags.join("/")}]` : "";
-            lines.push(`与 ${n} 关系更新${deltaStr}${tagsStr}`);
+            push("关系", `与 ${n} 关系更新${deltaStr}${tagsStr}`);
         }
     } else if (changes.relationships && Object.keys(changes.relationships).length) {
         for (const [n, val] of Object.entries(changes.relationships)) {
-            if (val && String(val).trim()) lines.push(`与 ${n} 关系更新`);
+            if (val && String(val).trim()) push("关系", `与 ${n} 关系更新`);
         }
     }
-    // 4) 物品
+    // 4) 物品（获得/失去，关键物品带 [关键] 标记）
     if (Array.isArray(changes.inventory)) {
         for (const op of changes.inventory) {
             const keyMark = op.is_key === true ? " [关键]" : "";
-            if (op.op === "add") lines.push(`获得${keyMark} ${op.name || op.item_id}`);
-            else if (op.op === "remove") lines.push(`失去${keyMark} ${op.name || op.item_id}`);
-            else if (op.op === "clear_world") lines.push(`清空某界物品`);
+            if (op.op === "add") push("物品", `获得${keyMark} ${op.name || op.item_id}`);
+            else if (op.op === "remove") push("物品", `失去${keyMark} ${op.name || op.item_id}`);
+            else if (op.op === "clear_world") push("物品", `清空某界物品`);
         }
     }
-    // 5) 临时状态
+    // 5) 临时状态（受伤/中毒/被禁足等）
     if (Array.isArray(changes.status_effects) && changes.status_effects.length) {
-        for (const e of changes.status_effects) lines.push(`状态 · ${e.name || "效果"}`);
+        for (const e of changes.status_effects) push("状态", `状态 · ${e.name || "效果"}`);
     }
-    // 6) 死亡
-    if (changes.is_alive === false) lines.push(`角色死亡`);
-    return lines;
+    // 6) 技能变化（习得/升星/运用，可选字段）
+    // 升星由引擎依据 success 次数确定性重算，挂在 entry.skill_growth_events（见 renderTurnChanges），
+    // 此处只处理「文字描述」类变化；带 result 对象的运用回报不在此重复列出，避免与升星行重复。
+    if (changes.skills && typeof changes.skills === "object" && !Array.isArray(changes.skills)) {
+        for (const [name, upd] of Object.entries(changes.skills)) {
+            if (!upd) continue;
+            if (upd && typeof upd === "object" && upd.result) continue; // 运用回报由升星行呈现
+            const delta = (typeof upd === "number") ? upd : (upd && typeof upd.delta === "number" ? upd.delta : 0);
+            const dstr = (typeof delta === "number" && delta !== 0) ? `（${delta > 0 ? "+" : ""}${delta}）` : "";
+            push("技能", `技能 · ${name}${dstr}`);
+        }
+    }
+    // 7) 死亡
+    if (changes.is_alive === false) push("状态", `角色死亡`);
+    return out;
+}
+
+// 兼容旧调用与既有测试：返回扁平字串数组（= 结构化版的 text 列表）。
+export function formatStateChanges(entry, world) {
+    return formatStateChangesStructured(entry, world).map(x => x.text);
 }
 
 export function buildToneGuide() {
@@ -1204,6 +1309,148 @@ export function buildNarrativeControlNote(pacing = "standard", length = "standar
     return parts.join("\n");
 }
 
+// ★ docs/70：随机事件——纯函数可单测的调度逻辑（与 S 解耦，便于测试）。
+// 触发节奏：每 interval 回合一次（默认 3）。round 从 1 计；回合用「非警告剧情条数」近似。
+// ★ docs/73：随机事件条件系统（确定性判定，零 AI 介入）
+// 比较算子（数值条件通用）
+function cmpNum(a, op, b) {
+    switch (op) {
+        case ">": return a > b;
+        case "<": return a < b;
+        case "<=": return a <= b;
+        case "==": return a === b;
+        case ">=": return a >= b;
+        default: return a >= b;
+    }
+}
+// 由 current_date 推断季节（北半球简化：month 优先，否则按 day/30 估算）
+function seasonFromDate(d) {
+    if (!d || typeof d !== "object") return null;
+    let m = (typeof d.month === "number") ? d.month : null;
+    if (m == null && typeof d.day === "number") m = Math.floor((d.day - 1) / 30) % 12 + 1;
+    if (m == null) return null;
+    if (m >= 3 && m <= 5) return "春季";
+    if (m >= 6 && m <= 8) return "夏季";
+    if (m >= 9 && m <= 11) return "秋季";
+    return "冬季";
+}
+// 单条条件判定（ctx = { gameState, world }；缺字段时保守返回 false）
+export function evalCondition(cond, ctx) {
+    if (!cond || !cond.type) return false;
+    const gs = (ctx && ctx.gameState) || {};
+    const world = (ctx && ctx.world) || {};
+    switch (cond.type) {
+        case "location": {
+            const loc = gs.current_location;
+            return typeof loc === "string" && typeof cond.value === "string" && loc === cond.value;
+        }
+        case "story_progress": {
+            const sp = typeof gs.story_progress === "number" ? gs.story_progress : 0;
+            const v = Number(cond.value);
+            if (!Number.isFinite(v)) return false;
+            return cmpNum(sp, cond.op || ">=", v);
+        }
+        case "bond": {
+            const b = (gs.bonds && cond.npc) ? gs.bonds[cond.npc] : null;
+            const aff = (b && typeof b.affinity === "number") ? b.affinity : 0;
+            const v = Number(cond.value);
+            if (!Number.isFinite(v)) return false;
+            return cmpNum(aff, cond.op || ">=", v);
+        }
+        case "fired": {
+            const arr = (gs.random_event_state && Array.isArray(gs.random_event_state.firedTitles))
+                ? gs.random_event_state.firedTitles : [];
+            return typeof cond.value === "string" && arr.includes(cond.value);
+        }
+        case "events": {
+            const arr = Array.isArray(gs.completed_events) ? gs.completed_events : [];
+            return typeof cond.value === "string" && arr.includes(cond.value);
+        }
+        case "lore": {
+            const kb = (world && Array.isArray(world.lore_kb)) ? world.lore_kb : [];
+            const card = kb.find(c => c && c.title === cond.value);
+            if (!card) return false;
+            const stage = (typeof card.unlock_stage === "number") ? card.unlock_stage : 1;
+            const sp = typeof gs.story_progress === "number" ? gs.story_progress : 0;
+            return sp >= stage;
+        }
+        case "season": {
+            const s = seasonFromDate(gs.current_date);
+            return typeof cond.value === "string" && s === cond.value;
+        }
+        case "era": {
+            const era = gs.era || (world && world.era_label);
+            return typeof cond.value === "string" && era === cond.value;
+        }
+        case "influence": { // ★ docs/76：玩家影响度门控（复用条件引擎，零新条件基础设施）
+            const inf = (typeof gs.player_influence === "number") ? gs.player_influence : 0;
+            const v = Number(cond.value);
+            if (!Number.isFinite(v)) return false;
+            return cmpNum(inf, cond.op || ">=", v);
+        }
+        default:
+            return false;
+    }
+}
+// 组合逻辑：all=多条件全满足 | any=满足任意一个；无条件=始终满足
+export function evalEventConditions(event, ctx) {
+    const conds = (event && Array.isArray(event.conditions)) ? event.conditions : [];
+    if (!conds.length) return true;
+    const mode = (event.condition_mode === "any") ? "any" : "all";
+    const results = conds.map(c => evalCondition(c, ctx));
+    return mode === "any" ? results.some(Boolean) : results.every(Boolean);
+}
+
+export function shouldTriggerRandomEvent(round, interval) {
+    const iv = (typeof interval === "number" && interval > 0) ? interval : 3;
+    return typeof round === "number" && round > 0 && round % iv === 0;
+}
+// 从事件池挑一个：★docs/73 先按条件过滤，再排除上一次避免连续重复；池为空返回 null。
+export function pickRandomEvent(pool, excludeTitle, rng, S) {
+    const all = Array.isArray(pool) ? pool : [];
+    const cand = all.filter(e => evalEventConditions(e, S || {}));
+    if (!cand.length) return null;
+    let pool2 = cand;
+    if (excludeTitle && pool2.length > 1) {
+        const filtered = pool2.filter(e => (e && e.title) !== excludeTitle);
+        if (filtered.length) pool2 = filtered;
+    }
+    const r = (typeof rng === "function") ? rng() : Math.random();
+    const idx = Math.min(pool2.length - 1, Math.max(0, Math.floor(r * pool2.length)));
+    return pool2[idx] || null;
+}
+// 把随机事件拼成中部注入文案。
+export function buildRandomEventNote(ev) {
+    if (!ev || !ev.title) return null;
+    const hint = ev.hint ? `——${ev.hint}` : "";
+    return `【随机事件】本回合请在叙事中自然融入一次随机事件：「${ev.title}」${hint}。`
+        + `以玩家可感知的视角呈现，不要以全知旁白预告，也不要破坏主线进程。`;
+}
+// 组合上述纯函数，从全局状态 S 取出本轮提示（无模块/无池/未到节奏/条件全不满足则返回 null）。
+// ★docs/73：注入成功后把事件标题记入 firedTitles（供「前置事件」条件判定）。
+export function getRandomEventHint(opts) {
+    const world = (opts && opts.world) || S.currentWorld;
+    if (!world || !isModuleEnabled(world, "random_event")) return null;
+    const pool = (world.random_events && Array.isArray(world.random_events)) ? world.random_events : [];
+    if (!pool.length) return null;
+    const history = (opts && opts.history) || (S.conversationHistory || []);
+    const round = history.filter(e => e && !e.isWarning).length;
+    const interval = (world.random_event_interval && typeof world.random_event_interval === "number" && world.random_event_interval > 0) ? world.random_event_interval : 3;
+    if (!shouldTriggerRandomEvent(round, interval)) return null;
+    const ctx = { gameState: (opts && opts.gameState) || S.gameState || {}, world };
+    const state = (S.gameState && S.gameState.random_event_state) || {};
+    const ev = pickRandomEvent(pool, state.lastTitle, undefined, ctx);
+    if (ev && S.gameState) {
+        if (!S.gameState.random_event_state) S.gameState.random_event_state = { lastTitle: null, firedTitles: [] };
+        if (!Array.isArray(S.gameState.random_event_state.firedTitles)) S.gameState.random_event_state.firedTitles = [];
+        if (ev.title && !S.gameState.random_event_state.firedTitles.includes(ev.title)) {
+            S.gameState.random_event_state.firedTitles.push(ev.title);   // ★ docs/73：记录已触发
+        }
+        S.gameState.random_event_state.lastTitle = ev.title;
+    }
+    return buildRandomEventNote(ev);
+}
+
 // ★ B2：中部注入位 author_note —— 作为独立消息插在「最近对话」与「本轮玩家输入」之间。
 // 内容 = 事件引擎动态推进提示（基于当前状态判定，非写死脚本）+ 玩家手动设定的持续约束 + ★S5-6 权威当前时间。
 // 放在这个位置的目的：给一个"中部纠偏位"，让导演级提示不被埋没在 user 消息末尾。
@@ -1243,12 +1490,22 @@ export function buildAuthorNote() {
             + "经工具字段 side_events 返回，每张含：title（标题）、desc（一句话描述）、cost_stamina（体力消耗，建议 10~40 的整数）、cost_time（时间消耗，如“半天”/“1天”，仅作提示）、tag（类型标签）。"
             + "支线应是可选的行动（如探查某地、与某人交谈、处理琐事），不是主线必需。");
     }
+    // ★ docs/70：随机事件——仅 random_event 模块开启、且轮次满足节奏、且世界定义了事件池时，
+    //   向中部每轮位注入一条随机突发事件，要求 AI 在叙事中自然融入（引擎调度，不靠 LLM 自觉）。
+    if (S.currentWorld && isModuleEnabled(S.currentWorld, "random_event")) {
+        const reHint = getRandomEventHint();
+        if (reHint) parts.push(reHint);
+    }
     // ★ docs/53：私聊语境注入（中部每轮位）——让 AI 以 NPC 身份回应私语
     if (S.privateChat) {
         parts.push("【私聊语境】你正与「" + S.privateChat.npcId + "」私下交谈（渠道：" + (S.privateChat.channel || "某种方式") + "），周围无人偷听。"
             + "以下玩家输入是他说给「" + S.privateChat.npcId + "」听的私语；请完全以「" + S.privateChat.npcId + "」的身份与口吻回应，"
             + "不要跳出角色，也不要描写旁观者。");
     }
+    // ★ docs/71：人设校准（一次性）——玩家指出某角色 OOC 或点击「人设校准」按钮后，
+    // 下一轮中部注入重锚指令，要求该角色回到已定义切面并集内（不锁死单一面、不删历史）。
+    const reanchor = consumeOocReanchor();
+    if (reanchor) parts.push(reanchor);
     return parts.join("\n\n");
 }
 

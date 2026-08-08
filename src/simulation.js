@@ -67,7 +67,10 @@ export function normalizeSimulationState(state) {
     const asObj = (v) => (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
     out.attributes = asObj(out.attributes);
     out.relationships = asObj(out.relationships);
-    out.skills = asObj(out.skills);
+    out.skills = asObj(out.skills); // ★ 技能文字描述映射（{名:描述}），保持字符串契约不被破坏
+    // ★ docs/74：技能成长进度存独立字段 skill_growth（运行时对象映射），与 s.skills 字符串描述解耦
+    out.skill_growth = asObj(out.skill_growth);
+    out.pendingGrowthEvents = Array.isArray(out.pendingGrowthEvents) ? out.pendingGrowthEvents : [];
     // ★ docs/54：结局图鉴（旧存档兜底，不破坏已有字段）
     out.unlockedEndings = Array.isArray(out.unlockedEndings) ? out.unlockedEndings : [];
     return out;

@@ -12,11 +12,11 @@ import { idbGet } from "./idb.js";
 import { clearSourceFile, handleFileSelect } from "./files.js";
 import { closeModal, closeStatusPanel, hideStatusPanel, renderSaveList, renderWorldList, showApiModal, showCreateWorldModal, showSettingsModal, showSettingsScreen, showStatusPanel, showWorldDetail, skipTypewriter, switchStatusTab, toggleCustomPrefix, toggleWorldPrefix, updatePlotFreedomLabel, updateWorldTempLabel, selectTagPref, onCustomTagInput, collectStylePrefs, showToast, renderEventPanel, showModal, openSaveMenu, openWorldSaveChooser, showEndingTracker, openRewindTurn } from "./render.js";
 import { wizardNextStep, wizardPrevStep, wizardSkipStep, gotoWizardStep, selectStyleTemplate, updateNarrativeStyleCount, toggleStyleGridExpand } from "./wizard-editor.js";
-import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, saveWorldSecrecy, saveWorldHistory, removeBannedSentence, ignoreBannedTerm, regenerateTurn, startPrivateChat, endPrivateChat, requestDaily, commitChannelAction, addContactChannelRow, removeContactChannelRow, rewindToTurnInGame } from "./game.js";
+import { backToHomeAfterGameOver, chooseOption, confirmRestart, deleteMemory, doRestartConfirmed, exportDebugLog, exportMemoryPack, exportStory, generateWorld, goHome, importMemoryPack, importWorld, showExportWorldChoice, exportWorldChoice, triggerWorldPackImport, restToNextDay, reviewDeathScene, saveAuthorNote, showAuthorNoteModal, showGameSettings, showSaveList, showSaveDetail, returnFromSaveDetail, showWorldList, submitInput, toggleAIEnhanced, togglePinMemory, triggerMemoryPackImport, switchTimeline, showPlayerNoteModal, savePlayerNote, showPreviewModal, handlePredictBranches, saveWorldModules, saveWorldSecrecy, saveWorldHistory, saveWorldRandomEvents, addRandomEventRow, removeRandomEventRow, addRandomEventCondRow, removeRandomEventCondRow, removeBannedSentence, ignoreBannedTerm, regenerateTurn, startPrivateChat, endPrivateChat, requestDaily, commitChannelAction, addContactChannelRow, removeContactChannelRow, rewindToTurnInGame, requestOocReanchor, upgradeRelationship, switchNarrativeLayerAction } from "./game.js";
 import { continueLatestSave, deleteSave, deleteWorld, loadSave, startGame, createOrUpdateSave, saveCurrentSlot, saveAsNewSave } from "./save.js";
 import { triggerWorldCritic, confirmCriticRevision, rejectCriticRevision } from "./critic.js";
 import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, editSaveLore, openLoreReview, rejectLoreRevision, saveLoreReview, toggleLoreRequireConfirm, extractAndMergeSourceLore, syncTimeConfigFromDOM, updateTimeConflictBadge, regenerateOpening, applyOpeningFix, rejectOpeningFix, optimizeOpening, updateTcTempLabel, refreshCustomCalendarEditor, refreshMultiverseEditor, timeStructChanged, mvAddLine, mvDelLine, mvSetActive, mvRenameId, mvRenName, mvCalChanged, mvRenEra, mvRenDate, mvRenWeather, mvMoveLine, mvTpl, defaultStrategyChanged, mvLineStrategy, mvAddSync, mvDelSync, mvSyncRef, mvSyncRatio, ccAddMonth, ccDelMonth, ccMoveMonth, ccRenMonthName, ccRenMonthDays, ccRenLabel, ccLeapMonth, ccPreset, ccClearMonths } from "./lore-ui.js";
-import { openRuleEditor, addRule, deleteRule, ruleTypeChange, selectRuleType, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview, openDeadlineEditor, addDeadline, deleteDeadline, dlPolicyChanged, saveDeadlineReview, setRuleFilter } from "./lore-editors.js";
+import { openRuleEditor, addRule, deleteRule, ruleTypeChange, selectRuleType, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview, openDeadlineEditor, addDeadline, deleteDeadline, dlPolicyChanged, saveDeadlineReview, setRuleFilter, addCharMode, delCharMode } from "./lore-editors.js";
 import { clearLoreAnnCache } from "./ann-index.js";
 import { isModuleEnabled } from "./modules.js"; // ★ 事件系统：支线事件门禁判断
 
@@ -144,6 +144,16 @@ const ACTIONS = {
     showCreateWorldModal: () => showCreateWorldModal(),
     showStatusPanel: () => showStatusPanel(),
     showEndingTracker: () => showEndingTracker(),
+    // ★ docs/74：技能升星 banner 收起（非阻塞，点 ✕ 即走）
+    dismissSkillGrowth: () => { const b = document.getElementById("skillGrowthBanner"); if (b) b.classList.remove("show"); },
+    // ★ docs/75：关系升级 banner 收起（非阻塞，点 ✕ 即走）
+    dismissRelUpgrade: () => { const b = document.getElementById("relUpgradeBanner"); if (b) b.classList.remove("show"); },
+    // ★ docs/76：影响度/世界线分叉 banner 收起（非阻塞，点 ✕ 即走）
+    dismissInfluence: () => { const b = document.getElementById("influenceBanner"); if (b) b.classList.remove("show"); },
+    // ★ docs/75：玩家主动触发关系升级（确定性动作，不依赖 AI 临场发挥）
+    upgradeRelationship: (el) => upgradeRelationship(el && el.dataset ? el.dataset.npc : undefined),
+    // ★ docs/76：玩家主动切换叙事层/世界线（确定性动作，恢复该层镜像副本）
+    switchNarrativeLayer: (el) => switchNarrativeLayerAction(el && el.dataset ? el.dataset.id : undefined),
     setRuleFilter: (el) => setRuleFilter(el),
     exportStory: () => exportStory(),
     exportDebugLog: () => exportDebugLog(),
@@ -242,6 +252,7 @@ const ACTIONS = {
     // 状态面板
     closeStatusPanel: () => closeStatusPanel(),
     switchStatusTab: (el) => switchStatusTab(el.dataset.key),
+    requestOocReanchor: () => requestOocReanchor(),
     togglePinMemory: (el) => togglePinMemory(el.dataset.id),
     deleteMemory: (el) => deleteMemory(el.dataset.id),
     exportMemoryPack: () => exportMemoryPack(),
@@ -275,6 +286,12 @@ const ACTIONS = {
     saveWorldModules: (el) => saveWorldModules(el.dataset.id),
     saveWorldSecrecy: (el) => saveWorldSecrecy(el.dataset.id),
     saveWorldHistory: (el) => saveWorldHistory(el.dataset.id),
+    // ★ docs/70：随机事件池（可自选功能）编辑入口
+    saveWorldRandomEvents: (el) => saveWorldRandomEvents(el.dataset.id),
+    addRandomEvent: () => addRandomEventRow(),
+    removeRandomEvent: (el) => removeRandomEventRow(el),
+    addRandomEventCond: (el) => addRandomEventCondRow(el),
+    removeRandomEventCond: (el) => removeRandomEventCondRow(el),
     // ★ docs/53：NPC 私聊 / 世界日报
     privateChat: (el) => startPrivateChat(el.dataset.npc),
     endPrivateChat: () => endPrivateChat(),
@@ -319,6 +336,9 @@ const ACTIONS = {
     deleteCharacter: (el) => deleteCharacter(el.dataset.idx),
     saveCharacterReview: () => saveCharacterReview(),
     generateCharactersAI: () => generateCharactersAI(),
+    // ★ docs/71：人物卡「情境人格切面」增删
+    addCharMode: (el) => addCharMode(el.dataset.idx),
+    delCharMode: (el) => delCharMode(el.dataset.i, el.dataset.j),
     openVariableEditor: (el) => openVariableEditor(el.dataset.id),
     addVariable: () => addVariable(),
     deleteVariable: (el) => deleteVariable(el.dataset.idx),

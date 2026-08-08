@@ -542,6 +542,30 @@ export function ensureWorldCharacters(world) {
         if (typeof c.affinity !== "number" || !isFinite(c.affinity)) c.affinity = 0;
         else c.affinity = Math.max(-100, Math.min(100, c.affinity));
         if (!Array.isArray(c.rel_tags)) c.rel_tags = [];
+        // ★ 性格 / 声音标签统一为「顿号分隔字符串」，避免数组与字符串混用导致 prompt 解析漂移
+        //   （种子世界用数组、编辑器用字符串，加载时在此归一为唯一规范形态）
+        if (Array.isArray(c.personality)) c.personality = c.personality.filter(Boolean).join("、");
+        if (typeof c.personality === "string") c.personality = c.personality.trim();
+        if (Array.isArray(c.voice)) c.voice = c.voice.filter(Boolean).join("、");
+        if (typeof c.voice === "string") c.voice = c.voice.trim();
+        // ★ docs/71：情境人格 modes 归一（与 personality/voice 同规范形态，避免数组/字符串混用）
+        //   traits/voice 缺省时回退到角色基线单值；is_alter 兜底布尔；priority 兜底数字。
+        if (!Array.isArray(c.personality_modes)) c.personality_modes = [];
+        c.personality_modes = c.personality_modes
+            .filter(m => m && typeof m === "object")
+            .map((m, mi) => {
+                const normStr = (v) => Array.isArray(v) ? v.filter(Boolean).join("、") : (typeof v === "string" ? v.trim() : "");
+                const ctx = (typeof m.context === "string" && m.context.trim()) ? m.context.trim() : "default";
+                return {
+                    id: (typeof m.id === "string" && m.id) ? m.id : "m" + Date.now().toString(36) + "_" + i + "_" + mi,
+                    context: ctx,
+                    traits: normStr(m.traits) || (typeof c.personality === "string" ? c.personality : ""),
+                    voice: normStr(m.voice) || (typeof c.voice === "string" ? c.voice : ""),
+                    attitude: normStr(m.attitude),
+                    is_alter: !!m.is_alter,
+                    priority: (typeof m.priority === "number" && isFinite(m.priority)) ? m.priority : 0
+                };
+            });
         return c;
     });
     return world.characters;
@@ -565,7 +589,8 @@ export function defaultCharacter(role) {
         untouchable: "",
         notes: "",
         affinity: 0,        // ★ B4：初始好感度（NPC 对主角），-100~100，默认 0；主角卡忽略
-        rel_tags: []        // ★ B4：关系标签，如 ["盟友","宿敌"]
+        rel_tags: [],       // ★ B4：关系标签，如 ["盟友","宿敌"]
+        personality_modes: [] // ★ docs/71：情境人格切面（可选）；与单值基线叠加兼容
     };
 }
 
