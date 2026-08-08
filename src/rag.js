@@ -11,6 +11,7 @@ import { isLoreFullInSystem } from "./prompt.js";
 import { showToast } from "./render.js";
 import { getLoreAnnIndex, embeddingRetrieveBruteforce } from "./ann-index.js";
 import { expandRelationNeighbors } from "./kg-graph.js"; // ★ Phase 4 增补：relations 实体图遍历召回（纯函数）
+import { showEngineBadge, setEngineReady } from "./loading-ui.js"; // ★ 加载体验：把 worker 进度接到 UI
 
 // ★ P0-3-A：中文 embedding 模型（替代英文 all-MiniLM，中文语义召回更强）。维度由模型固定为 512。
 export const EMBED_MODEL = "Xenova/bge-small-zh-v1.5";
@@ -22,6 +23,23 @@ const BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章
 let _embedWorker = null;
 let _embedReqId = 0;
 const _embedPending = new Map();
+// ★ 加载体验：模型就绪状态机（供进入游戏遮罩 / 角标判断）
+let _modelReady = false;
+let _modelReadyPromise = null;
+let _modelReadyResolve = null;
+
+function getModelReadyPromise() {
+    if (_modelReadyPromise) return _modelReadyPromise;
+    _modelReadyPromise = new Promise((res) => { _modelReadyResolve = res; });
+    return _modelReadyPromise;
+}
+
+// 返回模型就绪的 Promise；Worker 不可用时（如 Node 测试）立即视为就绪，避免悬挂
+export function whenModelReady() {
+    if (_modelReady) return Promise.resolve();
+    if (typeof Worker === "undefined") return Promise.resolve();
+    return getModelReadyPromise();
+}
 
 function getEmbedWorker() {
     if (_embedWorker) return _embedWorker;
@@ -29,7 +47,14 @@ function getEmbedWorker() {
     _embedWorker = new Worker(new URL("./embedding-worker.js", import.meta.url), { type: "module" }); // ESM module worker（import 加载 transformers 单文件 ESM）
     _embedWorker.onmessage = (e) => {
         const { id, type, data } = e.data || {};
-        if (type === "ready" || type === "progress") return; // warmup / 进度消息，无 pending
+        // ★ 加载体验：warmup 进度 / 就绪消息 → 接到 UI 角标（不再默默吞掉）
+        if (type === "progress") { showEngineBadge(typeof data === "string" ? data : "AI 语义引擎准备中…"); return; }
+        if (type === "ready") {
+            _modelReady = true;
+            if (_modelReadyResolve) { _modelReadyResolve(); _modelReadyResolve = null; }
+            setEngineReady();
+            return;
+        }
         const p = _embedPending.get(id);
         if (!p) return;
         _embedPending.delete(id);
@@ -92,7 +117,9 @@ function splitBatchTensor(out) {
 // 主动预热（init 时调用）：让 worker 后台加载模型，玩家首次语义检索即命中、不卡
 export function warmupEmbeddingWorker() {
     try {
+        getModelReadyPromise(); // 先建 promise，确保 worker 的 ready 能 resolve 它
         getEmbedWorker().postMessage({ id: ++_embedReqId, type: "warmup" });
+        showEngineBadge("AI 语义引擎准备中…"); // ★ 加载体验：首页即给出可见提示
     } catch (e) { /* Worker 不可用（如 Node 测试环境），忽略，运行时回落主线程 */ }
 }
 

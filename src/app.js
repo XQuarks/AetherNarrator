@@ -19,6 +19,7 @@ import { addLoreEntry, confirmLoreRevision, deleteLoreEntry, editWorldLore, edit
 import { openRuleEditor, addRule, deleteRule, ruleTypeChange, selectRuleType, importBannedAsRules, saveRuleReview, openCharacterEditor, addCharacter, deleteCharacter, saveCharacterReview, generateCharactersAI, openVariableEditor, addVariable, deleteVariable, saveVariableReview, openItemEditor, addItem, deleteItem, saveItemReview, openDeadlineEditor, addDeadline, deleteDeadline, dlPolicyChanged, saveDeadlineReview, setRuleFilter, addCharMode, delCharMode } from "./lore-editors.js";
 import { clearLoreAnnCache } from "./ann-index.js";
 import { isModuleEnabled } from "./modules.js"; // ★ 事件系统：支线事件门禁判断
+import { hideBootOverlay } from "./loading-ui.js"; // ★ 加载体验：首页就绪后收起启动遮罩
 
 // 小工具（docs/34 #7 消重）：fetch 数据文件，失败时告警并返回兜底值，各文件独立降级互不影响
 async function fetchDataSafe(url, fallback, asText = false) {
@@ -72,6 +73,9 @@ async function init() {
     if (savedSummary) S.chatSummary = savedSummary;
     renderWorldList();
     renderSaveList();
+
+    // ★ 加载体验：首页内容已渲染，收起启动遮罩（此前玩家看到的是"正在启动…"而非白屏）
+    hideBootOverlay();
 
     // 后台预热 embedding 模型（★ P0-3-E：改在 Web Worker 内加载，主线程不卡 UI）
     setTimeout(() => { try { warmupEmbeddingWorker(); } catch (e) { /* Worker 不可用则运行时回落主线程 */ } }, 800);

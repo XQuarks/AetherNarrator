@@ -23,12 +23,16 @@ import { sanitizeModules, ensureEventsWorldReady } from "./modules.js"; // ★ C
 import { abortCurrentRequest } from "./turn-lifecycle.js";
 // ★ docs/69：章节化回溯——存档侧只做"另存复制日志 / 删除清日志"两件旁路事，不改存档结构
 import { copyTurnLog, deleteTurnLog } from "./timeline-log.js";
+// ★ 加载体验：进入游戏全屏遮罩控制器
+import { showEnterOverlay, hideEnterOverlay } from "./loading-ui.js";
 
 export async function startGame(opts = {}) {
     abortCurrentRequest(S); // ★ P0: 失效在途请求，避免旧响应串入新周目
     invalidateAllLoreAnn(); // ★ Phase 1：切换/重开世界，释放旧 ANN 索引
     closeModal("worldDetailModal");
     if (!S.currentWorld) return;
+    // ★ 加载体验：进入游戏全屏遮罩（语义引擎首次加载约需 20s，给玩家明确反馈）
+    showEnterOverlay("正在进入世界…", "首次加载 AI 语义引擎约需 20 秒，请稍候（再次进入将秒进）");
     stopTypewriter();
     S.currentSession.worldId = S.currentWorld.id;
     // ★ 多存档槽位：新周目默认开"新槽位"（不覆盖任何已有存档）；opts.keepSlot 时复用当前槽位（重新开始=覆盖重置）
@@ -110,6 +114,8 @@ export async function startGame(opts = {}) {
         S.currentChoices = S.currentWorld.initial_choices;
         renderChoices(S.currentChoices);
     }
+    // ★ 加载体验：界面与开场白就绪，收起进入遮罩
+    hideEnterOverlay();
 }
 
 export function continueLatestSave(worldId) {

@@ -26,8 +26,57 @@
     <script src="./vendor/dompurify.min.js" defer></script>
     <script src="./vendor/force-graph/force-graph.min.js" defer></script>
     <link rel="stylesheet" href="styles.css">
+    <!-- ★ 加载体验：启动遮罩 / 引擎角标 / 进入游戏遮罩 的内联样式（不依赖任何模块，确保首屏即时显示） -->
+    <style>
+      .boot-overlay{position:fixed;inset:0;z-index:9999;background:radial-gradient(ellipse at 50% -10%,#28221A 0%,#211B14 38%,#15110C 100%);
+        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .5s ease}
+      .boot-overlay.hide{opacity:0;pointer-events:none}
+      .boot-ring{width:54px;height:54px;border-radius:50%;border:3px solid rgba(201,168,124,.22);border-top-color:#C9A87C;animation:bootspin .9s linear infinite}
+      @keyframes bootspin{to{transform:rotate(360deg)}}
+      .boot-overlay .bt{font-size:20px;letter-spacing:.18em;color:#D8BC9A}
+      .boot-overlay .bs{font-size:13px;color:rgba(217,207,192,.62)}
+      .boot-overlay .bbar{width:160px;height:3px;border-radius:3px;background:rgba(217,207,192,.12);overflow:hidden}
+      .boot-overlay .bbar i{display:block;height:100%;width:35%;background:#C9A87C;animation:bootbar 1.4s ease-in-out infinite}
+      @keyframes bootbar{0%{margin-left:-35%}100%{margin-left:100%}}
+
+      .engine-badge{position:fixed;right:14px;bottom:74px;z-index:9000;display:flex;align-items:center;gap:8px;
+        background:rgba(20,16,11,.92);border:1px solid rgba(217,207,192,.14);border-radius:24px;padding:8px 14px;font-size:12.5px;
+        color:#D9CFC0;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s,transform .4s}
+      .engine-badge.hide{opacity:0;transform:translateY(8px);pointer-events:none}
+      .engine-badge .mini{width:14px;height:14px;border-radius:50%;border:2px solid rgba(201,168,124,.25);border-top-color:#C9A87C;animation:bootspin .8s linear infinite;flex:none}
+      .engine-badge.ok .mini{border-color:#7BAA92;border-top-color:#7BAA92;animation:none}
+      .engine-badge.ok .mini::after{content:"\2713";font-size:10px;color:#7BAA92;display:flex;align-items:center;justify-content:center;height:100%}
+
+      .enter-overlay{position:fixed;inset:0;z-index:9500;background:rgba(10,8,5,.86);backdrop-filter:blur(3px);
+        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:30px;text-align:center;transition:opacity .5s}
+      .enter-overlay.hide{opacity:0;pointer-events:none}
+      .enter-overlay .big{font-size:19px;letter-spacing:.12em;color:#D8BC9A}
+      .enter-overlay .note{font-size:12.5px;color:rgba(217,207,192,.62);line-height:1.6;max-width:280px}
+      .enter-overlay .pbar{width:240px;height:5px;border-radius:5px;background:rgba(217,207,192,.12);overflow:hidden;margin-top:6px}
+      .enter-overlay .pbar i{display:block;height:100%;width:30%;background:linear-gradient(90deg,#C9A87C,#D8BC9A);animation:bootbar 1.3s ease-in-out infinite}
+    </style>
 </head>
 <body>
+
+<!-- ★ 加载体验：启动遮罩（JS 解析/数据加载期间显示，init 完成后由 app.js 收起） -->
+<div class="boot-overlay" id="bootOverlay">
+    <div class="boot-ring"></div>
+    <div class="bt">以太叙事</div>
+    <div class="bs">正在启动…</div>
+    <div class="bbar"><i></i></div>
+</div>
+
+<!-- ★ 加载体验：引擎角标（后台 33MB 语义模型下载时的非阻塞提示，由 rag.js 控制显隐） -->
+<div class="engine-badge hide" id="engineBadge">
+    <span class="mini"></span><span id="engineBadgeText">AI 语义引擎准备中…</span>
+</div>
+
+<!-- ★ 加载体验：进入游戏全屏遮罩（由 save.js 的 startGame 控制显隐） -->
+<div class="enter-overlay hide" id="enterOverlay">
+    <div class="big" id="enterTitle">正在进入世界…</div>
+    <div class="note" id="enterNote">首次加载 AI 语义引擎约需 20 秒，请稍候（再次进入将秒进）</div>
+    <div class="pbar"><i></i></div>
+</div>
 
 <!-- 全局背景光点层：单个 fixed canvas，覆盖所有界面（首页/世界/存档/设置/游戏） -->
 <canvas id="bgMotes"></canvas>
@@ -1194,5 +1243,19 @@
             设置
         </button>
     </nav>
+
+    <!-- ★ 加载体验：注册 Service Worker（仅 https 环境，如 GitHub Pages）。
+         缓存 app shell 与大体积静态资源（models/、ort-wasm），手机二次访问秒进。
+         部署新版本后，新 sw.js 的 CACHE 版本号已变更，会自动失效旧缓存；
+         如仍见旧版，让用户强刷一次（Ctrl+F5 / 手机清站点数据）即可。 -->
+    <script>
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('./sw.js').catch(function (e) {
+          console.warn('[SW] 注册失败（不影响主功能）：', e);
+        });
+      });
+    }
+    </script>
 </body>
 </html>

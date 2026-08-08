@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>加载体验预览 · 以太叙事</title>
+<style>
+  :root{
+    --bg:#191510; --bg-gradient:radial-gradient(ellipse at 50% -10%,#28221A 0%,#211B14 38%,#15110C 100%);
+    --primary:#C9A87C; --primary-light:#D8BC9A; --text:#D9CFC0; --text-secondary:rgba(217,207,192,.62);
+    --panel:rgba(217,207,192,.05); --border:rgba(217,207,192,.14); --success:#7BAA92;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0d0b08;color:var(--text);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px;gap:18px}
+  /* 手机外框，模拟手机端观感 */
+  .phone{width:390px;max-width:100%;height:780px;max-height:84vh;border-radius:42px;border:10px solid #2a241c;
+    background:var(--bg);position:relative;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .screen{position:absolute;inset:0;background:var(--bg-gradient);display:flex;flex-direction:column}
+  .mist{position:absolute;inset:0;background:radial-gradient(circle at 30% 20%,rgba(201,168,124,.12),transparent 45%),radial-gradient(circle at 70% 80%,rgba(201,168,124,.08),transparent 40%);pointer-events:none}
+  .vignette{position:absolute;inset:0;box-shadow:inset 0 0 120px 30px rgba(0,0,0,.55);pointer-events:none}
+
+  /* —— 启动遮罩（内联、零依赖，JS解析期间就显示）—— */
+  .boot{position:absolute;inset:0;background:var(--bg-gradient);z-index:50;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;transition:opacity .5s ease}
+  .boot.hide{opacity:0;pointer-events:none}
+  .ring{width:54px;height:54px;border-radius:50%;border:3px solid rgba(201,168,124,.22);border-top-color:var(--primary);animation:spin .9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .boot .title{font-size:20px;letter-spacing:.18em;color:var(--primary-light)}
+  .boot .sub{font-size:13px;color:var(--text-secondary)}
+  .boot .bar{width:160px;height:3px;border-radius:3px;background:rgba(217,207,192,.12);overflow:hidden}
+  .boot .bar i{display:block;height:100%;width:0;background:var(--primary);transition:width .2s}
+
+  /* —— 首页内容 —— */
+  .home{padding:46px 22px 22px;overflow:auto;flex:1}
+  .brand{font-size:22px;letter-spacing:.2em;color:var(--primary-light);text-align:center;margin-bottom:4px}
+  .brand-sub{text-align:center;font-size:12px;color:var(--text-secondary);margin-bottom:26px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;
+    cursor:pointer;transition:.18s}
+  .card:hover{border-color:rgba(201,168,124,.4);background:rgba(217,207,192,.09)}
+  .card h3{font-size:15px;color:var(--text);margin-bottom:4px}
+  .card p{font-size:12px;color:var(--text-secondary);line-height:1.5}
+  .tag{display:inline-block;font-size:11px;color:var(--primary);border:1px solid rgba(201,168,124,.35);border-radius:20px;padding:1px 9px;margin-top:6px}
+
+  /* —— worker 进度角标（非阻塞，右下角）—— */
+  .badge{position:absolute;right:14px;bottom:18px;z-index:40;display:flex;align-items:center;gap:8px;
+    background:rgba(20,16,11,.92);border:1px solid var(--border);border-radius:24px;padding:8px 14px;font-size:12.5px;
+    color:var(--text);box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s,transform .4s}
+  .badge.hide{opacity:0;transform:translateY(8px);pointer-events:none}
+  .badge .mini{width:14px;height:14px;border-radius:50%;border:2px solid rgba(201,168,124,.25);border-top-color:var(--primary);animation:spin .8s linear infinite;flex:none}
+  .badge.ok .mini{border-color:var(--success);border-top-color:var(--success);animation:none}
+  .badge.ok .mini::after{content:"✓";font-size:10px;color:var(--success);display:flex;align-items:center;justify-content:center;height:100%}
+
+  /* —— 进入游戏全屏遮罩 —— */
+  .enter{position:absolute;inset:0;z-index:60;background:rgba(10,8,5,.86);backdrop-filter:blur(3px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:30px;text-align:center;
+    transition:opacity .5s}
+  .enter.hide{opacity:0;pointer-events:none}
+  .enter .big{font-size:19px;letter-spacing:.12em;color:var(--primary-light)}
+  .enter .note{font-size:12.5px;color:var(--text-secondary);line-height:1.6;max-width:280px}
+  .enter .pbar{width:240px;height:5px;border-radius:5px;background:rgba(217,207,192,.12);overflow:hidden;margin-top:6px}
+  .enter .pbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--primary),var(--primary-light));transition:width .25s}
+  .enter .pct{font-size:12px;color:var(--primary-light);font-variant-numeric:tabular-nums}
+
+  /* —— 控制条 —— */
+  .ctrls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .ctrls button{background:rgba(201,168,124,.12);color:var(--primary-light);border:1px solid rgba(201,168,124,.35);
+    border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer}
+  .ctrls button:hover{background:rgba(201,168,124,.22)}
+  .hint{font-size:12px;color:rgba(217,207,192,.4);text-align:center;max-width:420px;line-height:1.6}
+</style>
+</head>
+<body>
+  <div class="phone">
+    <!-- 启动遮罩 -->
+    <div class="boot" id="boot">
+      <div class="ring"></div>
+      <div class="title">以太叙事</div>
+      <div class="sub">正在启动…</div>
+      <div class="bar"><i id="bootBar"></i></div>
+    </div>
+
+    <!-- 首页 -->
+    <div class="screen" id="home">
+      <div class="mist"></div><div class="vignette"></div>
+      <div class="home">
+        <div class="brand">以太叙事</div>
+        <div class="brand-sub">AetherNarrator · 选择你的世界</div>
+        <div class="card" onclick="playEnter()">
+          <h3>龙族 · 青铜纪元</h3>
+          <p>混血种少年踏入卡塞尔学院，龙族的秘密在雨夜中苏醒。</p>
+          <span class="tag">改编IP</span>
+        </div>
+        <div class="card" onclick="playEnter()">
+          <h3>长安诡事录</h3>
+          <p>大唐开元年间，你是一名游走于阴阳之间的调查者。</p>
+          <span class="tag">原创</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- worker 进度角标 -->
+    <div class="badge hide" id="badge">
+      <span class="mini"></span><span id="badgeText">AI 语义引擎准备中…</span>
+    </div>
+
+    <!-- 进入游戏遮罩 -->
+    <div class="enter hide" id="enter">
+      <div class="big" id="enterTitle">正在进入世界…</div>
+      <div class="note">首次加载 AI 语义引擎约需 20 秒，请稍候<br>（再次进入将秒进）</div>
+      <div class="pbar"><i id="enterBar"></i></div>
+      <div class="pct" id="enterPct">0%</div>
+    </div>
+  </div>
+
+  <div class="ctrls">
+    <button onclick="playBoot()">▶ 重播启动遮罩</button>
+    <button onclick="playBadge()">▶ 重播引擎角标</button>
+    <button onclick="playEnter()">▶ 重播进入游戏</button>
+  </div>
+  <div class="hint">这是给手机端做的加载体验预览。三个状态：① 启动遮罩（JS 解析期间就显示，消除"白屏=坏了"）；② 引擎角标（把后台 33MB 下载变成可见提示）；③ 进入游戏遮罩（点击世界后明确告知等待约 20 秒）。设计 OK 我就按这个动真实代码。</div>
+
+<script>
+  const boot=document.getElementById('boot'),bootBar=document.getElementById('bootBar');
+  const badge=document.getElementById('badge'),badgeText=document.getElementById('badgeText');
+  const enter=document.getElementById('enter'),enterBar=document.getElementById('enterBar'),enterPct=document.getElementById('enterPct'),enterTitle=document.getElementById('enterTitle');
+
+  function playBoot(){
+    boot.classList.remove('hide');bootBar.style.width='0';
+    let p=0;const t=setInterval(()=>{p=Math.min(100,p+Math.random()*16);bootBar.style.width=p+'%';
+      if(p>=100){clearInterval(t);setTimeout(()=>boot.classList.add('hide'),350);}},120);
+  }
+  function playBadge(){
+    badge.classList.remove('hide','ok');badgeText.textContent='AI 语义引擎准备中…';
+    setTimeout(()=>{badge.classList.add('ok');badgeText.textContent='AI 语义引擎已就绪';
+      setTimeout(()=>badge.classList.add('hide'),1600);},2600);
+  }
+  function playEnter(){
+    enter.classList.remove('hide');enterTitle.textContent='正在进入世界…';
+    enterBar.style.width='0';enterPct.textContent='0%';
+    let p=0;const t=setInterval(()=>{p=Math.min(100,p+Math.random()*9);enterBar.style.width=p+'%';enterPct.textContent=Math.round(p)+'%';
+      if(p>=100){clearInterval(t);enterTitle.textContent='进入成功';setTimeout(()=>enter.classList.add('hide'),700);}},180);
+  }
+  // 自动演示一遍完整流程
+  playBoot();
+  setTimeout(playBadge,1900);
+</script>
+</body>
+</html>
